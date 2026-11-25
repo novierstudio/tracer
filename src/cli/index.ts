@@ -2,9 +2,11 @@ export type { IosDevice, Pending, RouterDevice, SwitchDevice } from './device/co
 export {
   applyLines,
   createDeviceSession,
+  openConsole,
   toConfigUpdate,
   withBlankConfig,
   type ApplyResult,
+  type Console,
   type DeviceSession,
   type LineError,
   type SessionResult,

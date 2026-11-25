@@ -553,6 +553,29 @@ describe('EXEC commands', () => {
     expect(c.prompt).toBe('Router#');
   });
 
+  it('asks for the console password on connect when the line has login', () => {
+    const setup = consoleOn(router());
+    setup.runAll([...ENTER, 'banner motd #Authorised use only#', 'line con 0']);
+    setup.runAll(['password cisco', 'login', 'end']);
+
+    const c = consoleOn(setup.device);
+    expect(c.greeting).toEqual(['Authorised use only', '', 'User Access Verification', '']);
+    expect([c.prompt, c.session.readingPassword]).toEqual(['Password: ', true]);
+    expect(['a', 'b'].flatMap((guess) => c.run(guess))).toEqual([]);
+    expect(c.run('c')).toEqual(['% Bad passwords']);
+    expect(c.prompt).toBe('Password: ');
+    c.run('cisco');
+    expect([c.prompt, c.session.readingPassword]).toEqual(['Router>', false]);
+  });
+
+  it('opens the console without a password when login has none to check', () => {
+    const setup = consoleOn(router());
+    setup.runAll([...ENTER, 'line con 0', 'login', 'end']);
+
+    const c = consoleOn(setup.device);
+    expect([c.greeting, c.prompt]).toEqual([[], 'Router>']);
+  });
+
   it('reads banner text until the delimiter, with an empty prompt', () => {
     const c = consoleOn(router());
     c.runAll(ENTER);
