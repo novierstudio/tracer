@@ -15,7 +15,10 @@ export default defineConfig({
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
   webServer: {
-    command: `pnpm build && pnpm preview --port ${port} --strictPort`,
+    // The build counts against the start timeout, and on a loaded machine it alone passes the
+    // default minute. scripts/e2e-build.js swaps a finished build into dist/ only when complete.
+    command: `node scripts/e2e-build.js && pnpm preview --port ${port} --strictPort`,
+    timeout: 5 * 60_000,
     url: `http://localhost:${port}/tracer/`,
     reuseExistingServer: !process.env.CI,
   },
