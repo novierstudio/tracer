@@ -1,0 +1,77 @@
+import { describe, expect, it } from 'vitest';
+import type { PingEvent } from '@/engine/api';
+import { ms } from '@/engine/core/time';
+import { createEngine } from '@/engine/engine';
+import { createSimService } from '@/engine/service';
+import { STACKS } from '@/engine/stacks';
+import { STP_CONVERGED } from '@/engine/testing';
+import { Ipv4Address, parseTopologyJson, serializeTopology, type Topology } from '@/model';
+import { BUILDERS } from './build';
+import { SAMPLE_LABS } from './catalog';
+
+/** The ping each lab is built to answer: from PC1 to an address across the network. */
+const HEADLINE_PING: Record<string, string> = {
+  'two-pcs-switch': '192.168.1.11',
+  'two-lans-router': '192.168.2.10',
+  'static-routes-serial': '192.168.2.10',
+  'router-on-a-stick': '192.168.20.10',
+  'stp-triangle': '192.168.1.11',
+};
+
+async function load(id: string): Promise<Topology> {
+  const sample = SAMPLE_LABS.find((lab) => lab.id === id)!;
+  const parsed = parseTopologyJson(await sample.load());
+  if (!parsed.ok) throw new Error(parsed.error.message);
+  return parsed.value;
+}
+
+/** Loads the lab into the engine, lets spanning tree settle, pings, and returns what came back. */
+function ping(topology: Topology, target: string) {
+  const engine = createEngine({ seed: 1, stacks: STACKS, linkDelay: ms(1) });
+  const sim = createSimService({ engine, frames: { now: () => 0, request: () => {} } });
+  sim.load(topology);
+  engine.runUntil(STP_CONVERGED);
+  const events: PingEvent[] = [];
+  const options = { count: 4, timeoutMs: 1000 };
+  const pc1 = Object.values(topology.devices).find((d) => d.config.hostname === 'PC1')!;
+  const started = sim.ping(pc1.id, Ipv4Address.parse(target), options, (e) => events.push(e));
+  if (!started.ok) throw new Error(started.error);
+  while (!events.some((e) => e.kind === 'summary') && engine.nextTime() !== undefined) {
+    engine.step();
+  }
+  return events.find((e) => e.kind === 'summary');
+}
+
+it('lists every lab that has a file, and a headline ping for each', () => {
+  const ids = SAMPLE_LABS.map((lab) => lab.id);
+  expect(ids).toEqual(Object.keys(BUILDERS));
+  expect(ids).toEqual(Object.keys(HEADLINE_PING));
+});
+
+it('gives every device a different id in each lab, so no console carries over between labs', async () => {
+  const ids = [];
+  for (const sample of SAMPLE_LABS) ids.push(...Object.keys((await load(sample.id)).devices));
+  expect(new Set(ids).size).toBe(ids.length);
+});
+
+describe.each(SAMPLE_LABS)('$title', (sample) => {
+  it('is the lab its builder makes', async () => {
+    const built = `${serializeTopology(BUILDERS[sample.id]!())}\n`;
+    await expect(built).toMatchFileSnapshot(`./${sample.id}.tracer.json`);
+  });
+
+  it('parses as a topology named after the lab, with the devices its card shows', async () => {
+    const topology = await load(sample.id);
+    expect(topology.meta.name).toBe(sample.title);
+    const kinds: Record<string, number> = {};
+    for (const device of Object.values(topology.devices)) {
+      kinds[device.kind] = (kinds[device.kind] ?? 0) + 1;
+    }
+    expect(kinds).toEqual(sample.devices);
+  });
+
+  it(`answers PC1's ping to ${HEADLINE_PING[sample.id]}`, async () => {
+    const summary = ping(await load(sample.id), HEADLINE_PING[sample.id]!);
+    expect(summary).toMatchObject({ kind: 'summary', sent: 4, received: 4 });
+  });
+});
