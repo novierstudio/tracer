@@ -1,7 +1,9 @@
 import { Terminal } from '@xterm/headless';
 import { describe, expect, it } from 'vitest';
+import { createDeviceSession } from '@/cli';
+import { consoleOn, router } from '@/cli/device/testing';
 import { decode, feed, initialState, reduce } from './discipline';
-import { createDemoSession } from './session';
+import { deviceTerminal } from './session';
 
 const UP = '\x1b[A';
 const DOWN = '\x1b[B';
@@ -12,10 +14,16 @@ const END = '\x1b[F';
 const BACKSPACE = '\x7f';
 const CTRL = { A: '\x01', C: '\x03', E: '\x05', U: '\x15', W: '\x17', Z: '\x1a' };
 
-/** Drives the discipline against the demo session and renders its output in a real terminal. */
+/** A router's console in an editor store, as the app binds it. */
+function routerSession() {
+  const { store, device } = consoleOn(router());
+  return { store, id: device.id, session: deviceTerminal(store, device.id, createDeviceSession()) };
+}
+
+/** Drives the discipline against a router's console and renders its output in a real terminal. */
 async function console_(cols = 80, rows = 24) {
   const term = new Terminal({ cols, rows, allowProposedApi: true });
-  const session = createDemoSession();
+  const { session, store, id } = routerSession();
   let state = initialState(cols, rows);
   const write = (data: string) => new Promise<void>((resolve) => term.write(data, resolve));
   await write(session.prompt);
@@ -42,6 +50,13 @@ async function console_(cols = 80, rows = 24) {
     get line() {
       return state.line;
     },
+    get history() {
+      return state.history;
+    },
+    get device() {
+      return store.getState().topology.devices[id];
+    },
+    store,
   };
 }
 
@@ -185,13 +200,9 @@ describe('?', () => {
 
   it('mid-line, helps with the text before the cursor and keeps the cursor in place', async () => {
     const t = await console_();
-    await t.type(`show ver${LEFT}${LEFT}${LEFT}?`);
-    expect(t.screen()).toEqual([
-      'Router>show ver',
-      '  version  System hardware and software status',
-      'Router>show ver',
-    ]);
-    expect(t.cursorX()).toBe('Router>show '.length);
+    await t.type(`show version${LEFT}${LEFT}${LEFT}${LEFT}?`);
+    expect(t.screen()).toEqual(['Router>show version', 'version', 'Router>show version']);
+    expect(t.cursorX()).toBe('Router>show ver'.length);
   });
 });
 
@@ -199,13 +210,11 @@ describe('Enter', () => {
   it('runs the line, prints its output and shows the new prompt', async () => {
     const t = await console_();
     await t.type('enable\rshow version\r');
-    expect(t.screen()).toEqual([
-      'Router>enable',
-      'Router#show version',
-      'Tracer IOS Software, Version 0.1 (demo)',
-      'Router uptime is 0 minutes',
-      'Router#',
-    ]);
+    const screen = t.screen();
+    expect(screen.slice(0, 2)).toEqual(['Router>enable', 'Router#show version']);
+    expect(screen[2]).toMatch(/^Tracer IOS Software/);
+    expect(screen).toContain('Router uptime is 0 minutes');
+    expect(screen.at(-1)).toBe('Router#');
   });
 
   it('puts the error caret under the bad character', async () => {
@@ -242,6 +251,7 @@ describe('paste', () => {
     expect(t.screen()).toEqual([
       'Router>enable',
       'Router#configure terminal',
+      'Enter configuration commands, one per line.  End with CNTL/Z.',
       'Router(config)#hostname R1',
       'R1(config)#interface g0/0',
       'R1(config-if)#ip address 10.0.0.1 255.255.255.0',
@@ -253,6 +263,9 @@ describe('paste', () => {
 
 describe('--More--', () => {
   it('pages long output: Space for a page, Enter for a line', async () => {
+    const { session } = routerSession();
+    session.run('enable');
+    const total = session.help('').length;
     const t = await console_(80, 3);
     await t.type('enable\r?');
     const options = () => t.screen().filter((row) => row.startsWith('  '));
@@ -262,8 +275,10 @@ describe('--More--', () => {
     expect(t.lastRow()).toBe(' --More--');
     expect(options()).toHaveLength(3);
     await t.type(' ');
+    expect(options()).toHaveLength(Math.min(5, total));
+    for (let page = 0; page < total && t.lastRow() !== 'Router#'; page++) await t.type(' ');
     expect(t.lastRow()).toBe('Router#');
-    expect(options()).toHaveLength(5);
+    expect(options()).toHaveLength(total);
     expect(t.screen().join('\n')).not.toContain('--More--');
   });
 
@@ -277,8 +292,51 @@ describe('--More--', () => {
 });
 
 it('pages to the size the terminal reports', () => {
-  const session = createDemoSession();
+  const { session } = routerSession();
   let state = initialState(80, 24);
   state = reduce(state, { kind: 'resize', cols: 80, rows: 2 }, session).state;
   expect(feed(state, '?', session).out).toContain('--More--');
+});
+
+describe('password prompts', () => {
+  async function withEnableSecret() {
+    const t = await console_();
+    await t.type('enable\rconfigure terminal\renable secret class\rend\rdisable\r');
+    return t;
+  }
+
+  it('echoes nothing while reading a password and keeps it out of history', async () => {
+    const t = await withEnableSecret();
+    await t.type('enable\r');
+    expect(t.lastRow()).toBe('Password:');
+    await t.type(`cl?x${BACKSPACE}${BACKSPACE}ass`);
+    expect(t.lastRow()).toBe('Password:');
+    expect(t.line).toBe('class');
+    await t.type('\r');
+    expect(t.screen().slice(-3)).toEqual(['Router>enable', 'Password:', 'Router#']);
+    expect(t.history).not.toContain('class');
+    expect(t.history.at(-1)).toBe('enable');
+  });
+
+  it('a pasted password runs without echo, then the next line echoes again', async () => {
+    const t = await withEnableSecret();
+    await t.type('enable\nclass\ndisable\n');
+    expect(t.screen().slice(-4)).toEqual([
+      'Router>enable',
+      'Password:',
+      'Router#disable',
+      'Router>',
+    ]);
+  });
+
+  it('commits each config line as its own undo step', async () => {
+    const t = await console_();
+    await t.type('enable\rconf t\rhostname EDGE\rinterface g0/0\rno shutdown\rend\r');
+    expect(t.device?.config.hostname).toBe('EDGE');
+    expect(t.store.temporal.getState().pastStates).toHaveLength(2);
+    t.store.getState().undo();
+    expect(t.device?.config.hostname).toBe('EDGE');
+    t.store.getState().undo();
+    expect(t.device?.config.hostname).toBe('Router');
+  });
 });
