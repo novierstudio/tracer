@@ -39,7 +39,7 @@ export function DialogContent({
       <Overlay />
       <D.Content
         className={cn(
-          'fixed top-1/2 left-1/2 z-50 flex max-h-[calc(100dvh-2rem)] w-[calc(100vw-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 animate-fade-in flex-col gap-4 overflow-y-auto rounded-xl bg-surface-1 p-5 text-fg-1 shadow-pop',
+          'fixed top-1/2 left-1/2 z-50 flex max-h-[calc(100dvh-2rem)] w-[calc(100vw-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 animate-fade-in flex-col gap-4 overflow-y-auto rounded-xl bg-surface-1 p-5 text-fg-1 shadow-pop outline-none',
           className,
         )}
         {...(description ? {} : { 'aria-describedby': undefined })}
@@ -77,7 +77,7 @@ export function SheetContent({ title, side, className, children, ...props }: She
       <D.Content
         aria-describedby={undefined}
         className={cn(
-          'fixed inset-y-0 z-50 flex w-[min(20rem,calc(100vw-3rem))] flex-col bg-surface-1 text-fg-1 shadow-pop',
+          'fixed inset-y-0 z-50 flex w-[min(20rem,calc(100vw-3rem))] flex-col bg-surface-1 text-fg-1 shadow-pop outline-none',
           side === 'left' ? 'left-0 animate-slide-in-left' : 'right-0 animate-slide-in-right',
           className,
         )}
