@@ -2,6 +2,7 @@ import { lazy, Suspense, type ComponentType } from 'react';
 import { TooltipProvider } from '@/ui/tooltip';
 import { useRoute, type Route } from './router';
 import { Shell } from './shell/Shell';
+import { UpdatePrompt } from './UpdatePrompt';
 
 function NotFound() {
   return (
@@ -27,6 +28,7 @@ export function App() {
       <Suspense>
         <Page />
       </Suspense>
+      <UpdatePrompt />
     </TooltipProvider>
   );
 }

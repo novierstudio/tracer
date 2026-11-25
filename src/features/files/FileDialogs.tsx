@@ -6,6 +6,7 @@ import { Button } from '@/ui/button';
 import { Dialog, DialogClose, DialogContent } from '@/ui/dialog';
 import { fileCommands } from './fileCommands';
 import { ImportDialog } from './ImportDialog';
+import { openLaunchedFiles } from './launchQueue';
 import { useFiles } from './react';
 import { fileSession } from './session';
 import { ShareDialogs } from './ShareDialogs';
@@ -121,6 +122,7 @@ function Notice() {
 // Restores the last lab, autosaves, and hosts the file dialogs. Mount once.
 export function FileDialogs() {
   useEffect(() => fileSession.start(), []);
+  useEffect(openLaunchedFiles, []);
   const recents = useFiles((state) => state.recents);
   useRegisterCommands(useMemo(() => fileCommands(fileSession, recents), [recents]));
   const dragging = useFileDrop();
