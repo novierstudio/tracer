@@ -1,3 +1,16 @@
+export type { IosDevice, Pending, RouterDevice, SwitchDevice } from './device/context';
+export {
+  applyLines,
+  createDeviceSession,
+  toConfigUpdate,
+  withBlankConfig,
+  type ApplyResult,
+  type DeviceSession,
+  type LineError,
+  type SessionResult,
+  type SessionState,
+} from './device/session';
+export { runningConfig, UNSUPPORTED_MARKER } from './device/show';
 export { formatError, formatHelp } from './format';
 export { expandInterfaceRange, INTERFACE_TYPES, normalizeInterface } from './interfaces';
 export {
@@ -8,6 +21,7 @@ export {
   PRIV_EXEC,
   prompt,
   USER_EXEC,
+  type LineRef,
   type Mode,
   type ModeKind,
   type ModeOf,

@@ -1,11 +1,17 @@
 import type { InterfaceId } from '../model';
 
+/** The lines a `line` command selects. A vty range runs from `first` to `last`. */
+export type LineRef =
+  | { readonly kind: 'console' }
+  | { readonly kind: 'aux' }
+  | { readonly kind: 'vty'; readonly first: number; readonly last: number };
+
 export type Mode =
   | { readonly kind: 'user-exec' }
   | { readonly kind: 'priv-exec' }
   | { readonly kind: 'global-config' }
   | { readonly kind: 'interface-config'; readonly interfaces: readonly InterfaceId[] }
-  | { readonly kind: 'line-config'; readonly line: string }
+  | { readonly kind: 'line-config'; readonly line: LineRef }
   | { readonly kind: 'router-config'; readonly protocol: string };
 
 export type ModeKind = Mode['kind'];
