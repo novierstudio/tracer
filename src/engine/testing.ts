@@ -209,3 +209,22 @@ export function labBuilder(seed = 1) {
     },
   };
 }
+
+/** PC1 192.168.1.10 on SW1, R1 between 192.168.1.0/24 and 192.168.2.0/24, PC2 192.168.2.10 on SW2. */
+export function routedLab(r1Routes: StaticRoute[] = []) {
+  const lab = labBuilder();
+  const sw1 = lab.switch('SW1');
+  const sw2 = lab.switch('SW2');
+  const pc1 = lab.host('pc', 'PC1', '192.168.1.10/24', '192.168.1.1');
+  const pc2 = lab.host('pc', 'PC2', '192.168.2.10/24', '192.168.2.1');
+  const r1 = lab.router(
+    'R1',
+    { 'GigabitEthernet0/0': '192.168.1.1/24', 'GigabitEthernet0/1': '192.168.2.1/24' },
+    r1Routes,
+  );
+  lab.connect(pc1, 'FastEthernet0', sw1, 'FastEthernet0/1');
+  lab.connect(sw1, 'GigabitEthernet0/1', r1, 'GigabitEthernet0/0');
+  lab.connect(r1, 'GigabitEthernet0/1', sw2, 'GigabitEthernet0/1');
+  lab.connect(pc2, 'FastEthernet0', sw2, 'FastEthernet0/1');
+  return { lab, pc1, pc2, r1, sw1, sw2 };
+}

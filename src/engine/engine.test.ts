@@ -14,9 +14,12 @@ import { buildLab, end, expectOk, port } from '@/model/testing';
 import { ms, simTime } from './core/time';
 import { createEngine, type Engine, type EngineOptions } from './engine';
 import type { EventId, SimEvent } from './events';
+import type { PingEvent } from './l3/ping';
 import type { SimModule, Stacks } from './module';
 import type { TopologyPatch } from './patch';
-import { helloModule, listenerModule, stacksOf } from './testing';
+import { createSimService } from './service';
+import { STACKS } from './stacks';
+import { helloModule, ip, listenerModule, routedLab, stacksOf } from './testing';
 
 function lab() {
   const base = buildLab();
@@ -565,5 +568,30 @@ describe('determinism', () => {
 
   it('gives a different trace for a different seed', () => {
     expect(run(2)).not.toEqual(run(1));
+  });
+
+  it('replays a ping across a router the same way, frame for frame', () => {
+    const clocks = [vi.spyOn(Math, 'random'), vi.spyOn(Date, 'now'), vi.spyOn(performance, 'now')];
+    const pingRun = () => {
+      const { lab, pc1 } = routedLab();
+      const engine = createEngine({ seed: 1, stacks: STACKS, linkDelay: ms(1) });
+      const sim = createSimService({ engine, frames: { now: () => 0, request: () => {} } });
+      sim.load(lab.topology);
+      const events: PingEvent[] = [];
+      sim.ping(pc1, ip('192.168.2.10'), { count: 4, timeoutMs: 1000 }, (event) =>
+        events.push(event),
+      );
+      engine.runUntil(simTime(10_000));
+      return { trace: trace(engine), events };
+    };
+
+    const first = pingRun();
+    const second = pingRun();
+
+    expect(first.events.at(-1)).toMatchObject({ kind: 'summary', sent: 4, received: 4 });
+    // Four echo round trips of 8 hops, and two ARP exchanges of 4: PC1 for R1, R1 for PC2.
+    expect(frames(first.trace)).toHaveLength(40);
+    expect(second).toEqual(first);
+    for (const clock of clocks) expect(clock).not.toHaveBeenCalled();
   });
 });
