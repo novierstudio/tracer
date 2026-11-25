@@ -4,7 +4,15 @@ import type { DeviceModelId } from '@/devices/catalog';
 import { PortId, type DeviceId } from '@/model';
 import { createEditorStore } from '@/model/store';
 import { expectOk } from '@/model/testing';
-import { autoCable, onlyPort, planLink, portOptions, type PortEnd } from './cables';
+import {
+  autoCable,
+  describeCableError,
+  onlyPort,
+  planLink,
+  planQuickCable,
+  portOptions,
+  type PortEnd,
+} from './cables';
 
 const port = (name: string) => PortId.parse(name);
 
@@ -124,5 +132,78 @@ describe('planLink', () => {
       { device: router, port: port('GigabitEthernet0/1') },
     );
     expect(plan).toMatchObject({ ok: false, error: { kind: 'same-device' } });
+  });
+});
+
+describe('planQuickCable', () => {
+  const cable = (
+    editor: ReturnType<typeof lab>['editor'],
+    [a, aPort]: [DeviceId, string],
+    [b, bPort]: [DeviceId, string],
+  ) =>
+    expectOk(
+      editor.getState().addLink({
+        cable: 'straight',
+        a: { device: a, port: port(aPort) },
+        b: { device: b, port: port(bPort) },
+      }),
+    );
+
+  it('joins the first free port on the first device to the first compatible one on the second', () => {
+    const { editor, ids, topology } = lab('router-2g2s', 'switch-24');
+    const [router, sw] = ids as [DeviceId, DeviceId];
+    expect(planQuickCable(topology(), router, sw)).toEqual({
+      ok: true,
+      value: {
+        cable: 'straight',
+        a: { device: router, port: port('GigabitEthernet0/0') },
+        b: { device: sw, port: port('FastEthernet0/1') },
+      },
+    });
+    cable(editor, [router, 'GigabitEthernet0/0'], [sw, 'FastEthernet0/1']);
+    expect(planQuickCable(topology(), sw, router)).toMatchObject({
+      ok: true,
+      value: {
+        a: { device: sw, port: port('FastEthernet0/2') },
+        b: { device: router, port: port('GigabitEthernet0/1') },
+      },
+    });
+  });
+
+  it('falls through to serial when the copper ports are taken, with the first end as DCE', () => {
+    const { editor, ids, topology } = lab('router-2g2s', 'router-2g2s', 'switch-24');
+    const [r0, r1, sw] = ids as [DeviceId, DeviceId, DeviceId];
+    cable(editor, [r0, 'GigabitEthernet0/0'], [sw, 'FastEthernet0/1']);
+    cable(editor, [r0, 'GigabitEthernet0/1'], [sw, 'FastEthernet0/2']);
+    expect(planQuickCable(topology(), r0, r1)).toEqual({
+      ok: true,
+      value: {
+        cable: 'serial',
+        dce: 'a',
+        a: { device: r0, port: port('Serial0/0/0') },
+        b: { device: r1, port: port('Serial0/0/0') },
+      },
+    });
+  });
+
+  it('refuses the same device, a device with no free port and ports that share no medium', () => {
+    const { editor, ids, topology } = lab('pc', 'pc', 'router-2g2s', 'switch-24');
+    const [pc0, pc1, router, sw] = ids as [DeviceId, DeviceId, DeviceId, DeviceId];
+    expect(planQuickCable(topology(), pc0, pc0)).toEqual({
+      ok: false,
+      error: { kind: 'same-device', device: pc0 },
+    });
+    cable(editor, [pc0, 'FastEthernet0'], [sw, 'FastEthernet0/1']);
+    expect(planQuickCable(topology(), pc0, pc1)).toEqual({
+      ok: false,
+      error: { kind: 'no-free-port', device: pc0 },
+    });
+    cable(editor, [router, 'GigabitEthernet0/0'], [sw, 'FastEthernet0/2']);
+    cable(editor, [router, 'GigabitEthernet0/1'], [sw, 'FastEthernet0/3']);
+    const error = { kind: 'no-shared-medium', a: router, b: pc1 } as const;
+    expect(planQuickCable(topology(), router, pc1)).toEqual({ ok: false, error });
+    expect(describeCableError(topology(), error)).toBe(
+      'Router0 and PC1 have no free ports that take the same cable.',
+    );
   });
 });
