@@ -1,5 +1,4 @@
 // @vitest-environment node
-/// <reference types="node" />
 import { createCipheriv } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { eaxOpen, eaxSeal } from './eax';
