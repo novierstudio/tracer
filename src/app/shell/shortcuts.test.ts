@@ -18,6 +18,12 @@ it('maps bare keys to panel and focus shortcuts', () => {
   expect(press('?')).toBe('showShortcuts');
 });
 
+it('opens the command palette with Cmd or Ctrl plus K', () => {
+  expect(press('k', { meta: true })).toBe('commandPalette');
+  expect(press('K', { ctrl: true })).toBe('commandPalette');
+  expect(press('k')).toBeUndefined();
+});
+
 it('switches mode with Cmd or Ctrl plus Enter only', () => {
   expect(press('Enter', { meta: true })).toBe('toggleMode');
   expect(press('Enter', { ctrl: true })).toBe('toggleMode');

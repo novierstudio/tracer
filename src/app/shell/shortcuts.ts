@@ -1,4 +1,5 @@
 export type ShortcutId =
+  | 'commandPalette'
   | 'togglePalette'
   | 'toggleInspector'
   | 'toggleBottom'
@@ -6,11 +7,13 @@ export type ShortcutId =
   | 'toggleMode'
   | 'showShortcuts';
 
-type Shortcut = { key: string; mod?: true; label: string };
+// `inTextFields` shortcuts also fire while typing in a text field.
+type Shortcut = { key: string; mod?: true; inTextFields?: true; label: string };
 
-// One table drives key handling, tooltips and the cheat sheet. F, ⌘Enter and ? come from the
+// One table drives key handling, tooltips and the cheat sheet. ⌘K, F, ⌘Enter and ? come from the
 // UI/UX doc; the doc names no per-panel keys, so [ ] and ` follow common editor conventions.
 export const SHORTCUTS: Record<ShortcutId, Shortcut> = {
+  commandPalette: { key: 'k', mod: true, inTextFields: true, label: 'Command palette' },
   togglePalette: { key: '[', label: 'Toggle device palette' },
   toggleInspector: { key: ']', label: 'Toggle inspector' },
   toggleBottom: { key: '`', label: 'Toggle bottom panel' },

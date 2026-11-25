@@ -58,6 +58,7 @@ type TopBarProps = {
   onModeChange: (mode: Mode) => void;
   panels: { palette: PanelToggle; bottom: PanelToggle; inspector: PanelToggle };
   onOpenHelp: (dialog: HelpDialog) => void;
+  onOpenCommands: () => void;
 };
 
 function AppMenu({ onOpenHelp }: Pick<TopBarProps, 'onOpenHelp'>) {
@@ -141,7 +142,7 @@ function PanelButton({ toggle, className }: { toggle: PanelToggle; className?: s
   );
 }
 
-export function TopBar({ mode, onModeChange, panels, onOpenHelp }: TopBarProps) {
+export function TopBar({ mode, onModeChange, panels, onOpenHelp, onOpenCommands }: TopBarProps) {
   return (
     <header className="flex h-12 shrink-0 items-center gap-2 border-b border-line bg-surface-1 px-2">
       <div className="flex min-w-0 flex-1 items-center gap-1">
@@ -176,14 +177,27 @@ export function TopBar({ mode, onModeChange, panels, onOpenHelp }: TopBarProps) 
         <Button
           variant="secondary"
           size="sm"
-          disabled
           className="mr-1 w-48 justify-start pr-1 text-fg-3 max-lg:hidden"
-          aria-label="Command palette (coming soon)"
+          aria-label="Command palette"
+          aria-haspopup="dialog"
+          onClick={onOpenCommands}
         >
           <SearchIcon />
           Search…
-          <Kbd className="ml-auto">{formatKeys('k', true)}</Kbd>
+          <Kbd className="ml-auto">{formatShortcut('commandPalette')}</Kbd>
         </Button>
+        <Tooltip label="Command palette" shortcut={formatShortcut('commandPalette')}>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            className="lg:hidden"
+            aria-label="Command palette"
+            aria-haspopup="dialog"
+            onClick={onOpenCommands}
+          >
+            <SearchIcon />
+          </Button>
+        </Tooltip>
         <PanelButton toggle={panels.palette} className="max-sm:hidden" />
         <PanelButton toggle={panels.bottom} />
         <PanelButton toggle={panels.inspector} />
