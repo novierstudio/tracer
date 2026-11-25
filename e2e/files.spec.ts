@@ -134,12 +134,14 @@ test('saves in place through the File System Access API', async ({ page }) => {
   const savedName = () =>
     page.evaluate(async () => {
       const dir = await navigator.storage.getDirectory();
-      const file = await (await dir.getFileHandle('lab.tracer.json')).getFile();
+      // The file is missing until the picker runs, then empty until the app's write lands.
+      const handle = await dir.getFileHandle('lab.tracer.json').catch(() => undefined);
       // Reading while the app swaps in a new version throws; the poll then tries again.
-      return file.text().then(
-        (text) => JSON.parse(text).meta.name as string,
-        () => undefined,
-      );
+      const text = await handle
+        ?.getFile()
+        .then((file) => file.text())
+        .catch(() => undefined);
+      return text ? (JSON.parse(text).meta.name as string) : undefined;
     });
   const pickerCalls = () =>
     page.evaluate(() => (window as unknown as { pickerCalls: number }).pickerCalls);
