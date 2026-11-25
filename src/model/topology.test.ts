@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
-import { InterfaceId, PortId, VirtualInterfaceId } from './topology';
+import { InterfaceId, PortId, SubinterfaceId, VirtualInterfaceId } from './topology';
 
 describe('InterfaceId', () => {
   it.each(['GigabitEthernet0/0', 'FastEthernet0/1', 'Serial0/0/0'])(
@@ -17,6 +17,22 @@ describe('InterfaceId', () => {
       expect(PortId.safeParse(name).success).toBe(false);
       expect(VirtualInterfaceId.parse(name)).toBe(name);
       expect(InterfaceId.parse(name)).toBe(name);
+    },
+  );
+
+  it.each(['GigabitEthernet0/0.10', 'FastEthernet0/1.1', 'GigabitEthernet0/0.4294967295'])(
+    'reads %s as a subinterface',
+    (name) => {
+      expect(PortId.safeParse(name).success).toBe(false);
+      expect(SubinterfaceId.parse(name)).toBe(name);
+      expect(InterfaceId.parse(name)).toBe(name);
+    },
+  );
+
+  it.each(['Serial0/0/0.1', 'GigabitEthernet0/0.0', 'GigabitEthernet0/0.4294967296'])(
+    'rejects the subinterface %j',
+    (name) => {
+      expect(InterfaceId.safeParse(name).success).toBe(false);
     },
   );
 

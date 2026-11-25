@@ -267,6 +267,7 @@ export function withBlankConfig<D extends IosDevice>(device: D): D {
       ...shared,
       hostname: DEFAULT_ROUTER_HOSTNAME,
       interfaces: Object.fromEntries(ports.map((id) => [id, { shutdown: false }])),
+      subinterfaces: {},
       lines: { console: blankLine(), aux: blankLine(), vty: vty() },
       staticRoutes: [],
     };

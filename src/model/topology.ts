@@ -35,7 +35,20 @@ export const VirtualInterfaceId = z
   .brand<'VirtualInterfaceId'>();
 export type VirtualInterfaceId = z.infer<typeof VirtualInterfaceId>;
 
-export const InterfaceId = z.union([PortId, VirtualInterfaceId]);
+const SUBINTERFACE_LIMIT = 4294967295;
+
+/** A router's 802.1Q subinterface on an Ethernet port, such as `GigabitEthernet0/0.10`. */
+export const SubinterfaceId = z
+  .string()
+  .regex(/^(?:FastEthernet|GigabitEthernet)\d+(?:\/\d+)*\.[1-9]\d*$/, 'Invalid interface name')
+  .refine(
+    (name) => Number(name.slice(name.lastIndexOf('.') + 1)) <= SUBINTERFACE_LIMIT,
+    'Subinterface number out of range',
+  )
+  .brand<'SubinterfaceId'>();
+export type SubinterfaceId = z.infer<typeof SubinterfaceId>;
+
+export const InterfaceId = z.union([PortId, VirtualInterfaceId, SubinterfaceId]);
 export type InterfaceId = z.infer<typeof InterfaceId>;
 
 /** Every interface type name, in the order IOS lists interfaces in a running-config. */
@@ -74,15 +87,51 @@ export const RoutedInterface = z.object({
 });
 export type RoutedInterface = z.infer<typeof RoutedInterface>;
 
-/** Each mode also keeps the other mode's VLAN setting, as IOS does, so switching back restores it. */
+/** VLANs `first` to `last`, both included. */
+export const VlanRange = z
+  .object({ first: VlanId, last: VlanId })
+  .refine((range) => range.first <= range.last, 'A VLAN range must not run backwards');
+export type VlanRange = z.infer<typeof VlanRange>;
+
+/**
+ * `switchport trunk allowed vlan`: sorted ranges that neither overlap nor touch. Absent means every
+ * VLAN, the IOS default; an empty list is `none`.
+ */
+const allowedVlans = z.array(VlanRange).optional();
+
+/** Each mode also keeps the other mode's VLAN settings, as IOS does, so switching back restores them. */
 export const Switchport = z.discriminatedUnion('mode', [
-  z.object({ mode: z.literal('access'), vlan: VlanId, nativeVlan: VlanId.optional() }),
-  z.object({ mode: z.literal('trunk'), nativeVlan: VlanId, accessVlan: VlanId.optional() }),
+  z.object({
+    mode: z.literal('access'),
+    vlan: VlanId,
+    nativeVlan: VlanId.optional(),
+    allowedVlans,
+  }),
+  z.object({
+    mode: z.literal('trunk'),
+    nativeVlan: VlanId,
+    accessVlan: VlanId.optional(),
+    allowedVlans,
+  }),
 ]);
 export type Switchport = z.infer<typeof Switchport>;
 
 export const SwitchInterface = z.object({ ...interfaceFields, switchport: Switchport });
 export type SwitchInterface = z.infer<typeof SwitchInterface>;
+
+/** `encapsulation dot1Q <vlan> [native]`: the VLAN a subinterface tags, or sends untagged when native. */
+export const Dot1q = z.object({ vlan: VlanId, native: z.boolean() });
+export type Dot1q = z.infer<typeof Dot1q>;
+
+/** A router subinterface. It has no speed, duplex or clock of its own: those belong to its port. */
+export const Subinterface = z.object({
+  shutdown: z.boolean(),
+  description: z.string().optional(),
+  /** IOS refuses an address until the subinterface has an encapsulation. */
+  encapsulation: Dot1q.optional(),
+  ipv4: Ipv4Cidr.optional(),
+});
+export type Subinterface = z.infer<typeof Subinterface>;
 
 /** An MD5-crypt hash, which IOS shows as `enable secret 5 $1$salt$hash`. */
 export const Md5CryptHash = z
@@ -164,6 +213,7 @@ const iosFields = {
 export const RouterConfig = z.object({
   ...iosFields,
   interfaces: z.record(PortId, RoutedInterface),
+  subinterfaces: z.record(SubinterfaceId, Subinterface).default(() => ({})),
   lines: RouterLines.default(factoryRouterLines),
   staticRoutes: z.array(StaticRoute).default(() => []),
 });
