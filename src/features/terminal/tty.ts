@@ -21,7 +21,7 @@ export interface Tty {
   subscribe(write: (out: string) => void): () => void;
 }
 
-function trim(transcript: string): string {
+export function trimTranscript(transcript: string): string {
   if (transcript.length <= TRANSCRIPT_LIMIT) return transcript;
   const cut = transcript.indexOf('\r\n', transcript.length - TRANSCRIPT_LIMIT);
   return cut === -1 ? transcript.slice(-TRANSCRIPT_LIMIT) : transcript.slice(cut + 2);
@@ -46,7 +46,7 @@ export function createTty(session: TerminalSession, greeting: readonly string[] 
       const step = feed(line, data, session);
       line = step.state;
       if (!step.out) return;
-      transcript = trim(transcript + step.out);
+      transcript = trimTranscript(transcript + step.out);
       for (const write of views) write(step.out);
     },
     subscribe(write) {
