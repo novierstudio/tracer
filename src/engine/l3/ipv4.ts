@@ -1,14 +1,20 @@
-import {
-  ipv4ToUint32,
-  prefixMask,
-  uint32ToIpv4,
-  type Ipv4Address,
-  type Ipv4Cidr,
-  type PrefixLength,
-} from '@/model';
+import type { Ipv4Address, Ipv4Cidr, PrefixLength } from '@/model';
 
-// CIDR math the model does not export yet. NOV-206 wants these shared with the CLI and the
-// inspector, so they belong in src/model/values.ts once another agent is not editing the model.
+// IPv4 math for the engine. ipv4ToUint32, uint32ToIpv4 and prefixMask copy src/model/values.ts,
+// whose zod schemas would otherwise ride into the worker bundle. NOV-206 wants this math shared
+// with the CLI and the inspector: move it to a schema-free model module and import it from both.
+
+function ipv4ToUint32(address: Ipv4Address): number {
+  return address.split('.').reduce((acc, octet) => acc * 256 + Number(octet), 0);
+}
+
+function uint32ToIpv4(value: number): Ipv4Address {
+  return [24, 16, 8, 0].map((shift) => (value >>> shift) & 0xff).join('.') as Ipv4Address;
+}
+
+function prefixMask(prefixLength: PrefixLength): number {
+  return prefixLength === 0 ? 0 : (0xffffffff << (32 - prefixLength)) >>> 0;
+}
 
 /** The network number of an address under a prefix length, as a 32-bit number. */
 export function networkNumber(address: Ipv4Address, prefixLength: PrefixLength): number {
