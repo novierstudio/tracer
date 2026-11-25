@@ -20,7 +20,6 @@ import {
   ScanIcon,
   ScissorsIcon,
   SquareDashedMousePointerIcon,
-  StickyNoteIcon,
   TagIcon,
   Trash2Icon,
   WorkflowIcon,
@@ -37,8 +36,10 @@ import { deviceSpec } from '@/devices/create';
 import type { DeviceId, Point } from '@/model';
 import { editorStore } from '@/model/store';
 import type { Command } from '@/features/command/registry';
+import { ANNOTATION_TOOLS, isDrawTool, type AnnotationTool } from './annotations';
 import { ALIGN_EDGES, type AlignEdge, type Axis } from './arrange';
 import { cableTool } from './cableTool';
+import { canvasUi } from './canvasUi';
 import {
   align,
   autoLayout,
@@ -46,7 +47,6 @@ import {
   canDistribute,
   canPaste,
   copySelection,
-  currentSelection,
   cutSelection,
   deleteSelection,
   distribute,
@@ -54,10 +54,13 @@ import {
   hasSelection,
   nudge,
   paste,
+  placeAnnotation,
   selectAll,
-  setSelection,
-  startNote,
   startRename,
+  startTyping,
+  stopTools,
+  toggleCableTool,
+  toggleDrawTool,
 } from './edit';
 import type { CableFlowEdge, CanvasNode } from './flow';
 import { GRID, snapCentre } from './geometry';
@@ -111,6 +114,9 @@ export function trackPointer(at: { clientX: number; clientY: number } | null) {
   pointer = at && { x: at.clientX, y: at.clientY };
 }
 
+/** The pointer's last place over the canvas, in screen pixels. */
+export const lastPointer = () => pointer;
+
 function toFlowPoint(at: { x: number; y: number }): Point | undefined {
   return mounted?.flow.screenToFlowPosition(at);
 }
@@ -148,7 +154,7 @@ export function placeDevice(model: DeviceModelId, at?: Point) {
     existingNames: devices.map((device) => device.config.hostname),
   });
   const result = editor.addDevice(spec);
-  if (result.ok) setSelection({ devices: [result.value], links: [], notes: [] });
+  if (result.ok) editorStore.getState().select({ devices: [result.value] });
 }
 
 /** What R, S and P add: the first model of each kind in the catalog. */
@@ -158,9 +164,17 @@ export const QUICK_ADD = {
   addPc: { model: 'pc', label: 'PC', icon: MonitorIcon },
 } as const satisfies Record<string, { model: DeviceModelId; label: string; icon: LucideIcon }>;
 
-export function addNote(at?: Point) {
-  const point = at ?? pointerOrCentre();
-  if (point) startNote(point);
+/** Adds an annotation at a flow point: drafts for typing tools, default boxes for draw tools. */
+export function addAnnotationAt(tool: AnnotationTool, at: Point) {
+  if (isDrawTool(tool)) placeAnnotation(tool, at);
+  else startTyping(tool, at);
+}
+
+/** What N, T, B and O do: typing tools start under the pointer, draw tools arm for a drag. */
+export function pickAnnotationTool(tool: AnnotationTool) {
+  if (isDrawTool(tool)) return toggleDrawTool(tool);
+  const point = pointerOrCentre();
+  if (point) startTyping(tool, point);
 }
 
 export function autoLayoutAndFit() {
@@ -169,11 +183,15 @@ export function autoLayoutAndFit() {
 
 /** Esc on the canvas. True when it was used, so the shell leaves focus mode only otherwise. */
 export function canvasEscape(): boolean {
+  if (canvasUi.getState().drawing) {
+    canvasUi.setState({ drawing: null });
+    return true;
+  }
   return cableTool.getState().escape();
 }
 
 const selectedDevice = (): DeviceId | undefined => {
-  const { devices } = currentSelection();
+  const { devices } = editorStore.getState().selection;
   return devices.length === 1 ? devices[0] : undefined;
 };
 
@@ -201,6 +219,9 @@ type CanvasShortcutId = Extract<
   | 'addSwitch'
   | 'addPc'
   | 'addNote'
+  | 'addText'
+  | 'addArea'
+  | 'addEllipse'
 >;
 
 type KeyPress = Pick<KeyboardEvent, 'key' | 'shiftKey'>;
@@ -209,8 +230,8 @@ export const canvasShortcuts: Record<CanvasShortcutId, (event?: KeyPress) => voi
   fitView,
   zoomIn: () => zoomBy('in'),
   zoomOut: () => zoomBy('out'),
-  selectTool: () => cableTool.getState().exit(),
-  cableTool: () => cableTool.getState().toggle(),
+  selectTool: stopTools,
+  cableTool: toggleCableTool,
   deleteSelection,
   selectAll,
   copy: copySelection,
@@ -222,7 +243,10 @@ export const canvasShortcuts: Record<CanvasShortcutId, (event?: KeyPress) => voi
   addRouter: () => placeDevice(QUICK_ADD.addRouter.model, pointerOrCentre()),
   addSwitch: () => placeDevice(QUICK_ADD.addSwitch.model, pointerOrCentre()),
   addPc: () => placeDevice(QUICK_ADD.addPc.model, pointerOrCentre()),
-  addNote: () => addNote(),
+  addNote: () => pickAnnotationTool('note'),
+  addText: () => pickAnnotationTool('text'),
+  addArea: () => pickAnnotationTool('area'),
+  addEllipse: () => pickAnnotationTool('ellipse'),
 };
 
 const PORT_LABELS_KEY = 'tracer.canvas.portLabels';
@@ -242,8 +266,8 @@ export function togglePortLabels() {
 const deviceCount = () => Object.keys(editorStore.getState().topology.devices).length;
 const hasDevices = () => deviceCount() > 0;
 const hasCopyable = () => {
-  const { devices, notes } = currentSelection();
-  return devices.length + notes.length > 0;
+  const { devices, annotations } = editorStore.getState().selection;
+  return devices.length + annotations.length > 0;
 };
 
 export const ALIGN_LABELS: Record<AlignEdge, { title: string; icon: LucideIcon }> = {
@@ -260,12 +284,20 @@ export const DISTRIBUTE_LABELS: Record<Axis, { title: string; icon: LucideIcon }
   vertical: { title: 'Distribute vertically', icon: AlignVerticalDistributeCenterIcon },
 };
 
+const ANNOTATION_KEYWORDS: Record<AnnotationTool, string[]> = {
+  note: ['sticky', 'comment', 'text'],
+  text: ['heading', 'title', 'caption', 'words'],
+  area: ['region', 'zone', 'group', 'building', 'vlan', 'room', 'box'],
+  rectangle: ['shape', 'square', 'box', 'outline'],
+  ellipse: ['shape', 'circle', 'oval', 'outline', 'cloud'],
+};
+
 export const canvasCommands: readonly Command[] = [
   {
     id: 'edit.copy',
     title: 'Copy',
     group: 'Edit',
-    keywords: ['clipboard', 'devices', 'notes'],
+    keywords: ['clipboard', 'devices', 'annotations'],
     icon: CopyIcon,
     shortcut: 'copy',
     enabled: hasCopyable,
@@ -305,7 +337,7 @@ export const canvasCommands: readonly Command[] = [
     id: 'edit.selectAll',
     title: 'Select all',
     group: 'Edit',
-    keywords: ['devices', 'links', 'notes', 'everything'],
+    keywords: ['devices', 'links', 'annotations', 'everything'],
     icon: SquareDashedMousePointerIcon,
     shortcut: 'selectAll',
     enabled: () =>
@@ -316,7 +348,7 @@ export const canvasCommands: readonly Command[] = [
     id: 'edit.deleteSelection',
     title: 'Delete selection',
     group: 'Edit',
-    keywords: ['remove', 'devices', 'links', 'cables', 'notes'],
+    keywords: ['remove', 'devices', 'links', 'cables', 'annotations'],
     icon: Trash2Icon,
     shortcut: 'deleteSelection',
     enabled: hasSelection,
@@ -339,7 +371,7 @@ export const canvasCommands: readonly Command[] = [
     keywords: ['connect', 'link', 'wire', 'straight', 'crossover', 'serial'],
     icon: CableIcon,
     shortcut: 'cableTool',
-    run: () => cableTool.getState().toggle(),
+    run: toggleCableTool,
   },
   ...(Object.keys(QUICK_ADD) as (keyof typeof QUICK_ADD)[]).map((id): Command => ({
     id: `edit.${id}`,
@@ -350,15 +382,18 @@ export const canvasCommands: readonly Command[] = [
     shortcut: id,
     run: canvasShortcuts[id],
   })),
-  {
-    id: 'edit.addNote',
-    title: 'Add note',
-    group: 'Edit',
-    keywords: ['annotation', 'sticky', 'text', 'label', 'comment'],
-    icon: StickyNoteIcon,
-    shortcut: 'addNote',
-    run: () => addNote(),
-  },
+  ...(Object.keys(ANNOTATION_TOOLS) as AnnotationTool[]).map((tool): Command => {
+    const { label, icon, shortcut } = ANNOTATION_TOOLS[tool];
+    return {
+      id: `edit.add${tool.charAt(0).toUpperCase()}${tool.slice(1)}`,
+      title: isDrawTool(tool) ? `Draw ${label.toLowerCase()}` : `Add ${label.toLowerCase()}`,
+      group: 'Edit',
+      keywords: ['annotation', 'label', 'document', ...ANNOTATION_KEYWORDS[tool]],
+      icon,
+      shortcut,
+      run: () => pickAnnotationTool(tool),
+    };
+  }),
   ...ALIGN_EDGES.map((edge): Command => ({
     id: `arrange.align.${edge}`,
     title: ALIGN_LABELS[edge].title,

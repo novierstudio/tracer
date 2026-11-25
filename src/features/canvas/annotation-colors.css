@@ -1,0 +1,25 @@
+/*
+ * The annotation palette as colour tokens, global so the inspector's swatches match the canvas.
+ * Each is a mid tone that reads as a line or text on its theme's surfaces; fills mix it down.
+ */
+
+:root,
+.light {
+  --annotation-slate: #64748b;
+  --annotation-blue: #2563eb;
+  --annotation-teal: #0d9488;
+  --annotation-green: #15803d;
+  --annotation-amber: #b45309;
+  --annotation-red: #dc2626;
+  --annotation-purple: #9333ea;
+}
+
+.dark {
+  --annotation-slate: #94a3b8;
+  --annotation-blue: #60a5fa;
+  --annotation-teal: #2dd4bf;
+  --annotation-green: #4ade80;
+  --annotation-amber: #fbbf24;
+  --annotation-red: #f87171;
+  --annotation-purple: #c084fc;
+}

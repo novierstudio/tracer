@@ -2,43 +2,45 @@ import {
   createIdSource,
   Hostname,
   type AnnotationId,
+  type AnnotationSpec,
   type DeviceId,
   type LinkId,
   type Move,
   type Point,
+  type Size,
 } from '@/model';
-import { editorStore, type EditorStore } from '@/model/store';
+import { editorStore, type EditorStore, type Selection } from '@/model/store';
+import {
+  annotationText,
+  draftSpec,
+  drawnSpec,
+  placedSpec,
+  resized,
+  withText,
+  type DrawTool,
+} from './annotations';
 import { alignMoves, distributeMoves, type AlignEdge, type Axis } from './arrange';
 import { cableTool } from './cableTool';
 import { canvasUi } from './canvasUi';
 import { copyFragment, fragmentCentre, pasteElements, type Fragment } from './clipboard';
 import { GRID, snap } from './geometry';
 
-// Canvas edits that span the editor store and the canvas's own state. Each is one undo step.
+// Canvas edits on the editor store and the canvas's own state. Each is one undo step.
 
-export type CanvasSelection = { devices: DeviceId[]; links: LinkId[]; notes: AnnotationId[] };
-
-export function currentSelection(): CanvasSelection {
-  const { devices, links } = editorStore.getState().selection;
-  return { devices, links, notes: canvasUi.getState().notes };
-}
-
-export function setSelection({ devices, links, notes }: CanvasSelection) {
-  editorStore.getState().select({ devices, links });
-  canvasUi.setState({ notes });
-}
+const selection = () => editorStore.getState().selection;
+const select = (next: Partial<Selection>) => editorStore.getState().select(next);
 
 export const hasSelection = () => {
-  const { devices, links, notes } = currentSelection();
-  return devices.length + links.length + notes.length > 0;
+  const { devices, links, annotations } = selection();
+  return devices.length + links.length + annotations.length > 0;
 };
 
 export function selectAll() {
   const { topology } = editorStore.getState();
-  setSelection({
+  select({
     devices: Object.keys(topology.devices) as DeviceId[],
     links: Object.keys(topology.links) as LinkId[],
-    notes: Object.keys(topology.annotations) as AnnotationId[],
+    annotations: Object.keys(topology.annotations) as AnnotationId[],
   });
 }
 
@@ -54,12 +56,12 @@ function step(edit: (editor: ReturnType<EditorStore['getState']>) => void) {
 }
 
 export function deleteSelection() {
-  const { devices, links, notes } = currentSelection();
-  if (devices.length + links.length + notes.length === 0) return;
+  const { devices, links, annotations } = selection();
+  if (devices.length + links.length + annotations.length === 0) return;
   step((editor) => {
     editor.removeLinks(links);
     editor.removeDevices(devices);
-    editor.removeAnnotations(notes);
+    editor.removeAnnotations(annotations);
   });
 }
 
@@ -70,12 +72,12 @@ const PASTE_STEP = GRID * 2;
 
 export const canPaste = () => clipboard !== undefined;
 
-function copyOf({ devices, notes }: CanvasSelection) {
-  return copyFragment(editorStore.getState().topology, { devices, notes });
+function copyOf({ devices, annotations }: Selection) {
+  return copyFragment(editorStore.getState().topology, { devices, annotations });
 }
 
 export function copySelection() {
-  const fragment = copyOf(currentSelection());
+  const fragment = copyOf(selection());
   if (!fragment) return;
   clipboard = fragment;
   pastes = 0;
@@ -93,10 +95,10 @@ function insert(fragment: Fragment, offset: Point) {
   const elements = pasteElements(editor.topology, fragment, { ids, offset });
   const result = editor.addElements(elements);
   if (!result.ok) return;
-  setSelection({
+  select({
     devices: elements.devices.map((device) => device.id),
     links: elements.links.map((link) => link.id),
-    notes: elements.annotations.map((note) => note.id),
+    annotations: elements.annotations.map((annotation) => annotation.id),
   });
 }
 
@@ -114,7 +116,7 @@ export function paste(at?: Point) {
 
 /** Copies and pastes in one go, leaving the clipboard alone. */
 export function duplicateSelection() {
-  const fragment = copyOf(currentSelection());
+  const fragment = copyOf(selection());
   if (fragment) insert(fragment, { x: PASTE_STEP, y: PASTE_STEP });
 }
 
@@ -127,32 +129,32 @@ export const ARROWS: Record<string, Point> = {
   ArrowDown: { x: 0, y: 1 },
 };
 
-/** Moves the selected devices and notes one grid step per arrow press, four with Shift. */
+/** Moves the selected devices and annotations one grid step per arrow press, four with Shift. */
 export function nudge(event?: Pick<KeyboardEvent, 'key' | 'shiftKey'>) {
   const direction = event && ARROWS[event.key];
   if (!direction) return;
   const distance = event.shiftKey ? NUDGE.far : NUDGE.near;
   const by = (p: Point) => ({ x: p.x + direction.x * distance, y: p.y + direction.y * distance });
   const { topology } = editorStore.getState();
-  const { devices, notes } = currentSelection();
+  const { devices, annotations } = selection();
   const deviceMoves = devices.flatMap((device) => {
     const at = topology.devices[device]?.position;
     return at ? [{ device, position: by(at) }] : [];
   });
-  const noteMoves = notes.flatMap((annotation) => {
+  const annotationMoves = annotations.flatMap((annotation) => {
     const at = topology.annotations[annotation]?.position;
     return at ? [{ annotation, position: by(at) }] : [];
   });
-  if (deviceMoves.length + noteMoves.length === 0) return;
+  if (deviceMoves.length + annotationMoves.length === 0) return;
   step((editor) => {
     editor.moveDevices(deviceMoves);
-    editor.moveAnnotations(noteMoves);
+    editor.moveAnnotations(annotationMoves);
   });
 }
 
 function selectedPlacements() {
   const { topology } = editorStore.getState();
-  return currentSelection().devices.flatMap((device) => {
+  return selection().devices.flatMap((device) => {
     const position = topology.devices[device]?.position;
     return position ? [{ device, position }] : [];
   });
@@ -230,16 +232,17 @@ export async function autoLayout({
   await animateMoves(editor, moves, duration);
 }
 
-/** Starts a note at `position`. It joins the lab when it has text. */
-export function startNote(position: Point) {
-  cableTool.getState().exit();
-  canvasUi.setState({
-    edit: { kind: 'new-note', position: { x: snap(position.x), y: snap(position.y) } },
-  });
+/** Starts a note or text at `position`. It joins the lab once it has text. */
+export function startTyping(tool: 'note' | 'text', position: Point) {
+  stopTools();
+  canvasUi.setState({ edit: { kind: 'new', annotation: draftSpec(tool, position) } });
 }
 
-export function editNote(note: AnnotationId) {
-  canvasUi.setState({ edit: { kind: 'note', note } });
+/** Edits an annotation's text in place. Shapes have none. */
+export function editText(id: AnnotationId) {
+  const annotation = editorStore.getState().topology.annotations[id];
+  if (!annotation || annotationText(annotation) === undefined) return;
+  canvasUi.setState({ edit: { kind: 'annotation', annotation: id } });
 }
 
 export function startRename(device: DeviceId) {
@@ -248,9 +251,60 @@ export function startRename(device: DeviceId) {
 
 export const stopEditing = () => canvasUi.setState({ edit: null });
 
+/** Arms a tool that drags out a box, or disarms it when it is already armed. */
+export function toggleDrawTool(tool: DrawTool) {
+  const armed = canvasUi.getState().drawing === tool;
+  stopTools();
+  if (!armed) canvasUi.setState({ drawing: tool });
+}
+
+/** Turns the cable tool on or off, leaving any draw tool. */
+export function toggleCableTool() {
+  if (canvasUi.getState().drawing) canvasUi.setState({ drawing: null });
+  cableTool.getState().toggle();
+}
+
+/** Leaves the cable and draw tools. */
+export function stopTools() {
+  cableTool.getState().exit();
+  if (canvasUi.getState().drawing) canvasUi.setState({ drawing: null });
+}
+
+function addAnnotation(spec: AnnotationSpec) {
+  const result = editorStore.getState().addAnnotation(spec);
+  if (!result.ok) return undefined;
+  select({ annotations: [result.value] });
+  // A new area box is named straight away, so its label field opens with "Area" selected.
+  if (spec.kind === 'area') editText(result.value);
+  return result.value;
+}
+
+/** Adds what a draw tool dragged out, and disarms it. */
+export function drawAnnotation(tool: DrawTool, box: { position: Point; size: Size }) {
+  canvasUi.setState({ drawing: null });
+  return addAnnotation(drawnSpec(tool, box));
+}
+
+/** Adds a draw tool's default box centred on `at`. */
+export function placeAnnotation(tool: DrawTool, at: Point) {
+  stopTools();
+  return addAnnotation(placedSpec(tool, at));
+}
+
+/** Applies what a resize handle reports. The handle's gesture makes the drag one undo step. */
+export function resizeAnnotation(
+  id: AnnotationId,
+  box: { position?: Point; width?: number; height?: number },
+) {
+  const editor = editorStore.getState();
+  const current = editor.topology.annotations[id];
+  if (!current) return;
+  editor.updateAnnotation(resized(current, { ...box, position: box.position ?? current.position }));
+}
+
 /**
- * Saves what was typed. An empty note is dropped, and clearing a note deletes it. A hostname the
- * device cannot take keeps the old name and returns the reason.
+ * Saves what was typed. An empty new note or text is dropped, and clearing one deletes it; an area
+ * may have no label. A hostname the device cannot take keeps the old name and returns the reason.
  */
 export function finishEditing(text: string): string | undefined {
   const { edit } = canvasUi.getState();
@@ -259,16 +313,20 @@ export function finishEditing(text: string): string | undefined {
   stopEditing();
   if (!edit) return undefined;
   switch (edit.kind) {
-    case 'new-note': {
+    case 'new': {
       if (!trimmed) return undefined;
-      const result = editor.addNote({ position: edit.position, text: text.trimEnd() });
-      if (result.ok) setSelection({ devices: [], links: [], notes: [result.value] });
+      const result = editor.addAnnotation(withText(edit.annotation, text.trimEnd()));
+      if (result.ok) select({ annotations: [result.value] });
       return undefined;
     }
-    case 'note':
-      if (!trimmed) editor.removeAnnotations([edit.note]);
-      else editor.editNote({ annotation: edit.note, text: text.trimEnd() });
+    case 'annotation': {
+      const current = editor.topology.annotations[edit.annotation];
+      if (!current) return undefined;
+      const area = current.kind === 'area';
+      if (!trimmed && !area) editor.removeAnnotations([current.id]);
+      else editor.updateAnnotation(withText(current, area ? trimmed : text.trimEnd()));
       return undefined;
+    }
     case 'rename': {
       const hostname = Hostname.safeParse(trimmed);
       if (!hostname.success) return hostname.error.issues[0]?.message;

@@ -515,7 +515,9 @@
         "x": 328,
         "y": 32
       },
-      "text": "The serial link is 10.0.0.0/30. R1 holds the DCE end of the cable, so it sets the clock rate."
+      "text": "The serial link is 10.0.0.0/30. R1 holds the DCE end of the cable, so it sets the clock rate.",
+      "width": 192,
+      "color": "amber"
     },
     "ann_srsroutes": {
       "id": "ann_srsroutes",
@@ -524,7 +526,9 @@
         "x": 328,
         "y": 336
       },
-      "text": "Each router knows only its own networks. A static route on each points at the far LAN."
+      "text": "Each router knows only its own networks. A static route on each points at the far LAN.",
+      "width": 192,
+      "color": "amber"
     }
   }
 }

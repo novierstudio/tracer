@@ -6,7 +6,6 @@ import {
   MousePointer2Icon,
   PlusIcon,
   ScanIcon,
-  StickyNoteIcon,
   TagIcon,
   WorkflowIcon,
   type LucideIcon,
@@ -19,11 +18,12 @@ import { Button } from '@/ui/button';
 import { Kbd } from '@/ui/kbd';
 import { Segmented } from '@/ui/segmented';
 import { Tooltip } from '@/ui/tooltip';
+import { ANNOTATION_TOOLS, isDrawTool, type AnnotationTool } from './annotations';
 import { CABLE_CHOICES, shortPortName, type CableChoice } from './cables';
 import { cableTool, useCableTool, type CableStep } from './cableTool';
 import { ALIGN_EDGES } from './arrange';
 import {
-  addNote,
+  addAnnotationAt,
   ALIGN_LABELS,
   autoLayoutAndFit,
   DISTRIBUTE_LABELS,
@@ -34,7 +34,8 @@ import {
   zoomBy,
   zoomToActualSize,
 } from './controller';
-import { align, distribute } from './edit';
+import { useCanvasUi } from './canvasUi';
+import { align, distribute, stopTools, toggleCableTool, toggleDrawTool } from './edit';
 
 type ToolButtonProps = {
   label: string;
@@ -141,8 +142,30 @@ function ArrangeButtons({ count }: { count: number }) {
   );
 }
 
+const TOOLBAR_ANNOTATIONS: AnnotationTool[] = ['note', 'text', 'area', 'ellipse'];
+
+/** Typing tools add under the view's centre; draw tools arm, so the next drag draws the box. */
+function AnnotationButton({ tool, drawing }: { tool: AnnotationTool; drawing: boolean }) {
+  const { label, icon, shortcut } = ANNOTATION_TOOLS[tool];
+  const draw = isDrawTool(tool);
+  return (
+    <ToolButton
+      label={draw ? `${label} (drag to draw)` : label}
+      icon={icon}
+      shortcut={shortcut}
+      pressed={draw ? drawing : undefined}
+      onClick={() => {
+        if (draw) return toggleDrawTool(tool);
+        const at = viewCentre();
+        if (at) addAnnotationAt(tool, at);
+      }}
+    />
+  );
+}
+
 export function Toolbar() {
   const cabling = useCableTool((state) => state.step !== null);
+  const drawing = useCanvasUi((state) => state.drawing);
   const cable = useCableTool((state) => state.cable);
   const selected = useEditor((state) => state.selection.devices.length);
   const devices = useEditor((state) => Object.keys(state.topology.devices).length);
@@ -156,22 +179,20 @@ export function Toolbar() {
         label="Select"
         icon={MousePointer2Icon}
         shortcut="selectTool"
-        pressed={!cabling}
-        onClick={() => cableTool.getState().exit()}
+        pressed={!cabling && !drawing}
+        onClick={stopTools}
       />
       <ToolButton
         label="Cable"
         icon={CableIcon}
         shortcut="cableTool"
         pressed={cabling}
-        onClick={() => cableTool.getState().toggle()}
+        onClick={toggleCableTool}
       />
-      <ToolButton
-        label="Note"
-        icon={StickyNoteIcon}
-        shortcut="addNote"
-        onClick={() => addNote(viewCentre())}
-      />
+      <Divider />
+      {TOOLBAR_ANNOTATIONS.map((tool) => (
+        <AnnotationButton key={tool} tool={tool} drawing={drawing === tool} />
+      ))}
       <Divider />
       <ToolButton
         label="Auto-layout"

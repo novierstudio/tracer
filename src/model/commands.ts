@@ -165,6 +165,17 @@ export function addElements(topology: Topology, elements: Elements): CommandResu
   return ok(next);
 }
 
+export type AnnotationSpec = DistributiveOmit<Annotation, 'id'>;
+
+export function createAnnotation(
+  spec: AnnotationSpec,
+  { ids, topology }: { ids: IdSource; topology: Topology },
+): Annotation {
+  let id = ids.annotationId();
+  while (id in topology.annotations) id = ids.annotationId();
+  return { ...spec, id };
+}
+
 export function addAnnotation(topology: Topology, annotation: Annotation): CommandResult {
   if (annotation.id in topology.annotations) {
     return err({ kind: 'duplicate-id', id: annotation.id });
@@ -176,16 +187,17 @@ export function addAnnotation(topology: Topology, annotation: Annotation): Comma
   );
 }
 
-export function editNote(
-  topology: Topology,
-  { annotation, text }: { annotation: AnnotationId; text: string },
-): CommandResult {
-  const current = topology.annotations[annotation];
-  if (!current) return err({ kind: 'annotation-not-found', annotation });
-  if (current.text === text) return ok(topology);
+// Annotations are small flat records, so comparing their JSON is exact and cheap.
+const sameAnnotation = (a: Annotation, b: Annotation) => JSON.stringify(a) === JSON.stringify(b);
+
+/** Replaces the annotation with the same id. An identical one changes nothing. */
+export function updateAnnotation(topology: Topology, next: Annotation): CommandResult {
+  const current = topology.annotations[next.id];
+  if (!current) return err({ kind: 'annotation-not-found', annotation: next.id });
+  if (sameAnnotation(current, next)) return ok(topology);
   return ok(
     produce(topology, (draft) => {
-      draft.annotations[annotation] = { ...current, text };
+      draft.annotations[next.id] = next;
     }),
   );
 }

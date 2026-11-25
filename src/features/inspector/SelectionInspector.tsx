@@ -1,5 +1,5 @@
 import { CableIcon, Trash2Icon } from 'lucide-react';
-import type { Device, Link, Topology } from '@/model';
+import type { Annotation, Device, Link, Topology } from '@/model';
 import { Button } from '@/ui/button';
 import { deleteItems, selectDevice } from './actions';
 import { DeviceTile, Mono, Section } from './parts';
@@ -9,19 +9,21 @@ import { CABLE_LABELS, describeModel, selectionSummary, shortPortName } from './
 export function SelectionInspector({
   devices,
   links,
+  annotations,
   topology,
 }: {
   devices: Device[];
   links: Link[];
+  annotations: Annotation[];
   topology: Topology;
 }) {
-  const count = devices.length + links.length;
+  const count = devices.length + links.length + annotations.length;
   const hostname = (id: Device['id']) => topology.devices[id]?.config.hostname ?? '?';
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
       <header className="flex flex-col gap-0.5 px-3 pt-1 pb-3">
         <h3 className="text-base font-semibold text-fg-1">{count} items selected</h3>
-        <p className="text-xs text-fg-2">{selectionSummary(devices, links)}</p>
+        <p className="text-xs text-fg-2">{selectionSummary(devices, links, annotations)}</p>
       </header>
       <div className="border-t border-line px-3 py-3">
         <Button
@@ -30,6 +32,7 @@ export function SelectionInspector({
             deleteItems(
               devices.map((d) => d.id),
               links.map((l) => l.id),
+              annotations.map((a) => a.id),
             )
           }
         >

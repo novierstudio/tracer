@@ -1,35 +1,33 @@
 import { useStore } from 'zustand';
 import { createStore } from 'zustand/vanilla';
-import type { AnnotationId, DeviceId, Point } from '@/model';
+import type { AnnotationId, AnnotationSpec, DeviceId } from '@/model';
 import { editorStore } from '@/model/store';
+import type { DrawTool } from './annotations';
 
-/** The one thing being typed into on the canvas, if any. A new note is not in the lab yet. */
+/** The one thing being typed into on the canvas, if any. A new note or text is not in the lab yet. */
 type InlineEdit =
-  | { kind: 'new-note'; position: Point }
-  | { kind: 'note'; note: AnnotationId }
+  | { kind: 'new'; annotation: AnnotationSpec }
+  | { kind: 'annotation'; annotation: AnnotationId }
   | { kind: 'rename'; device: DeviceId };
 
 type CanvasUiState = {
-  /** Selected notes. Devices and links keep their selection in the editor store. */
-  notes: AnnotationId[];
   edit: InlineEdit | null;
+  /** The armed tool that drags out a box, until the box is drawn or Esc. */
+  drawing: DrawTool | null;
 };
 
-// Canvas-only state: nothing outside the canvas reads which notes are selected or being edited.
-export const canvasUi = createStore<CanvasUiState>(() => ({ notes: [], edit: null }));
+// Canvas-only state: nothing outside the canvas reads what is being typed or drawn.
+export const canvasUi = createStore<CanvasUiState>(() => ({ edit: null, drawing: null }));
 
 export function useCanvasUi<T>(selector: (state: CanvasUiState) => T): T {
   return useStore(canvasUi, selector);
 }
 
-// Notes that undo or a delete removed drop out of the selection, as devices do in the store.
+// An edit whose subject undo or a delete removed ends, as the store drops it from the selection.
 editorStore.subscribe(({ topology }) => {
-  const { notes, edit } = canvasUi.getState();
-  const kept = notes.filter((id) => id in topology.annotations);
-  const editGone =
-    (edit?.kind === 'note' && !(edit.note in topology.annotations)) ||
+  const { edit } = canvasUi.getState();
+  const gone =
+    (edit?.kind === 'annotation' && !(edit.annotation in topology.annotations)) ||
     (edit?.kind === 'rename' && !(edit.device in topology.devices));
-  if (kept.length !== notes.length || editGone) {
-    canvasUi.setState({ notes: kept, edit: editGone ? null : edit });
-  }
+  if (gone) canvasUi.setState({ edit: null });
 });

@@ -2,15 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import { deviceSpec } from '@/devices/create';
 import type { DeviceModelId } from '@/devices/catalog';
-import {
-  createIdSource,
-  Hostname,
-  PortId,
-  Topology,
-  type AnnotationId,
-  type Device,
-  type DeviceId,
-} from '@/model';
+import { createIdSource, Hostname, PortId, Topology, type Device, type DeviceId } from '@/model';
 import { createEditorStore } from '@/model/store';
 import { expectOk } from '@/model/testing';
 import { copyFragment, pasteElements } from './clipboard';
@@ -50,7 +42,7 @@ function cabledPair() {
 describe('copyFragment', () => {
   it('keeps only the links whose two ends are both copied', () => {
     const { router, sw, topology } = cabledPair();
-    const fragment = copyFragment(topology(), { devices: [router, sw], notes: [] })!;
+    const fragment = copyFragment(topology(), { devices: [router, sw], annotations: [] })!;
     expect(fragment.devices.map((d) => d.id)).toEqual([router, sw]);
     expect(fragment.links).toHaveLength(1);
     expect(fragment.links[0]!.a.device).toBe(router);
@@ -58,14 +50,14 @@ describe('copyFragment', () => {
 
   it('is undefined when nothing copyable is selected', () => {
     const { topology } = cabledPair();
-    expect(copyFragment(topology(), { devices: [], notes: [] })).toBeUndefined();
+    expect(copyFragment(topology(), { devices: [], annotations: [] })).toBeUndefined();
   });
 });
 
 describe('pasteElements', () => {
   it('gives copies new ids, MACs, the next free hostnames and offset positions', () => {
     const { router, sw, topology, editor } = cabledPair();
-    const fragment = copyFragment(topology(), { devices: [router, sw], notes: [] })!;
+    const fragment = copyFragment(topology(), { devices: [router, sw], annotations: [] })!;
     const pasted = pasteElements(topology(), fragment, {
       ids: createIdSource(11),
       offset: { x: 32, y: 32 },
@@ -99,7 +91,7 @@ describe('pasteElements', () => {
     const { editor, ids, topology } = lab('pc');
     const [pc] = ids as [DeviceId];
     expectOk(editor.getState().renameDevice({ device: pc, hostname: Hostname.parse('Lab-PC7') }));
-    const fragment = copyFragment(topology(), { devices: [pc], notes: [] })!;
+    const fragment = copyFragment(topology(), { devices: [pc], annotations: [] })!;
     const [copy] = pasteElements(topology(), fragment, {
       ids: createIdSource(2),
       offset: { x: 0, y: 0 },
@@ -107,21 +99,61 @@ describe('pasteElements', () => {
     expect(copy!.config).toEqual({ ...topology().devices[pc]!.config, hostname: 'Lab-PC0' });
   });
 
-  it('copies notes with fresh ids', () => {
-    const { editor, topology } = lab();
-    const note = expectOk(editor.getState().addNote({ position: { x: 0, y: 0 }, text: 'VLAN 10' }));
-    const fragment = copyFragment(topology(), { devices: [], notes: [note as AnnotationId] })!;
-    const { annotations } = pasteElements(topology(), fragment, {
+  it('copies devices and annotations together, as one undo step, with fresh ids', () => {
+    const { editor, router, sw, topology } = cabledPair();
+    const area = expectOk(
+      editor.getState().addAnnotation({
+        kind: 'area',
+        position: { x: -48, y: -48 },
+        size: { width: 320, height: 128 },
+        label: 'Building A',
+        color: 'teal',
+      }),
+    );
+    const text = expectOk(
+      editor.getState().addAnnotation({
+        kind: 'text',
+        position: { x: 0, y: 96 },
+        text: 'Core',
+        textSize: 'large',
+        color: 'slate',
+      }),
+    );
+    const before = topology();
+    const steps = editor.temporal.getState().pastStates.length;
+
+    const fragment = copyFragment(before, { devices: [router, sw], annotations: [area, text] })!;
+    const elements = pasteElements(before, fragment, {
       ids: createIdSource(4),
-      offset: { x: 16, y: 0 },
+      offset: { x: 32, y: 16 },
     });
-    expect(annotations).toEqual([
+    expectOk(editor.getState().addElements(elements));
+
+    const after = topology();
+    expect(Object.keys(after.devices)).toHaveLength(5);
+    expect(Object.keys(after.links)).toHaveLength(3);
+    const copies = Object.values(after.annotations).filter((a) => a.id !== area && a.id !== text);
+    expect(copies).toEqual([
       {
-        id: expect.not.stringMatching(note),
-        kind: 'note',
-        position: { x: 16, y: 0 },
-        text: 'VLAN 10',
+        id: expect.not.stringMatching(area),
+        kind: 'area',
+        position: { x: -16, y: -32 },
+        size: { width: 320, height: 128 },
+        label: 'Building A',
+        color: 'teal',
+      },
+      {
+        id: expect.not.stringMatching(text),
+        kind: 'text',
+        position: { x: 32, y: 112 },
+        text: 'Core',
+        textSize: 'large',
+        color: 'slate',
       },
     ]);
+    expect(Topology.safeParse(after).success).toBe(true);
+    expect(editor.temporal.getState().pastStates).toHaveLength(steps + 1);
+    editor.getState().undo();
+    expect(topology()).toBe(before);
   });
 });

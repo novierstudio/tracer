@@ -71,3 +71,11 @@ it('maps the clipboard, nudge and add-at-pointer keys', () => {
   expect(press('n')).toBe('addNote');
   expect(press('s', { meta: true })).toBe('save');
 });
+
+it('maps the annotation tools to T, B and O, leaving their browser combinations alone', () => {
+  expect(press('t')).toBe('addText');
+  expect(press('b')).toBe('addArea');
+  expect(press('o')).toBe('addEllipse');
+  expect(press('o', { meta: true })).toBe('open');
+  expect(press('t', { ctrl: true })).toBeUndefined();
+});

@@ -91,10 +91,46 @@ function richLab() {
       },
     }),
   );
-  const note = AnnotationId.parse('ann_note1');
+  const [note, text, area, shape] = ['ann_note1', 'ann_text1', 'ann_area1', 'ann_shape1'].map(
+    (id) => AnnotationId.parse(id),
+  ) as [AnnotationId, AnnotationId, AnnotationId, AnnotationId];
   topology = {
     ...topology,
-    annotations: { [note]: { id: note, kind: 'note', position: { x: 5, y: 5 }, text: 'Core' } },
+    annotations: {
+      [note]: {
+        id: note,
+        kind: 'note',
+        position: { x: 5, y: 5 },
+        text: 'Core',
+        width: 240,
+        color: 'green',
+      },
+      [text]: {
+        id: text,
+        kind: 'text',
+        position: { x: 0, y: -80 },
+        text: 'Campus',
+        textSize: 'large',
+        width: 200,
+        color: 'slate',
+      },
+      [area]: {
+        id: area,
+        kind: 'area',
+        position: { x: -48, y: -48 },
+        label: 'Building A',
+        size: { width: 400, height: 240 },
+        color: 'teal',
+      },
+      [shape]: {
+        id: shape,
+        kind: 'shape',
+        shape: 'ellipse',
+        position: { x: 480, y: 0 },
+        size: { width: 160, height: 96 },
+        color: 'red',
+      },
+    },
   };
 
   return { ...lab, topology };
@@ -112,6 +148,38 @@ describe('topology files', () => {
 
     expect(JSON.parse(text)).toMatchObject({ version: 1 });
     expect(expectOk(parseTopologyJson(text))).toEqual(topology);
+  });
+
+  it('load files whose notes predate colours and sizes', () => {
+    const { topology } = richLab();
+    const document = JSON.parse(serializeTopology(topology));
+    document.annotations = {
+      ann_old: { id: 'ann_old', kind: 'note', position: { x: 5, y: 5 }, text: 'Core' },
+    };
+
+    const read = expectOk(parseTopology(document));
+
+    expect(read.annotations).toEqual({
+      ann_old: {
+        id: 'ann_old',
+        kind: 'note',
+        position: { x: 5, y: 5 },
+        text: 'Core',
+        width: 192,
+        color: 'amber',
+      },
+    });
+  });
+
+  it('refuse an annotation colour outside the palette', () => {
+    const { topology } = richLab();
+    const document = JSON.parse(serializeTopology(topology));
+    document.annotations.ann_area1.color = 'chartreuse';
+
+    expect(parseTopology(document)).toMatchObject({
+      ok: false,
+      error: { kind: 'invalid-topology' },
+    });
   });
 
   it('fill the IOS fields that files written before they existed lack', () => {

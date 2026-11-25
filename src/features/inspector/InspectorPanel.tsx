@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import type { DeviceId } from '@/model';
 import { useEditor } from '@/model/react';
 import { EmptyState } from '@/ui/empty-state';
+import { AnnotationInspector } from './AnnotationInspector';
 import { DeviceInspector, type DeviceTab } from './DeviceInspector';
 import './devHandle';
 import { LinkInspector } from './LinkInspector';
@@ -50,8 +51,16 @@ export function InspectorPanel() {
         />
       )}
       {view.kind === 'link' && <LinkInspector link={view.link} topology={topology} />}
+      {view.kind === 'annotation' && (
+        <AnnotationInspector key={view.annotation.id} annotation={view.annotation} />
+      )}
       {view.kind === 'multi' && (
-        <SelectionInspector devices={view.devices} links={view.links} topology={topology} />
+        <SelectionInspector
+          devices={view.devices}
+          links={view.links}
+          annotations={view.annotations}
+          topology={topology}
+        />
       )}
       {view.kind === 'empty' && (
         <div className="min-h-0 flex-1 overflow-y-auto pt-12">

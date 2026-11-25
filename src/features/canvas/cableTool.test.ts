@@ -39,7 +39,11 @@ describe('cable tool', () => {
       a: { device: router, port: 'GigabitEthernet0/1' },
       b: { device: sw, port: 'FastEthernet0/3' },
     });
-    expect(editor.getState().selection).toEqual({ devices: [], links: [link!.id] });
+    expect(editor.getState().selection).toEqual({
+      devices: [],
+      links: [link!.id],
+      annotations: [],
+    });
     expect(state().step).toEqual({ at: 'source' });
     expect(state().notice).toBeNull();
   });
