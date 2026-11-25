@@ -1,5 +1,5 @@
 import { CableIcon, RouterIcon, SearchIcon, StickyNoteIcon, type LucideIcon } from 'lucide-react';
-import { useId, useState, type ComponentProps, type DragEvent } from 'react';
+import { useId, useState, type ComponentProps, type DragEvent, type KeyboardEvent } from 'react';
 import {
   CATEGORY_LABELS,
   DEVICE_CATEGORIES,
@@ -7,8 +7,10 @@ import {
   portSummary,
   type DeviceCategory,
   type DeviceModel,
+  type DeviceModelId,
 } from '@/devices/catalog';
 import { DeviceIcon } from '@/devices/icons';
+import { placeDevice } from '@/features/canvas/controller';
 import { EmptyState } from '@/ui/empty-state';
 import { Input } from '@/ui/input';
 
@@ -77,11 +79,21 @@ function DeviceItem({ entry: { model, summary } }: { entry: Entry }) {
     event.dataTransfer.setData(DEVICE_DRAG_TYPE, model.id);
     event.dataTransfer.effectAllowed = 'copy';
   };
+  // Clicking, or Enter on a focused item, drops the device in the middle of the canvas view.
+  const add = () => placeDevice(model.id as DeviceModelId);
+  const onKeyDown = (event: KeyboardEvent) => {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    event.preventDefault();
+    add();
+  };
   return (
     <li
       draggable
       tabIndex={0}
+      title={`Click to add ${model.name}, or drag it onto the canvas`}
       onDragStart={onDragStart}
+      onClick={add}
+      onKeyDown={onKeyDown}
       data-model={model.id}
       className="flex cursor-grab items-center gap-2.5 rounded-md px-2 py-1.5 transition-colors outline-none hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:ring-2 focus-visible:ring-accent/40 active:cursor-grabbing"
     >
