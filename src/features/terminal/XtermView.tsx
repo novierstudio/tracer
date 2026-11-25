@@ -47,9 +47,13 @@ function connect(tty: Tty, parent: HTMLElement) {
   return { term, fit };
 }
 
-type XtermViewProps = { tty: Tty; autoFocus: boolean };
+const IOS_HINT =
+  'Tab completes a command and ? lists what can come next. Shift+Tab leaves the terminal.';
 
-export default function XtermView({ tty, autoFocus }: XtermViewProps) {
+/** `hint` tells a screen reader how the terminal's keys work. */
+type XtermViewProps = { tty: Tty; autoFocus: boolean; hint?: string };
+
+export default function XtermView({ tty, autoFocus, hint = IOS_HINT }: XtermViewProps) {
   const host = useRef<HTMLDivElement>(null);
   const hintId = useId();
 
@@ -99,7 +103,7 @@ export default function XtermView({ tty, autoFocus }: XtermViewProps) {
   return (
     <div className="h-full min-h-0">
       <p id={hintId} className="sr-only">
-        Tab completes a command and ? lists what can come next. Shift+Tab leaves the terminal.
+        {hint}
       </p>
       <div ref={host} className="h-full" />
     </div>
