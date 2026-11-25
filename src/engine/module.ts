@@ -38,7 +38,15 @@ export interface SimModule<S = unknown> {
   onLinkChange?(ctx: ModuleContext<S>, port: PortId, up: boolean): void;
   /** The device's config or ports may have changed. Re-derive what depends on them. */
   onConfigChange?(ctx: ModuleContext<S>): void;
+  /**
+   * The device is powering off or leaving the simulation, and this instance is about to be
+   * dropped. Settle what waits on it. It must not send or set timers, and the device may be gone.
+   */
+  onStop?(ctx: ModuleContext<S>): void;
 }
+
+/** Why a module cannot run on a device: no such device, it is off, or its kind does not run the module. */
+export type DeviceUnavailable = 'unknown-device' | 'powered-off' | 'unsupported';
 
 /** The modules each kind of device runs, in the order they see frames. */
 export type Stacks = Readonly<Record<DeviceKind, readonly SimModule[]>>;

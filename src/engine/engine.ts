@@ -1,4 +1,14 @@
-import type { Device, DeviceId, Endpoint, Link, LinkId, Topology } from '@/model';
+import {
+  err,
+  ok,
+  type Device,
+  type DeviceId,
+  type Endpoint,
+  type Link,
+  type LinkId,
+  type Result,
+  type Topology,
+} from '@/model';
 import { createEventLog, type EventLog } from './core/log';
 import { createEventQueue, type QueueEntry } from './core/queue';
 import { createRandom } from './core/random';
@@ -6,7 +16,7 @@ import { after, ms, START, type SimDuration, type SimTime } from './core/time';
 import type { SimEvent } from './events';
 import type { Frame } from './frame';
 import { endUp } from './l1';
-import type { ModuleContext, SimModule, Stacks } from './module';
+import type { DeviceUnavailable, ModuleContext, SimModule, Stacks } from './module';
 import type { TopologyPatch } from './patch';
 
 export type EngineOptions = {
@@ -26,6 +36,15 @@ export type Engine = {
   step(): SimEvent[];
   /** Processes every event up to and including `time`, then moves the clock to `time`. */
   runUntil(time: SimTime): SimEvent[];
+  /**
+   * Runs `run` with the context of `module` on a running device, at the current time. What it
+   * sends or schedules counts as the module's own doing. Commands and queries reach devices this way.
+   */
+  withModule<S, R>(
+    device: DeviceId,
+    module: SimModule<S>,
+    run: (ctx: ModuleContext<S>) => R,
+  ): Result<R, DeviceUnavailable>;
 };
 
 type Slot = {
@@ -144,6 +163,7 @@ export function createEngine({
 
   function stop(id: DeviceId) {
     for (const slot of running.get(id) ?? []) {
+      slot.module.onStop?.(slot.ctx);
       for (const pending of slot.timers.values()) queue.cancel(pending);
     }
     running.delete(id);
@@ -205,6 +225,7 @@ export function createEngine({
   }
 
   function load(topology: Topology) {
+    for (const id of [...running.keys()]) stop(id);
     queue.clear();
     log.clear();
     devices.clear();
@@ -270,6 +291,20 @@ export function createEngine({
     return log.since(mark);
   }
 
+  function withModule<S, R>(
+    id: DeviceId,
+    module: SimModule<S>,
+    run: (ctx: ModuleContext<S>) => R,
+  ): Result<R, DeviceUnavailable> {
+    const device = devices.get(id);
+    if (!device) return err('unknown-device');
+    if (!device.powered) return err('powered-off');
+    const slot = running.get(id)?.find((candidate) => candidate.module === module);
+    if (!slot) return err('unsupported');
+    // The slot was booted by this very module, so its state is the module's S.
+    return ok(run(slot.ctx as ModuleContext<S>));
+  }
+
   return {
     get now() {
       return now;
@@ -280,5 +315,6 @@ export function createEngine({
     nextTime: () => queue.peek()?.time,
     step,
     runUntil,
+    withModule,
   };
 }

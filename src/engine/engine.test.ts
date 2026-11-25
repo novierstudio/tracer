@@ -466,6 +466,58 @@ describe('module timers', () => {
   });
 });
 
+describe('withModule', () => {
+  const counter: SimModule<{ hits: number }> = {
+    id: 'counter',
+    init: () => ({ hits: 0 }),
+    onStop: (ctx) => ctx.note(`stopped after ${ctx.state.hits}`),
+  };
+
+  it("runs against the module's own state and sends as the device, at the current time", () => {
+    const { topology, pc, sw, pcLink } = lab();
+    const engine = engineFor(stacksOf({ pc: [counter], switch: [listenerModule] }));
+    engine.load(topology);
+    engine.runUntil(simTime(10));
+
+    const hits = engine.withModule(pc.id, counter, (ctx) => {
+      ctx.send(port('FastEthernet0'), { kind: 'hello', origin: pc.id, seq: 1 });
+      return ++ctx.state.hits;
+    });
+
+    expect(hits).toEqual({ ok: true, value: 1 });
+    expect(engine.withModule(pc.id, counter, (ctx) => ctx.state.hits)).toEqual({
+      ok: true,
+      value: 1,
+    });
+    expect(frames(engine.runUntil(simTime(20)))).toMatchObject([
+      { link: pcLink.id, sentAt: 10, to: end(sw, 'FastEthernet0/1'), outcome: 'delivered' },
+    ]);
+  });
+
+  it('says why a device cannot run the module', () => {
+    const { topology, pc, server, sw } = lab();
+    const engine = engineFor(stacksOf({ pc: [counter], server: [counter] }));
+    engine.load(topology);
+    engine.applyPatch(withPower(server, false));
+    const run = (id: Device['id']) => engine.withModule(id, counter, () => 'ran');
+
+    expect(run(pc.id)).toEqual({ ok: true, value: 'ran' });
+    expect(run(server.id)).toEqual({ ok: false, error: 'powered-off' });
+    expect(run(sw.id)).toEqual({ ok: false, error: 'unsupported' });
+    expect(run('dev_missing' as Device['id'])).toEqual({ ok: false, error: 'unknown-device' });
+  });
+
+  it('lets a module settle its work when its device powers off', () => {
+    const { topology, pc } = lab();
+    const engine = engineFor(stacksOf({ pc: [counter] }));
+    engine.load(topology);
+    engine.withModule(pc.id, counter, (ctx) => (ctx.state.hits = 2));
+
+    engine.applyPatch(withPower(pc, false));
+    expect(notes(trace(engine))).toEqual([[pc.id, 'stopped after 2']]);
+  });
+});
+
 describe('a port with no cable', () => {
   it('sends nothing, while the same device still sends on its cabled port', () => {
     const { topology, r2 } = lab();
