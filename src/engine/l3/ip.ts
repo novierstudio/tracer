@@ -2,7 +2,7 @@ import type { SimModule } from '../module';
 import { BROADCAST_MAC, type Ipv4Packet } from '../pdu';
 import { forgetPort, onArp, onArpTimer } from './arp';
 import { interfacesOf, parseTimer, routesOf, type IpContext, type IpState } from './context';
-import { interfaceOn, isEthernet, ownsAddress } from './interfaces';
+import { lanInterfaceFor, ownsAddress, serialOn } from './interfaces';
 import { originate, reportError, transmit } from './output';
 import { endPings, onPingAnswer, onPingTimer } from './ping';
 import { nextHop } from './routes';
@@ -64,18 +64,16 @@ export const ipModule: SimModule<IpState> = {
     nextPingId: 1,
   }),
   onFrame(ctx, port, frame) {
-    const iface = interfaceOn(interfacesOf(ctx), port);
-    if (!iface) return;
     switch (frame.kind) {
       case 'hdlc':
-        if (iface.medium.kind === 'serial') receive(ctx, frame.payload);
+        if (serialOn(interfacesOf(ctx), port)) receive(ctx, frame.payload);
         return;
       case 'ethernet': {
-        // A routed port takes untagged frames for its own MAC or broadcast. Subinterfaces for
-        // router-on-a-stick are NOV-212.
-        if (!isEthernet(iface) || frame.tag) return;
+        // A LAN interface takes frames of its VLAN for its own MAC or broadcast.
+        const iface = lanInterfaceFor(ctx.device, interfacesOf(ctx), port, frame);
+        if (!iface) return;
         if (frame.dst !== iface.medium.mac && frame.dst !== BROADCAST_MAC) return;
-        if (frame.payload.kind === 'arp') onArp(ctx, iface, frame.payload);
+        if (frame.payload.kind === 'arp') onArp(ctx, iface, port, frame.payload);
         else receive(ctx, frame.payload);
         return;
       }

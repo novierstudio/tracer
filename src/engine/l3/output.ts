@@ -3,7 +3,7 @@ import { ms } from '../core/time';
 import type { IcmpDestinationUnreachable, IcmpTimeExceeded, Ipv4Packet, Ipv4Payload } from '../pdu';
 import { sendToNeighbour } from './arp';
 import { routesOf, timerKey, type IpContext } from './context';
-import { isEthernet, ownsAddress } from './interfaces';
+import { isLan, ownsAddress } from './interfaces';
 import { nextHop, type NextHop } from './routes';
 
 /** The TTL a device's own packets start with: 255 on IOS, 128 on Windows. */
@@ -14,13 +14,13 @@ export const INITIAL_TTL: Record<DeviceKind, number> = {
   server: 128,
 };
 
-/** Hands a packet to the next hop. Ethernet resolves the neighbour's MAC first. */
+/** Hands a packet to the next hop. A LAN resolves the neighbour's MAC first. */
 export function transmit(
   ctx: IpContext,
   { interface: iface, address }: NextHop,
   packet: Ipv4Packet,
 ) {
-  if (isEthernet(iface)) sendToNeighbour(ctx, iface, address, packet);
+  if (isLan(iface)) sendToNeighbour(ctx, iface, address, packet);
   else if (iface.medium.kind === 'serial')
     ctx.send(iface.medium.port, { kind: 'hdlc', payload: packet });
   // A route out of a loopback interface leads nowhere.

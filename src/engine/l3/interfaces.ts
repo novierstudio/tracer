@@ -1,8 +1,32 @@
-import type { Device, InterfaceId, Ipv4Address, Ipv4Cidr, MacAddress, PortId } from '@/model';
+import type {
+  Device,
+  InterfaceId,
+  Ipv4Address,
+  Ipv4Cidr,
+  MacAddress,
+  PortId,
+  SubinterfaceId,
+  VlanId,
+} from '@/model';
+import { parentPort } from '@/model/vlans';
+import { egressFrame, ingressVlan, vlanPorts } from '../l2/switching';
+import type { DeviceContext } from '../module';
+import type { EthernetFrame } from '../pdu';
 
-/** What carries an interface's packets: Ethernet needs ARP, a serial link has one peer. */
+/**
+ * What carries an interface's packets. Ethernet and a switch's VLAN interface need ARP, a serial
+ * link has one peer, and a loopback goes nowhere.
+ */
 export type Medium =
-  | { readonly kind: 'ethernet'; readonly port: PortId; readonly mac: MacAddress }
+  /** A routed port, or a subinterface of one that tags its frames with `tag`. */
+  | {
+      readonly kind: 'ethernet';
+      readonly port: PortId;
+      readonly mac: MacAddress;
+      readonly tag?: VlanId;
+    }
+  /** A switch's VLAN interface (SVI): it reaches every port that carries the VLAN. */
+  | { readonly kind: 'svi'; readonly vlan: VlanId; readonly mac: MacAddress }
   | { readonly kind: 'serial'; readonly port: PortId }
   | { readonly kind: 'loopback' };
 
@@ -14,10 +38,58 @@ export type IpInterface = {
   readonly medium: Medium;
 };
 
+type Router = Extract<Device, { kind: 'router' }>;
+type Switch = Extract<Device, { kind: 'switch' }>;
+
+/** A routed port's subinterfaces with an address and an encapsulation, while the port is up. */
+function subinterfaces(device: Router, portUp: (port: PortId) => boolean): IpInterface[] {
+  const found: IpInterface[] = [];
+  for (const [name, config] of Object.entries(device.config.subinterfaces)) {
+    const { ipv4, encapsulation, shutdown } = config;
+    if (!ipv4 || !encapsulation || shutdown) continue;
+    const port = device.ports.find(
+      (candidate) => candidate.id === parentPort(name as SubinterfaceId),
+    );
+    if (!port || port.kind === 'serial' || !portUp(port.id)) continue;
+    const medium: Medium = {
+      kind: 'ethernet',
+      port: port.id,
+      mac: port.mac,
+      ...(!encapsulation.native && { tag: encapsulation.vlan }),
+    };
+    found.push({ name: name as InterfaceId, cidr: ipv4, medium });
+  }
+  return found;
+}
+
+/** A VLAN interface answers with the switch's first Ethernet address, as `show interfaces` says. */
+function sviMac(device: Switch): MacAddress | undefined {
+  for (const port of device.ports) if (port.kind !== 'serial') return port.mac;
+  return undefined;
+}
+
+/** Each VLAN interface with an address, while its VLAN exists and an up port carries it. */
+function svis(device: Switch, portUp: (port: PortId) => boolean): IpInterface[] {
+  const mac = sviMac(device);
+  if (!mac) return [];
+  const found: IpInterface[] = [];
+  for (const [name, config] of Object.entries(device.config.virtualInterfaces)) {
+    if (!name.startsWith('Vlan') || !config?.ipv4 || config.shutdown) continue;
+    const vlan = Number(name.slice('Vlan'.length)) as VlanId;
+    if (!(vlan in device.config.vlans)) continue;
+    if (!vlanPorts(device, vlan).some(({ port }) => portUp(port))) continue;
+    found.push({
+      name: name as InterfaceId,
+      cidr: config.ipv4,
+      medium: { kind: 'svi', vlan, mac },
+    });
+  }
+  return found;
+}
+
 /**
  * The device's working IP interfaces, from its config and its link state now. A physical port
- * counts while its link is up, which already means it is not shut down. Switches have none yet:
- * the Vlan1 management address is left for later.
+ * counts while its link is up, which already means it is not shut down.
  */
 export function ipInterfaces(device: Device, portUp: (port: PortId) => boolean): IpInterface[] {
   switch (device.kind) {
@@ -32,6 +104,7 @@ export function ipInterfaces(device: Device, portUp: (port: PortId) => boolean):
             : { kind: 'ethernet', port: port.id, mac: port.mac };
         found.push({ name: port.id, cidr: ipv4, medium });
       }
+      found.push(...subinterfaces(device, portUp));
       for (const [name, config] of Object.entries(device.config.virtualInterfaces)) {
         if (!name.startsWith('Loopback') || !config?.ipv4 || config.shutdown) continue;
         found.push({ name: name as InterfaceId, cidr: config.ipv4, medium: { kind: 'loopback' } });
@@ -53,7 +126,7 @@ export function ipInterfaces(device: Device, portUp: (port: PortId) => boolean):
       ];
     }
     case 'switch':
-      return [];
+      return svis(device, portUp);
     default: {
       const exhaustive: never = device;
       return exhaustive;
@@ -61,16 +134,70 @@ export function ipInterfaces(device: Device, portUp: (port: PortId) => boolean):
   }
 }
 
-export type EthernetInterface = IpInterface & {
-  readonly medium: Extract<Medium, { kind: 'ethernet' }>;
+/** An interface on an Ethernet LAN: it has a MAC address and resolves neighbours with ARP. */
+export type LanInterface = IpInterface & {
+  readonly medium: Extract<Medium, { kind: 'ethernet' | 'svi' }>;
 };
 
-export const isEthernet = (iface: IpInterface): iface is EthernetInterface =>
-  iface.medium.kind === 'ethernet';
+export const isLan = (iface: IpInterface): iface is LanInterface =>
+  iface.medium.kind === 'ethernet' || iface.medium.kind === 'svi';
 
-/** The working interface on a physical port, if any. */
-export const interfaceOn = (interfaces: readonly IpInterface[], port: PortId) =>
-  interfaces.find((iface) => iface.medium.kind !== 'loopback' && iface.medium.port === port);
+/** The working interface on a serial port, if any. */
+export const serialOn = (interfaces: readonly IpInterface[], port: PortId) =>
+  interfaces.find((iface) => iface.medium.kind === 'serial' && iface.medium.port === port);
+
+/**
+ * The LAN interface an Ethernet frame that arrived on `port` belongs to. A routed port takes
+ * untagged frames and each subinterface the frames tagged with its VLAN. A switch reads the VLAN
+ * from the port's switchport, and its interface for that VLAN takes the frame.
+ */
+export function lanInterfaceFor(
+  device: Device,
+  interfaces: readonly IpInterface[],
+  port: PortId,
+  frame: EthernetFrame,
+): LanInterface | undefined {
+  if (device.kind === 'switch') {
+    const switchport = device.config.interfaces[port]?.switchport;
+    const vlan = switchport && ingressVlan(switchport, frame);
+    return interfaces.find(
+      (iface): iface is LanInterface => iface.medium.kind === 'svi' && iface.medium.vlan === vlan,
+    );
+  }
+  return interfaces.find(
+    (iface): iface is LanInterface =>
+      iface.medium.kind === 'ethernet' &&
+      iface.medium.port === port &&
+      iface.medium.tag === frame.tag?.vlan,
+  );
+}
+
+/**
+ * Sends an untagged frame out of a LAN interface. A routed port or subinterface has one port and
+ * tags for a subinterface. A switch's VLAN interface sends out `port`, where the neighbour was
+ * heard, or floods every up port of the VLAN when `port` is undefined, tagging as each port needs.
+ */
+export function sendOnLan(
+  ctx: DeviceContext,
+  iface: LanInterface,
+  frame: EthernetFrame,
+  port?: PortId,
+) {
+  const { medium } = iface;
+  if (medium.kind === 'ethernet') {
+    ctx.send(
+      medium.port,
+      medium.tag === undefined ? frame : { ...frame, tag: { vlan: medium.tag } },
+    );
+    return;
+  }
+  const { device } = ctx;
+  if (device.kind !== 'switch') return;
+  for (const out of vlanPorts(device, medium.vlan)) {
+    if ((port !== undefined && out.port !== port) || !ctx.portUp(out.port)) continue;
+    ctx.send(out.port, egressFrame(out.switchport, medium.vlan, frame));
+  }
+}
 
 export const ownsAddress = (interfaces: readonly IpInterface[], address: Ipv4Address) =>
   interfaces.some((iface) => iface.cidr.address === address);

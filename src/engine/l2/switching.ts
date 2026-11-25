@@ -1,4 +1,5 @@
-import type { MacAddress, PortId, SwitchInterface, VlanId } from '@/model';
+import type { Device, MacAddress, PortId, Switchport, VlanId } from '@/model';
+import { carriesVlan, vlanAllowed } from '@/model/vlans';
 import { ms, type SimTime } from '../core/time';
 import type { SimModule } from '../module';
 import type { EthernetFrame } from '../pdu';
@@ -17,8 +18,6 @@ type Learned = MacTableEntry & { readonly learnedAt: SimTime };
 /** Learned addresses by VLAN and MAC: one MAC can sit in two VLANs. An expired entry counts as absent. */
 export type SwitchState = { readonly table: Map<string, Learned> };
 
-type Switchport = SwitchInterface['switchport'];
-
 const tableKey = (vlan: VlanId, mac: MacAddress) => `${vlan} ${mac}`;
 
 /** Broadcast and multicast addresses have the group bit set in their first octet. */
@@ -27,29 +26,45 @@ const isGroup = (mac: MacAddress) => (parseInt(mac.slice(0, 2), 16) & 1) === 1;
 const fresh = (entry: Learned, now: SimTime) => now - entry.learnedAt < MAC_AGING;
 
 /**
- * The VLAN a frame arriving on a port belongs to, or undefined when the port drops it. Trunks
- * carry every VLAN; allowed lists, DTP and native VLAN checks are NOV-212.
+ * The VLAN a frame arriving on a port belongs to, or undefined when the port drops it. An access
+ * port drops tagged frames. A trunk reads the tag, takes an untagged frame as its native VLAN, and
+ * drops a VLAN its allowed list leaves out. There is no DTP: a port is access or trunk as set.
  */
-function ingressVlan(switchport: Switchport, frame: EthernetFrame): VlanId | undefined {
+export function ingressVlan(switchport: Switchport, frame: EthernetFrame): VlanId | undefined {
   switch (switchport.mode) {
     case 'access':
       return frame.tag ? undefined : switchport.vlan;
-    case 'trunk':
-      return frame.tag?.vlan ?? switchport.nativeVlan;
+    case 'trunk': {
+      const vlan = frame.tag?.vlan ?? switchport.nativeVlan;
+      return vlanAllowed(switchport.allowedVlans, vlan) ? vlan : undefined;
+    }
   }
 }
 
-const carries = (switchport: Switchport, vlan: VlanId) =>
-  switchport.mode === 'trunk' || switchport.vlan === vlan;
-
 /** The frame as it leaves a port: tagged on a trunk unless it is in the native VLAN. */
-function egressFrame(switchport: Switchport, vlan: VlanId, frame: EthernetFrame): EthernetFrame {
+export function egressFrame(
+  switchport: Switchport,
+  vlan: VlanId,
+  frame: EthernetFrame,
+): EthernetFrame {
   const { dst, src, payload } = frame;
   const tagged = switchport.mode === 'trunk' && vlan !== switchport.nativeVlan;
   return tagged
     ? { kind: 'ethernet', dst, src, tag: { vlan }, payload }
     : { kind: 'ethernet', dst, src, payload };
 }
+
+/** Every port that carries `vlan` out of a switch, with its switchport. */
+export function vlanPorts(device: Extract<Device, { kind: 'switch' }>, vlan: VlanId) {
+  return device.ports.flatMap((port) => {
+    const switchport = device.config.interfaces[port.id]?.switchport;
+    return switchport && carriesVlan(switchport, vlan) ? [{ port: port.id, switchport }] : [];
+  });
+}
+
+/** A frame for one of the switch's own addresses is for its management interface, not to switch. */
+const ownAddress = (device: Device, mac: MacAddress) =>
+  device.ports.some((port) => port.kind !== 'serial' && port.mac === mac);
 
 function forget(state: SwitchState, drop: (entry: Learned) => boolean) {
   for (const [key, entry] of state.table) if (drop(entry)) state.table.delete(key);
@@ -79,12 +94,13 @@ export const switchingModule: SimModule<SwitchState> = {
         learnedAt: now,
       });
     }
+    if (ownAddress(device, frame.dst)) return;
     const known = isGroup(frame.dst) ? undefined : state.table.get(tableKey(vlan, frame.dst));
     const out = known && fresh(known, now) ? [known.port] : device.ports.map((port) => port.id);
 
     for (const port of out) {
       const switchport = interfaces[port]?.switchport;
-      if (port === ingress || !switchport || !carries(switchport, vlan) || !ctx.portUp(port))
+      if (port === ingress || !switchport || !carriesVlan(switchport, vlan) || !ctx.portUp(port))
         continue;
       ctx.send(port, egressFrame(switchport, vlan, frame));
     }
@@ -97,7 +113,7 @@ export const switchingModule: SimModule<SwitchState> = {
     if (device.kind !== 'switch') return;
     forget(ctx.state, (entry) => {
       const switchport = device.config.interfaces[entry.port]?.switchport;
-      return !switchport || !carries(switchport, entry.vlan);
+      return !switchport || !carriesVlan(switchport, entry.vlan);
     });
   },
 };

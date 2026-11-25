@@ -38,7 +38,10 @@ const MAX_RECURSION = 8;
 
 const SOURCE_ORDER: Record<Route['source'], number> = { connected: 0, local: 1, static: 2 };
 
-/** A host's default gateway is a static default route, as `route print` shows it. */
+/**
+ * A host's default gateway is a static default route, as `route print` shows it. So is a switch's
+ * `ip default-gateway`, which its management interface uses.
+ */
 function configuredRoutes(device: Device): readonly StaticRoute[] {
   switch (device.kind) {
     case 'router':
@@ -50,8 +53,12 @@ function configuredRoutes(device: Device): readonly StaticRoute[] {
         ? [{ prefix: DEFAULT_ROUTE, nextHop: { kind: 'address', address: ipv4.gateway } }]
         : [];
     }
-    case 'switch':
-      return [];
+    case 'switch': {
+      const gateway = device.config.defaultGateway;
+      return gateway
+        ? [{ prefix: DEFAULT_ROUTE, nextHop: { kind: 'address', address: gateway } }]
+        : [];
+    }
     default: {
       const exhaustive: never = device;
       return exhaustive;

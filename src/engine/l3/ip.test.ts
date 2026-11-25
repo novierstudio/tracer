@@ -138,8 +138,8 @@ describe('ping on one LAN', () => {
     expect(arpRequestsFrom(engine, pc1)).toBe(1);
     expect(arpRequestsFrom(engine, pc2)).toBe(0);
     expect(value(sim.arpTable(pc1))).toMatchObject([
-      { kind: 'interface', address: '192.168.1.10', mac: macOf(pc1), port: 'FastEthernet0' },
-      { kind: 'dynamic', address: '192.168.1.20', mac: macOf(pc2), port: 'FastEthernet0' },
+      { kind: 'interface', address: '192.168.1.10', mac: macOf(pc1), interface: 'FastEthernet0' },
+      { kind: 'dynamic', address: '192.168.1.20', mac: macOf(pc2), interface: 'FastEthernet0' },
     ]);
     expect(value(sim.arpTable(pc2))).toMatchObject([
       { kind: 'dynamic', address: '192.168.1.10', mac: macOf(pc1) },
@@ -374,14 +374,14 @@ describe('routes', () => {
 
 describe('SimAPI.ping', () => {
   it('says why a device cannot ping', () => {
-    const { lab, sw1, pc1, pc2 } = oneLan();
+    const { lab, pc1, pc2 } = oneLan();
     const { engine, sim } = simulate(lab.topology);
     engine.applyPatch({ devices: { [pc2]: { ...lab.device(pc2), powered: false } }, links: {} });
     const options = { count: 1, timeoutMs: 1000 };
 
-    expect(sim.ping(sw1, ip('192.168.1.10'), options, () => {})).toEqual({
+    expect(sim.ping('dev_gone' as DeviceId, ip('192.168.1.10'), options, () => {})).toEqual({
       ok: false,
-      error: 'unsupported',
+      error: 'unknown-device',
     });
     expect(sim.ping(pc2, ip('192.168.1.10'), options, () => {})).toEqual({
       ok: false,
