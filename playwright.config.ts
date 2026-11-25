@@ -10,6 +10,8 @@ export default defineConfig({
   use: {
     baseURL: `http://localhost:${port}/tracer/`,
     trace: 'retain-on-failure',
+    // Tests load the network as a first visit would. pwa.spec.ts turns the service worker on.
+    serviceWorkers: 'block',
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
   webServer: {
