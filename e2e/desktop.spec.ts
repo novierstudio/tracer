@@ -13,7 +13,7 @@ type DevWindow = {
         topology: { devices: Record<string, { config: { ipv4?: unknown } } | undefined> };
       };
     };
-    parseTopology(input: unknown): { ok: true; value: unknown } | { ok: false; error: unknown };
+    loadLab(input: unknown): void;
   };
 };
 
@@ -95,9 +95,7 @@ async function openLab(page: Page) {
   await page.goto('./');
   await page.evaluate((topology) => {
     const { tracer } = window as unknown as DevWindow;
-    const parsed = tracer.parseTopology(topology);
-    if (!parsed.ok) throw new Error(JSON.stringify(parsed.error));
-    tracer.editorStore.getState().load(parsed.value);
+    tracer.loadLab(topology);
   }, LAB);
 }
 

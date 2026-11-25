@@ -9,7 +9,7 @@ type PingEvent = { kind: string; from?: string; ttl?: number; received?: number 
 type DevWindow = {
   __TRACER_DEV__?: boolean;
   tracer: {
-    parseTopology(input: unknown): { ok: true; value: unknown } | { ok: false; error: unknown };
+    loadLab(input: unknown): void;
     editorStore: { getState(): { load(topology: unknown): void } };
   };
   tracerSim: {
@@ -150,9 +150,7 @@ async function openLab(page: Page) {
   await expect(page.getByRole('contentinfo').getByRole('status')).toHaveText('Engine ready');
   await page.evaluate((topology) => {
     const { tracer } = window as unknown as DevWindow;
-    const parsed = tracer.parseTopology(topology);
-    if (!parsed.ok) throw new Error(JSON.stringify(parsed.error));
-    tracer.editorStore.getState().load(parsed.value);
+    tracer.loadLab(topology);
   }, LAB);
 }
 

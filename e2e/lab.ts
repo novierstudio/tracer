@@ -16,7 +16,7 @@ type DevWindow = {
         };
       };
     };
-    parseTopology(input: unknown): { ok: true; value: unknown } | { ok: false; error: unknown };
+    loadLab(input: unknown): void;
   };
 };
 
@@ -125,9 +125,7 @@ export async function openLab(page: Page) {
   // Through the app's own parser, as opening a saved file does, so schema defaults apply.
   await page.evaluate((topology) => {
     const { tracer } = window as unknown as DevWindow;
-    const parsed = tracer.parseTopology(topology);
-    if (!parsed.ok) throw new Error(JSON.stringify(parsed.error));
-    tracer.editorStore.getState().load(parsed.value);
+    tracer.loadLab(topology);
   }, LAB);
 }
 
