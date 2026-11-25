@@ -1,6 +1,6 @@
 import { KeyboardIcon } from 'lucide-react';
 import { SaveStatus } from '@/features/files/SaveStatus';
-import { EngineStatus } from '@/features/simulation/EngineStatus';
+import { EngineStatus, SimulationStatus } from '@/features/simulation/EngineStatus';
 import { useEditor } from '@/model/react';
 import { cn } from '@/ui/cn';
 import type { HelpDialog } from './HelpDialogs';
@@ -34,7 +34,7 @@ export function StatusBar({ mode, onOpenHelp, inert }: StatusBarProps) {
           aria-hidden
           className={cn('size-1.5 rounded-full', mode === 'realtime' ? 'bg-ok' : 'bg-warn')}
         />
-        {mode === 'realtime' ? 'Realtime' : 'Simulation · paused'}
+        {mode === 'realtime' ? 'Realtime' : <SimulationStatus />}
       </span>
       <LabCounts />
       <EngineStatus />

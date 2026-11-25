@@ -1,3 +1,4 @@
+import { useSimulation } from './store';
 import { useEngine, type EngineState } from './useEngine';
 
 const LABEL: Record<EngineState, string> = {
@@ -13,4 +14,11 @@ export function EngineStatus() {
       {LABEL[state]}
     </span>
   );
+}
+
+/** "Simulation · paused", or the play speed while it plays. */
+export function SimulationStatus() {
+  const playing = useSimulation((state) => state.playing);
+  const speed = useSimulation((state) => state.speed);
+  return <>Simulation · {playing ? `playing ${speed}×` : 'paused'}</>;
 }

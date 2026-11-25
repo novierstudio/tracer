@@ -12,6 +12,8 @@ import { InspectorPanel } from '@/features/inspector/InspectorPanel';
 import { consoleRequests } from '@/features/inspector/requests';
 import { PalettePanel, type PaletteSection } from '@/features/palette/PalettePanel';
 import { BottomPanel } from '@/features/simulation/BottomPanel';
+import { simulation } from '@/features/simulation/controller';
+import { useSimulation } from '@/features/simulation/store';
 import { Button } from '@/ui/button';
 import { cn } from '@/ui/cn';
 import { Dialog, SheetContent } from '@/ui/dialog';
@@ -92,7 +94,7 @@ function isEditable(target: EventTarget | null) {
 
 export function Shell() {
   const docked = useMediaQuery(DOCKED_QUERY);
-  const [mode, setMode] = useState<Mode>('realtime');
+  const mode = useSimulation((state) => state.mode);
   const [focus, setFocus] = useState(false);
   const [drawer, setDrawer] = useState<SidePanel | null>(null);
   const [section, setSection] = useState<PaletteSection>('devices');
@@ -121,7 +123,7 @@ export function Shell() {
     docked ? docks[side].toggle() : setDrawer((open) => (open === side ? null : side));
 
   const changeMode = (next: Mode) => {
-    setMode(next);
+    simulation.setMode(next);
     if (next === 'simulation') bottom.expand();
   };
 
