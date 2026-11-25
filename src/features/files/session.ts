@@ -311,18 +311,7 @@ export function createFileSession({
     },
     saveAs,
 
-    // The model has no lab-rename command yet. `setState` still goes through undo history.
-    rename(name: string) {
-      const trimmed = name.trim() || DEFAULT_LAB_NAME;
-      const { topology } = store.getState();
-      if (trimmed === topology.meta.name) return;
-      store.setState({
-        topology: {
-          ...topology,
-          meta: { ...topology.meta, name: trimmed, updatedAt: now().toISOString() },
-        },
-      });
-    },
+    rename: (name: string) => store.getState().renameLab(name.trim() || DEFAULT_LAB_NAME),
 
     dismissNotice: () => state.setState({ notice: undefined }),
     dismissProblem: () => state.setState({ problem: undefined }),
