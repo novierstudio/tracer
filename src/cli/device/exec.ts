@@ -1,4 +1,5 @@
-import { keyword } from '../params';
+import type { Ipv4Address } from '../../model';
+import { ipv4, keyword, num, type Segment } from '../params';
 import { defineCommand } from '../tree';
 import type { DeviceContext } from './context';
 
@@ -25,8 +26,54 @@ export function formatClock(time: Date, authoritative: boolean): string {
   return `${authoritative ? '' : '*'}${clock} UTC ${date}`;
 }
 
+const PING_OFFLINE = ['% The simulation is not running, so there is nothing to ping through.'];
+
+/** IOS sends 5 echoes and waits 2 seconds for each, unless told otherwise. */
+const PING_DEFAULTS = { count: 5, seconds: 2 };
+
+interface PingArgs {
+  readonly target: Ipv4Address;
+  readonly count?: number;
+  readonly seconds?: number;
+}
+
+const ping = keyword('ping', 'Send echo messages');
+const target = ipv4('target', 'Ping destination address');
+const repeat = [
+  keyword('repeat', 'specify repeat count'),
+  num('count', 1, 2147483647, 'Repeat count'),
+] as const;
+const timeout = [
+  keyword('timeout', 'specify timeout interval'),
+  num('seconds', 0, 3600, 'Timeout in seconds'),
+] as const;
+
+/** `ping <ip> [repeat N] [timeout S]`, the options in either order. */
+function pingCommand(options: readonly Segment[]) {
+  return command({
+    modes: EXEC,
+    path: [ping, target, ...options],
+    run: (args, ctx) => {
+      const {
+        target,
+        count = PING_DEFAULTS.count,
+        seconds = PING_DEFAULTS.seconds,
+      } = args as PingArgs;
+      // The engine needs a timeout above zero; IOS's `timeout 0` gives up at once.
+      const timeoutMs = Math.max(seconds * 1000, 1);
+      ctx.stream({ kind: 'ping', target, options: { count, timeoutMs } });
+      return PING_OFFLINE;
+    },
+  });
+}
+
 /** EXEC commands that read the session or the simulation rather than the config. */
 export const execCommands = [
+  pingCommand([]),
+  pingCommand(repeat),
+  pingCommand(timeout),
+  pingCommand([...repeat, ...timeout]),
+  pingCommand([...timeout, ...repeat]),
   command({
     modes: EXEC,
     path: [show, keyword('history', 'Information about Terminal history')],

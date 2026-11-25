@@ -24,7 +24,7 @@ import type {
   SwitchDevice,
 } from './context';
 import { applyModifier, pipeComplete, pipeHelp, readPipe } from './pipe';
-import { bindQuery, mapQuery, type EngineQuery } from './query';
+import { bindQuery, mapQuery, type EngineQuery, type EngineStream } from './query';
 import { blankLine } from './show';
 
 const ROUTER_TREE = buildTree<RouterContext>(routerCommands);
@@ -52,6 +52,8 @@ interface Step<D extends IosDevice> {
   readonly outcome: Outcome;
   /** Set by a show command that reads live state. `output` is what it prints without it. */
   readonly query?: EngineQuery;
+  /** Set by a command whose output streams from the simulation. */
+  readonly stream?: EngineStream;
 }
 
 const DONE: Outcome = { kind: 'done' };
@@ -135,7 +137,12 @@ function stepWith<D extends IosDevice>(
     return { device, state, output: [], outcome: { kind: 'invalid', error: parsed.error } };
   }
 
-  const effects: { rejected?: string; asked?: Pending; query?: EngineQuery } = {};
+  const effects: {
+    rejected?: string;
+    asked?: Pending;
+    query?: EngineQuery;
+    stream?: EngineStream;
+  } = {};
   let output: readonly string[] = [];
   const next = produce(device, (draft: Draft<D>) => {
     const context = {
@@ -156,6 +163,7 @@ function stepWith<D extends IosDevice>(
         effects.query = bindQuery(kind, render, device);
         return render(undefined, device);
       },
+      stream: (stream) => void (effects.stream = stream),
     } satisfies DeviceContext;
     output = parsed.execute(context as ContextFor<D>);
   });
@@ -170,13 +178,14 @@ function stepWith<D extends IosDevice>(
       outcome: DONE,
     };
   }
-  const { query } = effects;
+  const { query, stream } = effects;
   return {
     device: next,
     state: { mode: parsed.mode },
     output,
     outcome: DONE,
     ...(query && { query }),
+    ...(stream && { stream }),
   };
 }
 
@@ -329,6 +338,11 @@ export interface SessionResult {
    * simulation answers it and prints that output in place of `output`.
    */
   readonly query?: EngineQuery;
+  /**
+   * Set by a command whose output streams from the simulation, such as `ping`. A terminal that can
+   * reach the simulation opens it and prints its pieces in place of `output`.
+   */
+  readonly stream?: EngineStream;
 }
 
 /**
@@ -391,7 +405,8 @@ export function createDeviceSession(start: SessionState = { mode: USER_EXEC }): 
       switch (result.outcome.kind) {
         case 'done': {
           if (piped.kind === 'none') {
-            return { output: result.output, update, ...(result.query && { query: result.query }) };
+            const { output, query, stream } = result;
+            return { output, update, ...(query && { query }), ...(stream && { stream }) };
           }
           const filter = (lines: readonly string[]) => applyModifier(piped.modifier, lines);
           const query = result.query && mapQuery(result.query, filter);

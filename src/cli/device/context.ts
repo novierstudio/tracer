@@ -1,6 +1,6 @@
 import type { Draft } from 'immer';
 import type { Device } from '../../model';
-import type { EngineQueryKind, Render } from './query';
+import type { EngineQueryKind, EngineStream, Render } from './query';
 
 export type IosDevice = Extract<Device, { kind: 'router' | 'switch' }>;
 export type RouterDevice = Extract<Device, { kind: 'router' }>;
@@ -31,6 +31,11 @@ export interface DeviceContext {
    * config-only output, `render(undefined)`, for the handler to return.
    */
   query<K extends EngineQueryKind>(kind: K, render: Render<K>): readonly string[];
+  /**
+   * Marks the command as one whose output streams from the simulation, such as `ping`. The
+   * handler returns what to print when there is no simulation.
+   */
+  stream(stream: EngineStream): void;
 }
 
 export interface RouterContext extends DeviceContext {
