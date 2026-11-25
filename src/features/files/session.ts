@@ -3,7 +3,8 @@ import { emptyTopology, parseTopology, serializeTopology, type Topology } from '
 import { editorStore, type EditorStore } from '@/model/store';
 import { createAutosave, type SaveStatus } from './autosave';
 import * as browserIo from './fileAccess';
-import { importFile } from './importers';
+import type { ImportReport } from '@/importers/pkt/report';
+import { importFile, type FileProblem, type ImportStage } from './importers';
 import {
   newLabId,
   openLabStorage,
@@ -15,7 +16,10 @@ import {
 export const RECENT_LIMIT = 5;
 export const DEFAULT_LAB_NAME = 'Untitled lab';
 
-export type FileProblem = { title: string; message: string };
+/** A file import that shows progress, then a report to confirm before the lab opens. */
+export type ImportFlow =
+  | { step: 'progress'; fileName: string; stage: ImportStage }
+  | { step: 'review'; fileName: string; report: ImportReport; topology: Topology };
 
 export type FilesState = {
   status: SaveStatus;
@@ -26,6 +30,7 @@ export type FilesState = {
   // Blocking, such as a file that failed validation.
   problem: FileProblem | undefined;
   confirmingNew: boolean;
+  importing: ImportFlow | undefined;
 };
 
 type FileIo = Pick<
@@ -58,6 +63,7 @@ export function createFileSession({
     notice: undefined,
     problem: undefined,
     confirmingNew: false,
+    importing: undefined,
   }));
 
   let storage: Promise<LabStorage> | undefined;
@@ -71,6 +77,8 @@ export function createFileSession({
   // True while this session replaces the topology itself, so the change is not autosaved.
   let loading = false;
   let restoring: Promise<void> | undefined;
+  // The import in progress. Opening another file or cancelling aborts it.
+  let currentImport: AbortController | undefined;
 
   const refreshRecents = async () => {
     try {
@@ -158,17 +166,50 @@ export function createFileSession({
   };
 
   const openFile = async (file: File, fileHandle?: FileSystemFileHandle) => {
-    const result = await importFile(file);
+    currentImport?.abort();
+    const controller = new AbortController();
+    currentImport = controller;
+    const fileName = file.name;
+    const result = await importFile(file, {
+      signal: controller.signal,
+      // Stage messages can arrive after the result, so only a running import takes them.
+      onStage: (stage) => {
+        if (currentImport === controller) {
+          state.setState({ importing: { step: 'progress', fileName, stage } });
+        }
+      },
+    });
+    if (controller.signal.aborted) return;
+    currentImport = undefined;
     if (!result.ok) {
-      state.setState({ problem: { title: `Couldn't open ${file.name}`, message: result.error } });
+      state.setState({ importing: undefined, problem: result.error });
       return;
     }
+    const { topology, report } = result.value;
+    if (report) {
+      state.setState({ importing: { step: 'review', fileName, report, topology } });
+      return;
+    }
+    state.setState({ importing: undefined });
     // Only a native file can be saved back in place; an imported format keeps its original.
-    const writable = file.name.toLowerCase().endsWith(browserIo.NATIVE_EXTENSION);
-    await switchTo(newLabId(), result.value, {
+    const writable = fileName.toLowerCase().endsWith(browserIo.NATIVE_EXTENSION);
+    await switchTo(newLabId(), topology, {
       persist: true,
       file: writable ? fileHandle : undefined,
     });
+  };
+
+  const confirmImport = async () => {
+    const flow = state.getState().importing;
+    if (flow?.step !== 'review') return;
+    state.setState({ importing: undefined });
+    await switchTo(newLabId(), flow.topology, { persist: true });
+  };
+
+  const cancelImport = () => {
+    currentImport?.abort();
+    currentImport = undefined;
+    state.setState({ importing: undefined });
   };
 
   const saveAs = async () => {
@@ -238,6 +279,8 @@ export function createFileSession({
       }
     },
     openFile,
+    confirmImport,
+    cancelImport,
     async openRecent(lab: LabSummary) {
       try {
         const record = await (await getStorage()).get(lab.id);

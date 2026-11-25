@@ -1,4 +1,21 @@
+import type { PktStage } from '@/importers/pkt/mapper';
+import type { ImportReport } from '@/importers/pkt/report';
 import { err, parseTopologyJson, type Result, type Topology } from '@/model';
+import { packetTracer } from './pktImporter';
+
+/** What the import dialog shows while a file is read. */
+export type ImportStage = 'reading' | PktStage;
+
+/** A blocking error, shown in a dialog. `detail` is technical text, shown verbatim. */
+export type FileProblem = { title: string; message: string; detail?: string };
+
+/** A report means the user reviews what was imported before the lab opens. */
+export type ImportedLab = { topology: Topology; report?: ImportReport };
+
+export type ImportContext = {
+  onStage?: (stage: ImportStage) => void;
+  signal?: AbortSignal;
+};
 
 export type Importer = {
   description: string;
@@ -7,7 +24,7 @@ export type Importer = {
   extensions: readonly string[];
   // MIME type to extensions, for the browser's file picker.
   accept: Record<string, readonly string[]>;
-  read(file: Blob): Promise<Result<Topology, string>>;
+  read(file: File, context: ImportContext): Promise<Result<ImportedLab, FileProblem>>;
 };
 
 const tracerJson: Importer = {
@@ -16,12 +33,17 @@ const tracerJson: Importer = {
   accept: { 'application/json': ['.json'] },
   async read(file) {
     const result = parseTopologyJson(await file.text());
-    return result.ok ? result : err(result.error.message);
+    if (result.ok) return { ok: true, value: { topology: result.value } };
+    return err({
+      title: `Couldn't open ${file.name}`,
+      message: "It isn't a Tracer lab that this version can read.",
+      detail: result.error.message,
+    });
   },
 };
 
-// A new format (such as `.pkt`) plugs in by adding an entry here.
-export const IMPORTERS: readonly Importer[] = [tracerJson];
+// A new format plugs in by adding an entry here.
+export const IMPORTERS: readonly Importer[] = [tracerJson, packetTracer];
 
 export function findImporter(
   fileName: string,
@@ -39,19 +61,24 @@ export function findImporter(
   return best?.importer;
 }
 
+const anyOf = new Intl.ListFormat('en', { type: 'disjunction' });
+
 export async function importFile(
   file: File,
+  context: ImportContext = {},
   importers: readonly Importer[] = IMPORTERS,
-): Promise<Result<Topology, string>> {
+): Promise<Result<ImportedLab, FileProblem>> {
+  const title = `Couldn't open ${file.name}`;
   const importer = findImporter(file.name, importers);
   if (!importer) {
-    const known = importers.map((i) => i.extensions[0]).join(', ');
-    return err(`Tracer can't open this kind of file. Choose a ${known} file.`);
+    const known = anyOf.format(importers.flatMap((i) => i.extensions));
+    return err({ title, message: `Tracer can't open this kind of file. Choose a ${known} file.` });
   }
   try {
-    return await importer.read(file);
+    return await importer.read(file, context);
   } catch (error) {
-    return err(`The file could not be read: ${error instanceof Error ? error.message : error}`);
+    const detail = error instanceof Error ? error.message : String(error);
+    return err({ title, message: 'The file could not be read.', detail });
   }
 }
 
