@@ -215,6 +215,9 @@ importers:
       comlink:
         specifier: ^4.4.2
         version: 4.4.2
+      elkjs:
+        specifier: ^0.12.1
+        version: 0.12.1
       fast-xml-parser:
         specifier: ^5.12.1
         version: 5.12.1
@@ -1813,6 +1816,9 @@ packages:
 
   electron-to-chromium@1.5.493:
     resolution: {integrity: sha512-/Wto2sKd0EpepzMqwSP2il2TNc+rnBDF6k1poCvhRKpaSSD4sLGRBE+FydqHs2QwcW9cXKLVDqnauzJy1oByYw==}
+
+  elkjs@0.12.1:
+    resolution: {integrity: sha512-IhMYKHE4S2vtx0QrhBP3lYOIKDeIiJXBrdq9MGYkuB8ZHqhrBnHNfSUndjXFewrX1CPK8chwq+2NA0K0hliYuw==}
 
   enhanced-resolve@5.27.0:
     resolution: {integrity: sha512-Do6BB2xzlcc/odFg+XEYyneAx4T/WfywO71yw9ePS2tVfRsf7JVR4mUeELadIeHzixkzbG5DpluiEFPi2WGfYQ==}
@@ -4180,6 +4186,8 @@ snapshots:
   dom-accessibility-api@0.6.3: {}
 
   electron-to-chromium@1.5.493: {}
+
+  elkjs@0.12.1: {}
 
   enhanced-resolve@5.27.0:
     dependencies:

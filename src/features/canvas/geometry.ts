@@ -1,6 +1,9 @@
 /** Side of a device tile in flow units. A device's position is its tile centre. */
 export const TILE = 48;
 export const GRID = 16;
+
+/** The nearest grid line. `|| 0` turns -0 into 0, so snapped points compare and print cleanly. */
+export const snap = (value: number) => Math.round(value / GRID) * GRID || 0;
 /** Space between the tile and the hostname label under it. */
 export const LABEL_GAP = 6;
 
