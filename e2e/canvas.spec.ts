@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { gotoCanvas } from './lab';
 
 test.use({ viewport: { width: 1440, height: 900 } });
 
@@ -29,7 +30,7 @@ async function cable(page: Page, from: string, fromPort: string, to: string, toP
 }
 
 async function routerAndSwitch(page: Page) {
-  await page.goto('./');
+  await gotoCanvas(page);
   await dropDevice(page, 'Branch Router', 220, 180);
   await dropDevice(page, 'Access Switch 24', 520, 420);
 }

@@ -106,11 +106,17 @@ export const LAB = {
   annotations: {},
 };
 
+/** Opens the app and waits for the canvas, which loads after the shell. */
+export async function gotoCanvas(page: Page) {
+  await page.goto('./');
+  await expect(page.locator('.react-flow__pane')).toBeVisible();
+}
+
 export async function openLab(page: Page) {
   await page.addInitScript(() => {
     (window as unknown as DevWindow).__TRACER_DEV__ = true;
   });
-  await page.goto('./');
+  await gotoCanvas(page);
   // Through the app's own parser, as opening a saved file does, so schema defaults apply.
   await page.evaluate((topology) => {
     const { tracer } = window as unknown as DevWindow;
