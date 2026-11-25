@@ -2,16 +2,24 @@ import { temporal, type TemporalState } from 'zundo';
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import * as commands from './commands';
 import type {
+  AnnotationMove,
   CableChange,
   CommandResult,
   ConfigUpdate,
   DeviceSpec,
+  Elements,
   LinkSpec,
   Move,
 } from './commands';
-import { createIdSource, type DeviceId, type IdSource, type LinkId } from './ids';
+import {
+  createIdSource,
+  type AnnotationId,
+  type DeviceId,
+  type IdSource,
+  type LinkId,
+} from './ids';
 import { ok, type Result } from './result';
-import { emptyTopology, type Topology, type TopologyError } from './topology';
+import { emptyTopology, type Point, type Topology, type TopologyError } from './topology';
 import type { Hostname } from './values';
 
 export const HISTORY_LIMIT = 200;
@@ -31,6 +39,12 @@ export type EditorState = {
   removeLinks(ids: readonly LinkId[]): void;
   setLinkCable(change: CableChange): Result<void, TopologyError>;
   renameLab(name: string): void;
+  /** Ids, MACs and names must already be fresh: the batch goes in as given, or not at all. */
+  addElements(elements: Elements): Result<void, TopologyError>;
+  addNote(note: { position: Point; text: string }): Result<AnnotationId, TopologyError>;
+  editNote(edit: { annotation: AnnotationId; text: string }): Result<void, TopologyError>;
+  moveAnnotations(moves: readonly AnnotationMove[]): void;
+  removeAnnotations(ids: readonly AnnotationId[]): void;
   select(selection: Selection): void;
   beginGesture(): void;
   endGesture(): void;
@@ -117,6 +131,20 @@ export function createEditorStore({
           removeLinks: (linkIds) => commit(commands.removeLinks(get().topology, linkIds)),
           setLinkCable: (change) => apply(commands.setLinkCable(get().topology, change)),
           renameLab: (name) => commit(commands.renameLab(get().topology, { name, now: now() })),
+          addElements: (elements) => apply(commands.addElements(get().topology, elements)),
+          addNote: ({ position, text }) => {
+            const { topology } = get();
+            let id = ids.annotationId();
+            while (id in topology.annotations) id = ids.annotationId();
+            const result = commands.addAnnotation(topology, { id, kind: 'note', position, text });
+            if (!result.ok) return result;
+            commit(result.value);
+            return ok(id);
+          },
+          editNote: (edit) => apply(commands.editNote(get().topology, edit)),
+          moveAnnotations: (moves) => commit(commands.moveAnnotations(get().topology, moves)),
+          removeAnnotations: (annotationIds) =>
+            commit(commands.removeAnnotations(get().topology, annotationIds)),
           select: (selection) => set({ selection: pruneSelection(selection, get().topology) }),
           beginGesture: () => {
             if (gestureStart) return;
