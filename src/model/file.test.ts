@@ -111,6 +111,39 @@ describe('topology files', () => {
     expect(expectOk(parseTopologyJson(text))).toEqual(topology);
   });
 
+  it('fill the IOS fields that files written before they existed lack', () => {
+    const { topology, r1, sw } = richLab();
+    const document = JSON.parse(serializeTopology(topology));
+    const added = [
+      'virtualInterfaces',
+      'servicePasswordEncryption',
+      'domainLookup',
+      'lines',
+      'staticRoutes',
+    ];
+    for (const id of [r1.id, sw.id]) {
+      for (const field of added) delete document.devices[id].config[field];
+    }
+
+    const read = expectOk(parseTopology(document));
+
+    const router = read.devices[r1.id];
+    const routerConfig = router?.kind === 'router' ? router.config : undefined;
+    expect(routerConfig).toMatchObject({
+      virtualInterfaces: {},
+      servicePasswordEncryption: false,
+      domainLookup: true,
+      staticRoutes: [],
+    });
+    expect(routerConfig?.lines.aux.login).toBe('none');
+    expect(routerConfig?.lines.vty).toHaveLength(16);
+    const switchDevice = read.devices[sw.id];
+    expect(switchDevice?.kind === 'switch' && Object.keys(switchDevice.config.lines)).toEqual([
+      'console',
+      'vty',
+    ]);
+  });
+
   it('report text that is not JSON', () => {
     const result = parseTopologyJson('{"version": 1,');
 

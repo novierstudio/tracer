@@ -126,6 +126,20 @@ describe('createDevice', () => {
     });
     expect(sw.kind === 'switch' && sw.config.vlans).toEqual({ 1: { name: 'default' } });
   });
+
+  it('ships a switch with Vlan1 shut down, and vty lines that ask for a password', () => {
+    const { r1, sw } = buildLab();
+
+    expect(sw.kind === 'switch' && sw.config.virtualInterfaces).toEqual({
+      Vlan1: { shutdown: true },
+    });
+    expect(r1.kind === 'router' && r1.config.virtualInterfaces).toEqual({});
+    for (const device of [r1, sw]) {
+      if (device.kind !== 'router' && device.kind !== 'switch') throw new Error('Not IOS');
+      expect(device.config.lines.console.login).toBe('none');
+      expect(device.config.lines.vty.every((line) => line.login === 'password')).toBe(true);
+    }
+  });
 });
 
 describe('removeDevices', () => {
