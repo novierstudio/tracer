@@ -1,5 +1,6 @@
 import { ChevronDownIcon, ListIcon, TerminalIcon } from 'lucide-react';
 import { useState } from 'react';
+import { HostPrompt } from '@/features/desktop/HostPrompt';
 import { DeviceTerminal } from '@/features/terminal/Terminal';
 import type { DeviceId } from '@/model';
 import { useEditor } from '@/model/react';
@@ -16,12 +17,11 @@ type Tab = 'events' | 'terminal';
 // The shell unmounts this panel while it is collapsed; reopening it returns to the last tab.
 let lastTab: Tab = 'events';
 
-/** The one selected router or switch, whose console the Terminal tab shows. */
+/** The one selected device, whose console or Command Prompt the Terminal tab shows. */
 function consoleDevice({ topology, selection }: EditorState) {
   const [id, ...others] = selection.devices;
   if (!id || others.length > 0 || selection.links.length > 0) return undefined;
-  const device = topology.devices[id];
-  return device?.kind === 'router' || device?.kind === 'switch' ? device : undefined;
+  return topology.devices[id];
 }
 
 type BottomPanelProps = { onCollapse: () => void; collapseShortcut: string };
@@ -60,7 +60,8 @@ export function BottomPanel({ onCollapse, collapseShortcut }: BottomPanelProps) 
           </TabsList>
           {tab === 'terminal' && device && (
             <p className="ml-1 min-w-0 truncate text-xs text-fg-3">
-              {device.config.hostname} console
+              {device.config.hostname}{' '}
+              {device.kind === 'pc' || device.kind === 'server' ? 'Command Prompt' : 'console'}
             </p>
           )}
           <Tooltip label="Hide bottom panel" shortcut={collapseShortcut}>
@@ -81,12 +82,16 @@ export function BottomPanel({ onCollapse, collapseShortcut }: BottomPanelProps) 
         </TabsContent>
         {device ? (
           <TabsContent value="terminal" className="pr-1 pb-2 pl-3">
-            <DeviceTerminal device={device.id} autoFocus={focusFor === device.id} />
+            {device.kind === 'pc' || device.kind === 'server' ? (
+              <HostPrompt device={device.id} autoFocus={focusFor === device.id} />
+            ) : (
+              <DeviceTerminal device={device.id} autoFocus={focusFor === device.id} />
+            )}
           </TabsContent>
         ) : (
           <TabsContent value="terminal" className={emptyClass}>
-            <p className="font-medium text-fg-1">Select a router or switch</p>
-            <p>Its IOS console opens here, and in the CLI tab of the inspector.</p>
+            <p className="font-medium text-fg-1">Select a device</p>
+            <p>A router or switch console, or a PC&apos;s Command Prompt, opens here.</p>
           </TabsContent>
         )}
       </Tabs>
