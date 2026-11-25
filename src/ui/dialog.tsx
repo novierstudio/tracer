@@ -43,6 +43,10 @@ export function DialogContent({
           className,
         )}
         {...(description ? {} : { 'aria-describedby': undefined })}
+        onOpenAutoFocus={(event) => {
+          event.preventDefault();
+          (event.currentTarget as HTMLElement | null)?.focus();
+        }}
         {...props}
       >
         <div className="flex items-start justify-between gap-4">

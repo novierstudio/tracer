@@ -1,19 +1,7 @@
 import { lazy, Suspense, type ComponentType } from 'react';
 import { TooltipProvider } from '@/ui/tooltip';
-import iconUrl from '../../assets/icon.svg';
 import { useRoute, type Route } from './router';
-
-function Home() {
-  return (
-    <main className="grid min-h-full place-content-center justify-items-center gap-3 p-4 text-center">
-      <img src={iconUrl} width={96} height={96} alt="" />
-      <h1 className="text-4xl font-semibold">Tracer</h1>
-      <p className="text-fg-2">
-        Tracer is an independent project and is not affiliated with or endorsed by Cisco Systems.
-      </p>
-    </main>
-  );
-}
+import { Shell } from './shell/Shell';
 
 function NotFound() {
   return (
@@ -27,7 +15,7 @@ function NotFound() {
 }
 
 const PAGES: Record<Route, ComponentType> = {
-  '/': Home,
+  '/': Shell,
   '/dev/ui': lazy(() => import('./dev/UiGallery')),
   'not-found': NotFound,
 };
