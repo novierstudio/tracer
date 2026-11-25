@@ -74,15 +74,22 @@ function inflate(payload: Uint8Array, format: PktFormat): DecryptResult {
   }
 }
 
-export function decryptPkt(bytes: Uint8Array): DecryptResult {
+/** `onInflate` runs once the container is open, before stage 4, so callers can report progress. */
+export function decryptPkt(bytes: Uint8Array, onInflate?: () => void): DecryptResult {
   if (bytes.length < MIN_LENGTH) {
     return { ok: false, error: { kind: 'too-short', length: bytes.length } };
   }
   const opened = eaxOpen(CIPHER, NONCE, NO_HEADER, unscramble(bytes));
-  if (opened) return inflate(xorWithRemaining(opened), 'modern');
+  if (opened) {
+    onInflate?.();
+    return inflate(xorWithRemaining(opened), 'modern');
+  }
   // The tag is the authoritative check, so legacy is only tried once it fails.
   const legacy = xorWithRemaining(bytes);
-  if (hasZlibHeader(legacy)) return inflate(legacy, 'legacy');
+  if (hasZlibHeader(legacy)) {
+    onInflate?.();
+    return inflate(legacy, 'legacy');
+  }
   return { ok: false, error: { kind: 'bad-tag' } };
 }
 
