@@ -175,13 +175,25 @@ function usePduClicks(canvas: RefObject<HTMLCanvasElement | null>) {
   }, [step, canvas]);
 }
 
+/** The top-most chip under a point in canvas pixels, if any. */
+function chipAt(drawn: readonly Drawn[], x: number, y: number): Drawn | undefined {
+  for (let index = drawn.length - 1; index >= 0; index--) {
+    const chip = drawn[index]!;
+    if (Math.abs(x - chip.x) <= chip.width / 2 + 2 && Math.abs(y - chip.y) <= chip.height / 2 + 2)
+      return chip;
+  }
+  return undefined;
+}
+
 /**
  * Packets on the canvas: one 2D canvas over React Flow's edges and nodes, drawn in screen space
  * from the viewport transform every animation frame, so it follows pan and zoom for free.
- * Mount it inside <ReactFlow>.
+ * Hovering a drop's cross names the reason, and in Simulation mode clicking a chip selects its
+ * event. Mount it inside <ReactFlow>.
  */
 export function TrafficOverlay() {
   const canvas = useRef<HTMLCanvasElement>(null);
+  const tip = useRef<HTMLDivElement>(null);
   const flowStore = useStoreApi();
   const flow = useReactFlow();
   const focusRequest = useSimulation((state) => state.focusRequest);
@@ -191,8 +203,9 @@ export function TrafficOverlay() {
 
   useEffect(() => {
     const element = canvas.current;
+    const tooltip = tip.current;
     const ctx = element?.getContext('2d');
-    if (!element || !ctx) return;
+    if (!element || !tooltip || !ctx) return;
     // React Flow's root carries the theme class the tokens re-scope on.
     const themed = element.closest<HTMLElement>('.react-flow') ?? element;
     const device = (id: DeviceId) => devicePlace(flowStore, id);
@@ -230,6 +243,55 @@ export function TrafficOverlay() {
       };
     }
 
+    // The pointer, in canvas pixels, while it is over the canvas.
+    let pointer: { x: number; y: number } | undefined;
+    const pointAt = (event: MouseEvent) => {
+      const box = element.getBoundingClientRect();
+      return { x: event.clientX - box.left, y: event.clientY - box.top };
+    };
+    const selectable = () => {
+      const { mode, pdu } = simulationStore.getState();
+      return mode === 'simulation' && pdu.step === 'off';
+    };
+    const chipUnder = (event: MouseEvent) => {
+      const { x, y } = pointAt(event);
+      return selectable() ? chipAt(drawnLast, x, y) : undefined;
+    };
+    const track = (event: PointerEvent) => (pointer = pointAt(event));
+    const leave = () => (pointer = undefined);
+    // Clicking a chip selects its event, and must not also select, drag or pan what is under it.
+    const swallow = (event: MouseEvent) => {
+      if (chipUnder(event)) event.stopPropagation();
+    };
+    const select = (event: MouseEvent) => {
+      const hit = chipUnder(event);
+      if (!hit) return;
+      event.stopPropagation();
+      simulation.select(hit.chip.event.id);
+    };
+    themed.addEventListener('pointermove', track, true);
+    themed.addEventListener('pointerleave', leave);
+    themed.addEventListener('pointerdown', swallow, true);
+    themed.addEventListener('mousedown', swallow, true);
+    themed.addEventListener('click', select, true);
+
+    // What the pointer rests on, so the cursor and the reason change only when that does.
+    let hovered: Drawn | undefined;
+    const hover = (next: Drawn | undefined) => {
+      if (next?.chip !== hovered?.chip) {
+        if (next && selectable()) themed.dataset.chipHover = '';
+        else delete themed.dataset.chipHover;
+        const reason = next?.chip.drop;
+        tooltip.hidden = reason === undefined;
+        if (reason !== undefined) tooltip.textContent = reason;
+      }
+      hovered = next;
+      if (next?.chip.drop !== undefined) {
+        const top = next.y - next.height / 2 - 6;
+        tooltip.style.transform = `translate(${next.x}px, ${top}px) translate(-50%, -100%)`;
+      }
+    };
+
     let painted = false;
     let shown = -1;
     let frame = requestAnimationFrame(function paint() {
@@ -251,6 +313,7 @@ export function TrafficOverlay() {
         if (painted) ctx.clearRect(0, 0, element.width, element.height);
         painted = false;
         drawnLast = [];
+        hover(undefined);
         if (shown !== 0) element.dataset.chips = String((shown = 0));
         return;
       }
@@ -294,6 +357,7 @@ export function TrafficOverlay() {
       }
       painted = true;
       drawnLast = drawn;
+      hover(pointer && chipAt(drawn, pointer.x, pointer.y));
       if (shown !== drawn.length) element.dataset.chips = String((shown = drawn.length));
     });
 
@@ -301,6 +365,12 @@ export function TrafficOverlay() {
       cancelAnimationFrame(frame);
       theme.disconnect();
       sizes.disconnect();
+      themed.removeEventListener('pointermove', track, true);
+      themed.removeEventListener('pointerleave', leave);
+      themed.removeEventListener('pointerdown', swallow, true);
+      themed.removeEventListener('mousedown', swallow, true);
+      themed.removeEventListener('click', select, true);
+      delete themed.dataset.chipHover;
       delete window.tracerTraffic;
     };
   }, [flowStore]);
@@ -329,6 +399,12 @@ export function TrafficOverlay() {
         aria-hidden
         data-testid="traffic-overlay"
         className="pointer-events-none absolute inset-0 z-[4] size-full"
+      />
+      <div
+        ref={tip}
+        role="tooltip"
+        hidden
+        className="pointer-events-none absolute top-0 left-0 z-[5] animate-fade-in rounded-md bg-fg-1 px-2 py-1 text-xs font-medium whitespace-nowrap text-surface-1 shadow-pop"
       />
       <PduHint />
     </>
