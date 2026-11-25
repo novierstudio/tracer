@@ -29,3 +29,7 @@ Before the first `pnpm test:e2e`, install the browser with `pnpm exec playwright
 ## Disclaimer
 
 Tracer is an independent project. It is not affiliated with or endorsed by Cisco Systems. Cisco and Packet Tracer are trademarks of Cisco Systems, Inc.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
