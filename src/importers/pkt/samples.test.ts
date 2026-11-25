@@ -1,4 +1,3 @@
-/// <reference types="node" />
 // Decrypts real Packet Tracer files. Point PKT_SAMPLES_DIR at a folder of .pkt / .pka files to
 // run it, and set PKT_XML_OUT to also write each decrypted XML there. Skipped when unset.
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
