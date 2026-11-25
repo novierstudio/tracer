@@ -1,0 +1,530 @@
+{
+  "version": 1,
+  "meta": {
+    "name": "Static routing",
+    "createdAt": "2026-11-25T00:00:00.000Z",
+    "updatedAt": "2026-11-25T00:00:00.000Z"
+  },
+  "devices": {
+    "dev_srsR1": {
+      "id": "dev_srsR1",
+      "model": "router-2g2s",
+      "position": {
+        "x": 232,
+        "y": 232
+      },
+      "powered": true,
+      "ports": [
+        {
+          "kind": "gigabitEthernet",
+          "id": "GigabitEthernet0/0",
+          "mac": "5a:14:b9:f8:ef:0d"
+        },
+        {
+          "kind": "gigabitEthernet",
+          "id": "GigabitEthernet0/1",
+          "mac": "ae:69:4e:8c:0a:9f"
+        },
+        {
+          "kind": "serial",
+          "id": "Serial0/0/0"
+        },
+        {
+          "kind": "serial",
+          "id": "Serial0/0/1"
+        }
+      ],
+      "kind": "router",
+      "config": {
+        "hostname": "R1",
+        "virtualInterfaces": {},
+        "servicePasswordEncryption": false,
+        "domainLookup": true,
+        "unknownLines": [],
+        "interfaces": {
+          "GigabitEthernet0/0": {
+            "shutdown": false,
+            "ipv4": {
+              "address": "192.168.1.1",
+              "prefixLength": 24
+            }
+          },
+          "GigabitEthernet0/1": {
+            "shutdown": true
+          },
+          "Serial0/0/0": {
+            "shutdown": false,
+            "ipv4": {
+              "address": "10.0.0.1",
+              "prefixLength": 30
+            },
+            "clockRate": 64000
+          },
+          "Serial0/0/1": {
+            "shutdown": true
+          }
+        },
+        "subinterfaces": {},
+        "lines": {
+          "console": {
+            "login": "none",
+            "transportInput": {
+              "ssh": true,
+              "telnet": true
+            }
+          },
+          "aux": {
+            "login": "none",
+            "transportInput": {
+              "ssh": true,
+              "telnet": true
+            }
+          },
+          "vty": [
+            {
+              "login": "password",
+              "transportInput": {
+                "ssh": true,
+                "telnet": true
+              }
+            },
+            {
+              "login": "password",
+              "transportInput": {
+                "ssh": true,
+                "telnet": true
+              }
+            },
+            {
+              "login": "password",
+              "transportInput": {
+                "ssh": true,
+                "telnet": true
+              }
+            },
+            {
+              "login": "password",
+              "transportInput": {
+                "ssh": true,
+                "telnet": true
+              }
+            },
+            {
+              "login": "password",
+              "transportInput": {
+                "ssh": true,
+                "telnet": true
+              }
+            },
+            {
+              "login": "password",
+              "transportInput": {
+                "ssh": true,
+                "telnet": true
+              }
+            },
+            {
+              "login": "password",
+              "transportInput": {
+                "ssh": true,
+                "telnet": true
+              }
+            },
+            {
+              "login": "password",
+              "transportInput": {
+                "ssh": true,
+                "telnet": true
+              }
+            },
+            {
+              "login": "password",
+              "transportInput": {
+                "ssh": true,
+                "telnet": true
+              }
+            },
+            {
+              "login": "password",
+              "transportInput": {
+                "ssh": true,
+                "telnet": true
+              }
+            },
+            {
+              "login": "password",
+              "transportInput": {
+                "ssh": true,
+                "telnet": true
+              }
+            },
+            {
+              "login": "password",
+              "transportInput": {
+                "ssh": true,
+                "telnet": true
+              }
+            },
+            {
+              "login": "password",
+              "transportInput": {
+                "ssh": true,
+                "telnet": true
+              }
+            },
+            {
+              "login": "password",
+              "transportInput": {
+                "ssh": true,
+                "telnet": true
+              }
+            },
+            {
+              "login": "password",
+              "transportInput": {
+                "ssh": true,
+                "telnet": true
+              }
+            },
+            {
+              "login": "password",
+              "transportInput": {
+                "ssh": true,
+                "telnet": true
+              }
+            }
+          ]
+        },
+        "staticRoutes": [
+          {
+            "prefix": {
+              "address": "192.168.2.0",
+              "prefixLength": 24
+            },
+            "nextHop": {
+              "kind": "address",
+              "address": "10.0.0.2"
+            }
+          }
+        ]
+      }
+    },
+    "dev_srsR2": {
+      "id": "dev_srsR2",
+      "model": "router-2g2s",
+      "position": {
+        "x": 616,
+        "y": 232
+      },
+      "powered": true,
+      "ports": [
+        {
+          "kind": "gigabitEthernet",
+          "id": "GigabitEthernet0/0",
+          "mac": "46:78:77:6e:42:f5"
+        },
+        {
+          "kind": "gigabitEthernet",
+          "id": "GigabitEthernet0/1",
+          "mac": "b2:ad:da:84:d3:40"
+        },
+        {
+          "kind": "serial",
+          "id": "Serial0/0/0"
+        },
+        {
+          "kind": "serial",
+          "id": "Serial0/0/1"
+        }
+      ],
+      "kind": "router",
+      "config": {
+        "hostname": "R2",
+        "virtualInterfaces": {},
+        "servicePasswordEncryption": false,
+        "domainLookup": true,
+        "unknownLines": [],
+        "interfaces": {
+          "GigabitEthernet0/0": {
+            "shutdown": false,
+            "ipv4": {
+              "address": "192.168.2.1",
+              "prefixLength": 24
+            }
+          },
+          "GigabitEthernet0/1": {
+            "shutdown": true
+          },
+          "Serial0/0/0": {
+            "shutdown": false,
+            "ipv4": {
+              "address": "10.0.0.2",
+              "prefixLength": 30
+            }
+          },
+          "Serial0/0/1": {
+            "shutdown": true
+          }
+        },
+        "subinterfaces": {},
+        "lines": {
+          "console": {
+            "login": "none",
+            "transportInput": {
+              "ssh": true,
+              "telnet": true
+            }
+          },
+          "aux": {
+            "login": "none",
+            "transportInput": {
+              "ssh": true,
+              "telnet": true
+            }
+          },
+          "vty": [
+            {
+              "login": "password",
+              "transportInput": {
+                "ssh": true,
+                "telnet": true
+              }
+            },
+            {
+              "login": "password",
+              "transportInput": {
+                "ssh": true,
+                "telnet": true
+              }
+            },
+            {
+              "login": "password",
+              "transportInput": {
+                "ssh": true,
+                "telnet": true
+              }
+            },
+            {
+              "login": "password",
+              "transportInput": {
+                "ssh": true,
+                "telnet": true
+              }
+            },
+            {
+              "login": "password",
+              "transportInput": {
+                "ssh": true,
+                "telnet": true
+              }
+            },
+            {
+              "login": "password",
+              "transportInput": {
+                "ssh": true,
+                "telnet": true
+              }
+            },
+            {
+              "login": "password",
+              "transportInput": {
+                "ssh": true,
+                "telnet": true
+              }
+            },
+            {
+              "login": "password",
+              "transportInput": {
+                "ssh": true,
+                "telnet": true
+              }
+            },
+            {
+              "login": "password",
+              "transportInput": {
+                "ssh": true,
+                "telnet": true
+              }
+            },
+            {
+              "login": "password",
+              "transportInput": {
+                "ssh": true,
+                "telnet": true
+              }
+            },
+            {
+              "login": "password",
+              "transportInput": {
+                "ssh": true,
+                "telnet": true
+              }
+            },
+            {
+              "login": "password",
+              "transportInput": {
+                "ssh": true,
+                "telnet": true
+              }
+            },
+            {
+              "login": "password",
+              "transportInput": {
+                "ssh": true,
+                "telnet": true
+              }
+            },
+            {
+              "login": "password",
+              "transportInput": {
+                "ssh": true,
+                "telnet": true
+              }
+            },
+            {
+              "login": "password",
+              "transportInput": {
+                "ssh": true,
+                "telnet": true
+              }
+            },
+            {
+              "login": "password",
+              "transportInput": {
+                "ssh": true,
+                "telnet": true
+              }
+            }
+          ]
+        },
+        "staticRoutes": [
+          {
+            "prefix": {
+              "address": "192.168.1.0",
+              "prefixLength": 24
+            },
+            "nextHop": {
+              "kind": "address",
+              "address": "10.0.0.1"
+            }
+          }
+        ]
+      }
+    },
+    "dev_srsPC1": {
+      "id": "dev_srsPC1",
+      "model": "pc",
+      "position": {
+        "x": 40,
+        "y": 232
+      },
+      "powered": true,
+      "ports": [
+        {
+          "kind": "fastEthernet",
+          "id": "FastEthernet0",
+          "mac": "76:22:7d:f9:f8:da"
+        }
+      ],
+      "kind": "pc",
+      "config": {
+        "ipv4": {
+          "mode": "static",
+          "address": {
+            "address": "192.168.1.10",
+            "prefixLength": 24
+          },
+          "gateway": "192.168.1.1"
+        },
+        "hostname": "PC1"
+      }
+    },
+    "dev_srsPC2": {
+      "id": "dev_srsPC2",
+      "model": "pc",
+      "position": {
+        "x": 808,
+        "y": 232
+      },
+      "powered": true,
+      "ports": [
+        {
+          "kind": "fastEthernet",
+          "id": "FastEthernet0",
+          "mac": "62:aa:9a:2c:c5:e2"
+        }
+      ],
+      "kind": "pc",
+      "config": {
+        "ipv4": {
+          "mode": "static",
+          "address": {
+            "address": "192.168.2.10",
+            "prefixLength": 24
+          },
+          "gateway": "192.168.2.1"
+        },
+        "hostname": "PC2"
+      }
+    }
+  },
+  "links": {
+    "lnk_srsPC1R1": {
+      "id": "lnk_srsPC1R1",
+      "a": {
+        "device": "dev_srsPC1",
+        "port": "FastEthernet0"
+      },
+      "b": {
+        "device": "dev_srsR1",
+        "port": "GigabitEthernet0/0"
+      },
+      "cable": "crossover"
+    },
+    "lnk_srsR1R2": {
+      "id": "lnk_srsR1R2",
+      "a": {
+        "device": "dev_srsR1",
+        "port": "Serial0/0/0"
+      },
+      "b": {
+        "device": "dev_srsR2",
+        "port": "Serial0/0/0"
+      },
+      "cable": "serial",
+      "dce": "a"
+    },
+    "lnk_srsR2PC2": {
+      "id": "lnk_srsR2PC2",
+      "a": {
+        "device": "dev_srsR2",
+        "port": "GigabitEthernet0/0"
+      },
+      "b": {
+        "device": "dev_srsPC2",
+        "port": "FastEthernet0"
+      },
+      "cable": "crossover"
+    }
+  },
+  "annotations": {
+    "ann_srsserial": {
+      "id": "ann_srsserial",
+      "kind": "note",
+      "position": {
+        "x": 328,
+        "y": 32
+      },
+      "text": "The serial link is 10.0.0.0/30. R1 holds the DCE end of the cable, so it sets the clock rate."
+    },
+    "ann_srsroutes": {
+      "id": "ann_srsroutes",
+      "kind": "note",
+      "position": {
+        "x": 328,
+        "y": 336
+      },
+      "text": "Each router knows only its own networks. A static route on each points at the far LAN."
+    }
+  }
+}
