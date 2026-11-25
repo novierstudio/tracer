@@ -67,6 +67,21 @@ describe('InspectorPanel', () => {
     expect(screen.getByText('CLI comes with device sessions')).toBeVisible();
   });
 
+  it('turns a device off and on from the header, undoably', () => {
+    renderPanel();
+    select([lab.r1.id]);
+    const power = screen.getByRole('switch', { name: 'Power' });
+    expect(power).toBeChecked();
+
+    fireEvent.click(power);
+    expect(deviceIn(lab.r1.id)?.powered).toBe(false);
+    expect(power).not.toBeChecked();
+
+    act(() => editor().undo());
+    expect(deviceIn(lab.r1.id)?.powered).toBe(true);
+    expect(power).toBeChecked();
+  });
+
   it('labels the console tab Desktop for an end host', () => {
     renderPanel();
     select([lab.pc.id]);
@@ -132,6 +147,34 @@ describe('InspectorPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Delete link' }));
     expect(editor().topology.links[lab.wan.id]).toBeUndefined();
     expect(screen.getByText('Nothing selected')).toBeVisible();
+  });
+
+  it('switches a copper link between straight-through and crossover, undoably', () => {
+    renderPanel();
+    select([], [lab.uplink.id]);
+    const picker = screen.getByRole('radiogroup', { name: 'Cable type' });
+    expect(
+      within(picker)
+        .getAllByRole('radio')
+        .map((option) => option.textContent),
+    ).toEqual(['Straight-through', 'Crossover']);
+
+    fireEvent.click(within(picker).getByRole('radio', { name: 'Crossover' }));
+    expect(editor().topology.links[lab.uplink.id]).toEqual({ ...lab.uplink, cable: 'crossover' });
+    expect(screen.getByRole('heading', { name: 'Copper crossover' })).toBeVisible();
+
+    act(() => editor().undo());
+    expect(within(picker).getByRole('radio', { name: 'Straight-through' })).toBeChecked();
+  });
+
+  it('moves the DCE end of a serial link', () => {
+    renderPanel();
+    select([], [lab.wan.id]);
+    expect(screen.queryByRole('radiogroup', { name: 'Cable type' })).toBeNull();
+
+    fireEvent.click(screen.getByRole('radio', { name: 'R2' }));
+    expect(editor().topology.links[lab.wan.id]).toMatchObject({ cable: 'serial', dce: 'b' });
+    expect(screen.getByRole('button', { name: 'End B: R2 Serial0/0/0' })).toHaveTextContent('DCE');
   });
 
   it('jumps from a link endpoint to its device', () => {
