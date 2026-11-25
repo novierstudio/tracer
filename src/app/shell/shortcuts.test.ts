@@ -53,5 +53,21 @@ it('maps canvas keys, with Shift+1 and Delete as alternatives', () => {
   expect(press('Delete')).toBe('deleteSelection');
   expect(press('a', { meta: true })).toBe('selectAll');
   expect(press('a')).toBeUndefined();
-  expect(press('c', { meta: true })).toBeUndefined();
+});
+
+it('maps the clipboard, nudge and add-at-pointer keys', () => {
+  expect(press('c', { meta: true })).toBe('copy');
+  expect(press('x', { ctrl: true })).toBe('cut');
+  expect(press('v', { meta: true })).toBe('paste');
+  expect(press('d', { meta: true })).toBe('duplicate');
+  expect(press('v')).toBe('selectTool');
+  for (const key of ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']) {
+    expect(press(key)).toBe('nudge');
+  }
+  expect(press('F2')).toBe('rename');
+  expect(press('r')).toBe('addRouter');
+  expect(press('s')).toBe('addSwitch');
+  expect(press('p')).toBe('addPc');
+  expect(press('n')).toBe('addNote');
+  expect(press('s', { meta: true })).toBe('save');
 });

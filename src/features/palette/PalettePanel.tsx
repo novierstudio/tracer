@@ -1,5 +1,12 @@
 import { CableIcon, RouterIcon, SearchIcon, StickyNoteIcon, type LucideIcon } from 'lucide-react';
-import { useId, useState, type ComponentProps, type DragEvent, type KeyboardEvent } from 'react';
+import {
+  useId,
+  useState,
+  type ComponentProps,
+  type DragEvent,
+  type KeyboardEvent,
+  type ReactNode,
+} from 'react';
 import {
   CATEGORY_LABELS,
   DEVICE_CATEGORIES,
@@ -10,7 +17,8 @@ import {
   type DeviceModelId,
 } from '@/devices/catalog';
 import { DeviceIcon } from '@/devices/icons';
-import { placeDevice } from '@/features/canvas/controller';
+import { formatShortcut } from '@/app/shell/shortcuts';
+import { addNote, placeDevice } from '@/features/canvas/controller';
 import { EmptyState } from '@/ui/empty-state';
 import { Input } from '@/ui/input';
 
@@ -19,6 +27,8 @@ export type PaletteSection = (typeof PALETTE_SECTIONS)[number];
 
 /** The drop payload is the catalog model id. */
 export const DEVICE_DRAG_TYPE = 'application/x-tracer-device';
+/** A sticky note dragged from the Annotate section. It carries no payload. */
+export const NOTE_DRAG_TYPE = 'application/x-tracer-note';
 
 export const SECTION_INFO: Record<
   PaletteSection,
@@ -42,8 +52,8 @@ export const SECTION_INFO: Record<
     label: 'Annotate',
     icon: StickyNoteIcon,
     search: 'Search annotations',
-    empty: 'Nothing to annotate yet',
-    hint: 'Notes, text, areas and shapes for labelling your lab will be listed here.',
+    empty: 'No matching annotations',
+    hint: 'Text, areas and shapes for labelling your lab will join notes here.',
   },
 };
 
@@ -74,35 +84,80 @@ function SearchField({ label, ...props }: { label: string } & ComponentProps<'in
   );
 }
 
-function DeviceItem({ entry: { model, summary } }: { entry: Entry }) {
+type PaletteItemProps = {
+  name: string;
+  summary: string;
+  icon: ReactNode;
+  drag: { type: string; payload: string };
+  onAdd: () => void;
+};
+
+// Clicking, or Enter on a focused item, drops the item in the middle of the canvas view.
+function PaletteItem({ name, summary, icon, drag, onAdd }: PaletteItemProps) {
   const onDragStart = (event: DragEvent) => {
-    event.dataTransfer.setData(DEVICE_DRAG_TYPE, model.id);
+    event.dataTransfer.setData(drag.type, drag.payload);
     event.dataTransfer.effectAllowed = 'copy';
   };
-  // Clicking, or Enter on a focused item, drops the device in the middle of the canvas view.
-  const add = () => placeDevice(model.id as DeviceModelId);
   const onKeyDown = (event: KeyboardEvent) => {
     if (event.key !== 'Enter' && event.key !== ' ') return;
     event.preventDefault();
-    add();
+    onAdd();
   };
   return (
     <li
       draggable
       tabIndex={0}
-      title={`Click to add ${model.name}, or drag it onto the canvas`}
+      title={`Click to add ${name}, or drag it onto the canvas`}
       onDragStart={onDragStart}
-      onClick={add}
+      onClick={onAdd}
       onKeyDown={onKeyDown}
-      data-model={model.id}
       className="flex cursor-grab items-center gap-2.5 rounded-md px-2 py-1.5 transition-colors outline-none hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:ring-2 focus-visible:ring-accent/40 active:cursor-grabbing"
     >
-      <DeviceIcon name={model.icon} className="size-6 shrink-0 text-fg-1" />
+      {icon}
       <div className="flex min-w-0 flex-col">
-        <span className="truncate text-sm text-fg-1">{model.name}</span>
+        <span className="truncate text-sm text-fg-1">{name}</span>
         <span className="truncate text-2xs text-fg-3">{summary}</span>
       </div>
     </li>
+  );
+}
+
+function DeviceItem({ entry: { model, summary } }: { entry: Entry }) {
+  return (
+    <PaletteItem
+      name={model.name}
+      summary={summary}
+      icon={<DeviceIcon name={model.icon} className="size-6 shrink-0 text-fg-1" />}
+      drag={{ type: DEVICE_DRAG_TYPE, payload: model.id }}
+      onAdd={() => placeDevice(model.id as DeviceModelId)}
+    />
+  );
+}
+
+function Annotations() {
+  const id = useId();
+  return (
+    <div className="min-h-0 flex-1 overflow-y-auto pt-1">
+      <section className="flex flex-col gap-0.5 px-1.5 pb-3">
+        <h3 id={id} className="px-2 pb-1 text-2xs font-semibold tracking-wide text-fg-3 uppercase">
+          Notes
+        </h3>
+        <ul aria-labelledby={id} className="flex flex-col gap-0.5">
+          <PaletteItem
+            name="Sticky note"
+            summary={`Free text on the canvas · ${formatShortcut('addNote')}`}
+            icon={
+              <span className="flex size-6 shrink-0 items-center justify-center">
+                <StickyNoteIcon className="size-5 text-warn" />
+              </span>
+            }
+            drag={{ type: NOTE_DRAG_TYPE, payload: 'note' }}
+            onAdd={() => addNote()}
+          />
+        </ul>
+      </section>
+      <p className="px-5 text-2xs text-balance text-fg-3">{SECTION_INFO.annotate.hint}</p>
+    </div>
   );
 }
 
@@ -156,6 +211,8 @@ export function PalettePanel({ section }: { section: PaletteSection }) {
       </div>
       {section === 'devices' ? (
         <DeviceCatalog />
+      ) : section === 'annotate' ? (
+        <Annotations />
       ) : (
         <>
           <SearchField label={info.search} disabled />

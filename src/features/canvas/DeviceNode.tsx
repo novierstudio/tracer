@@ -1,9 +1,12 @@
-import { Handle, Position, type NodeProps } from '@xyflow/react';
-import { memo } from 'react';
+import { Handle, Position, useStore, type NodeProps } from '@xyflow/react';
+import { memo, useState, type KeyboardEvent } from 'react';
 import { DeviceIcon } from '@/devices/icons';
 import type { DeviceId } from '@/model';
-import { useCableTool, type CableStep } from './cableTool';
-import type { DeviceFlowNode } from './flow';
+import { cableTool, useCableTool, type CableStep } from './cableTool';
+import { useCanvasUi } from './canvasUi';
+import { DeviceHoverCard } from './DeviceHoverCard';
+import { finishEditing, stopEditing } from './edit';
+import { CENTRE_HANDLE, QUICK_BANDS, QUICK_TARGET, type DeviceFlowNode } from './flow';
 import { LABEL_GAP } from './geometry';
 
 type CableRole = 'source' | 'target' | undefined;
@@ -16,19 +19,93 @@ function cableRole(step: CableStep | null, device: DeviceId): CableRole {
   return step.at === 'target-port' && step.device === device ? 'target' : undefined;
 }
 
-// Edges attach here. The handle is only an anchor, so it is invisible and takes no input.
-const handleClass =
+// Edges attach to the centre handles. They are only anchors, so they are invisible and take no input.
+const anchorClass =
   '!pointer-events-none !top-1/2 !left-1/2 !size-0 !min-h-0 !min-w-0 !border-0 !opacity-0';
 
-export const DeviceNode = memo(function DeviceNode({ id, data }: NodeProps<DeviceFlowNode>) {
+function RenameField({ hostname }: { hostname: string }) {
+  const [value, setValue] = useState(hostname);
+  const save = () => {
+    const problem = finishEditing(value);
+    if (problem) cableTool.getState().notify(problem);
+  };
+  // Enter saves and Esc cancels. Either way focus goes back to the canvas, which blurs the field.
+  const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key !== 'Enter' && event.key !== 'Escape') return;
+    event.preventDefault();
+    const canvas = event.currentTarget.closest<HTMLElement>('[aria-label="Canvas"]');
+    if (event.key === 'Escape') stopEditing();
+    canvas?.focus({ preventScroll: true });
+  };
+  return (
+    <input
+      aria-label="Hostname"
+      autoFocus
+      value={value}
+      spellCheck={false}
+      onChange={(event) => setValue(event.target.value)}
+      onFocus={(event) => event.currentTarget.select()}
+      onBlur={save}
+      onKeyDown={onKeyDown}
+      style={{ width: `${Math.max(value.length, 6) + 2}ch` }}
+      className="nodrag nopan pointer-events-auto rounded-[4px] bg-surface-1 px-1 py-px text-center text-xs leading-4 font-semibold text-fg-1 shadow-xs ring-2 ring-accent outline-none"
+    />
+  );
+}
+
+export const DeviceNode = memo(function DeviceNode({
+  id,
+  data,
+  dragging,
+}: NodeProps<DeviceFlowNode>) {
   const role = useCableTool((state) => cableRole(state.step, id as DeviceId));
+  const cabling = useCableTool((state) => state.step !== null);
+  const renaming = useCanvasUi(
+    (state) => state.edit?.kind === 'rename' && state.edit.device === id,
+  );
+  const connecting = useStore((state) => state.connection.inProgress);
   return (
     <div className="device-node relative size-12" data-powered={data.powered || undefined}>
-      <Handle type="source" position={Position.Top} isConnectable={false} className={handleClass} />
-      <Handle type="target" position={Position.Top} isConnectable={false} className={handleClass} />
-      <div className="device-tile size-12" data-cable-role={role}>
-        <DeviceIcon name={data.icon} className="size-12 text-fg-1" />
-      </div>
+      <Handle
+        {...CENTRE_HANDLE}
+        type="source"
+        position={Position.Top}
+        isConnectable={false}
+        className={anchorClass}
+      />
+      <Handle
+        {...CENTRE_HANDLE}
+        type="target"
+        position={Position.Top}
+        isConnectable={false}
+        className={anchorClass}
+      />
+      <DeviceHoverCard
+        device={id as DeviceId}
+        disabled={dragging || connecting || cabling || renaming}
+      >
+        <div className="device-tile size-12" data-cable-role={role}>
+          <DeviceIcon name={data.icon} className="size-12 text-fg-1" />
+        </div>
+      </DeviceHoverCard>
+      <Handle
+        id={QUICK_TARGET.id}
+        type="target"
+        position={QUICK_TARGET.position}
+        isConnectableStart={false}
+        className="quick-target"
+      />
+      {QUICK_BANDS.map((band) => (
+        <Handle
+          key={band.id}
+          id={band.id}
+          type="source"
+          position={band.position}
+          isConnectableEnd={false}
+          title="Drag to another device to connect"
+          className="quick-band"
+        />
+      ))}
       <span
         aria-hidden
         className="device-ports pointer-events-none absolute -top-2 left-[calc(100%-10px)] rounded-full border border-line bg-surface-1 px-1.5 text-[10px] leading-4 font-medium whitespace-nowrap text-fg-2 tabular-nums shadow-xs"
@@ -40,9 +117,13 @@ export const DeviceNode = memo(function DeviceNode({ id, data }: NodeProps<Devic
         className="pointer-events-none absolute top-full left-1/2 flex w-0 flex-col items-center whitespace-nowrap"
         style={{ marginTop: LABEL_GAP }}
       >
-        <span className="device-hostname rounded-[4px] bg-surface-0/85 px-1 py-px text-xs leading-4 font-semibold text-fg-1">
-          {data.hostname}
-        </span>
+        {renaming ? (
+          <RenameField hostname={data.hostname} />
+        ) : (
+          <span className="device-hostname rounded-[4px] bg-surface-0/85 px-1 py-px text-xs leading-4 font-semibold text-fg-1">
+            {data.hostname}
+          </span>
+        )}
         {data.address && (
           <span className="device-address rounded-[3px] bg-surface-0/85 px-0.5 font-mono text-[10px] leading-[14px] text-fg-3">
             {data.address}

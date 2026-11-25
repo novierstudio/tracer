@@ -6,7 +6,9 @@ import {
   MousePointer2Icon,
   PlusIcon,
   ScanIcon,
+  StickyNoteIcon,
   TagIcon,
+  WorkflowIcon,
   type LucideIcon,
 } from 'lucide-react';
 import { useEffect, type ReactNode } from 'react';
@@ -19,24 +21,48 @@ import { Segmented } from '@/ui/segmented';
 import { Tooltip } from '@/ui/tooltip';
 import { CABLE_CHOICES, shortPortName, type CableChoice } from './cables';
 import { cableTool, useCableTool, type CableStep } from './cableTool';
-import { fitView, togglePortLabels, usePortLabels, zoomBy, zoomToActualSize } from './controller';
+import { ALIGN_EDGES } from './arrange';
+import {
+  addNote,
+  ALIGN_LABELS,
+  autoLayoutAndFit,
+  DISTRIBUTE_LABELS,
+  fitView,
+  togglePortLabels,
+  usePortLabels,
+  viewCentre,
+  zoomBy,
+  zoomToActualSize,
+} from './controller';
+import { align, distribute } from './edit';
 
 type ToolButtonProps = {
   label: string;
   icon: LucideIcon;
   shortcut?: ShortcutId;
   pressed?: boolean;
+  disabled?: boolean;
+  side?: 'top' | 'bottom';
   onClick: () => void;
 };
 
-function ToolButton({ label, icon: Icon, shortcut, pressed, onClick }: ToolButtonProps) {
+function ToolButton({
+  label,
+  icon: Icon,
+  shortcut,
+  pressed,
+  disabled,
+  side = 'top',
+  onClick,
+}: ToolButtonProps) {
   return (
-    <Tooltip label={label} shortcut={shortcut && formatShortcut(shortcut)} side="top">
+    <Tooltip label={label} shortcut={shortcut && formatShortcut(shortcut)} side={side}>
       <Button
         variant="ghost"
         size="icon-sm"
         aria-label={label}
         aria-pressed={pressed}
+        disabled={disabled}
         onClick={onClick}
       >
         <Icon />
@@ -81,9 +107,45 @@ const CABLE_OPTIONS = CABLE_CHOICES.map((cable) => ({
   icon: <CableSwatch cable={cable} />,
 }));
 
+const Divider = () => <span aria-hidden className="mx-1 h-5 w-px bg-line" />;
+
+/** Align and distribute, shown while two or more devices are selected. */
+function ArrangeButtons({ count }: { count: number }) {
+  return (
+    <div role="group" aria-label="Arrange" className="flex animate-fade-in items-center gap-0.5">
+      {ALIGN_EDGES.map((edge) => (
+        <ToolButton
+          key={edge}
+          side="bottom"
+          label={ALIGN_LABELS[edge].title}
+          icon={ALIGN_LABELS[edge].icon}
+          onClick={() => align(edge)}
+        />
+      ))}
+      <Divider />
+      {(['horizontal', 'vertical'] as const).map((axis) => (
+        <ToolButton
+          key={axis}
+          side="bottom"
+          label={
+            count < 3
+              ? `${DISTRIBUTE_LABELS[axis].title} (select 3 or more)`
+              : DISTRIBUTE_LABELS[axis].title
+          }
+          icon={DISTRIBUTE_LABELS[axis].icon}
+          disabled={count < 3}
+          onClick={() => distribute(axis)}
+        />
+      ))}
+    </div>
+  );
+}
+
 export function Toolbar() {
   const cabling = useCableTool((state) => state.step !== null);
   const cable = useCableTool((state) => state.cable);
+  const selected = useEditor((state) => state.selection.devices.length);
+  const devices = useEditor((state) => Object.keys(state.topology.devices).length);
   return (
     <div
       role="toolbar"
@@ -104,9 +166,28 @@ export function Toolbar() {
         pressed={cabling}
         onClick={() => cableTool.getState().toggle()}
       />
+      <ToolButton
+        label="Note"
+        icon={StickyNoteIcon}
+        shortcut="addNote"
+        onClick={() => addNote(viewCentre())}
+      />
+      <Divider />
+      <ToolButton
+        label="Auto-layout"
+        icon={WorkflowIcon}
+        disabled={devices < 2}
+        onClick={autoLayoutAndFit}
+      />
+      {!cabling && selected >= 2 && (
+        <>
+          <Divider />
+          <ArrangeButtons count={selected} />
+        </>
+      )}
       {cabling && (
         <>
-          <span aria-hidden className="mx-1 h-5 w-px bg-line" />
+          <Divider />
           <Segmented
             label="Cable type"
             value={cable}

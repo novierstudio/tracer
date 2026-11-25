@@ -1,6 +1,19 @@
 import { Position, type Edge, type EdgeChange, type Node, type NodeChange } from '@xyflow/react';
 import { findDeviceModel, type DeviceIconName } from '@/devices/catalog';
-import type { Cable, Device, DeviceId, DeviceKind, Link, LinkId, Move, Topology } from '@/model';
+import type {
+  Annotation,
+  AnnotationId,
+  AnnotationMove,
+  Cable,
+  Device,
+  DeviceId,
+  DeviceKind,
+  Link,
+  LinkId,
+  Move,
+  Point,
+  Topology,
+} from '@/model';
 import { CABLE_LABELS, shortPortName } from './cables';
 import { TILE, type Size } from './geometry';
 
@@ -14,6 +27,17 @@ export type DeviceNodeData = {
 };
 export type DeviceFlowNode = Node<DeviceNodeData, 'device'>;
 
+type NoteNodeData = { text: string; editing: boolean };
+export type NoteFlowNode = Node<NoteNodeData, 'note'>;
+
+export type CanvasNode = DeviceFlowNode | NoteFlowNode;
+
+/** A note card's width, and its height with up to three lines. */
+const NOTE_SIZE = { width: 192, height: 76 };
+
+/** The node for a note being written that is not in the lab yet. */
+const NEW_NOTE_ID = 'note-new';
+
 export type CableEdgeData = { cable: Cable; ports: [a: string, b: string] };
 export type CableFlowEdge = Edge<CableEdgeData, 'cable'>;
 
@@ -26,10 +50,46 @@ const KIND_ICON: Record<DeviceKind, DeviceIconName> = {
 
 // Edges join tile centres. Declaring the handles and size up front means React Flow never has to
 // measure a node before drawing its links.
-const CENTRE = { x: TILE / 2, y: TILE / 2, width: 0, height: 0, position: Position.Top };
+export const CENTRE_HANDLE = { id: 'centre' } as const;
+const CENTRE = {
+  ...CENTRE_HANDLE,
+  x: TILE / 2,
+  y: TILE / 2,
+  width: 0,
+  height: 0,
+  position: Position.Top,
+};
+
+// Quick cable starts from a band along each tile edge and ends anywhere on another tile. React
+// Flow resets a node's handles to these declared ones whenever the node object changes, so every
+// handle DeviceNode renders is listed, with the boxes canvas.css draws.
+export const QUICK_BANDS = [
+  { id: 'quick-top', position: Position.Top, x: 6, y: -6, width: TILE - 12, height: 10 },
+  { id: 'quick-right', position: Position.Right, x: TILE - 4, y: 6, width: 10, height: TILE - 12 },
+  {
+    id: 'quick-bottom',
+    position: Position.Bottom,
+    x: 6,
+    y: TILE - 4,
+    width: TILE - 12,
+    height: 10,
+  },
+  { id: 'quick-left', position: Position.Left, x: -6, y: 6, width: 10, height: TILE - 12 },
+] as const;
+export const QUICK_TARGET = {
+  id: 'quick-in',
+  position: Position.Top,
+  x: 0,
+  y: 0,
+  width: TILE,
+  height: TILE,
+} as const;
+
 const HANDLES = [
   { ...CENTRE, type: 'source' as const },
   { ...CENTRE, type: 'target' as const },
+  ...QUICK_BANDS.map((band) => ({ ...band, type: 'source' as const })),
+  { ...QUICK_TARGET, type: 'target' as const },
 ];
 const MEASURED = { width: TILE, height: TILE };
 
@@ -154,6 +214,8 @@ export function createEdgeMapper() {
         type: 'cable',
         source: link.a.device,
         target: link.b.device,
+        sourceHandle: CENTRE_HANDLE.id,
+        targetHandle: CENTRE_HANDLE.id,
         selected: isSelected,
         data: {
           cable: link.cable,
@@ -169,23 +231,80 @@ export function createEdgeMapper() {
   };
 }
 
-/** Node moves as store moves. Node ids are device ids, since the store made every node. */
-export function movesFrom(changes: readonly NodeChange<DeviceFlowNode>[]): Move[] {
-  return changes.flatMap((change) =>
-    change.type === 'position' && change.position
-      ? [{ device: change.id as DeviceId, position: change.position }]
-      : [],
-  );
+// Node ids are store ids, and store ids carry their kind as a prefix.
+export const isDeviceId = (id: string): id is DeviceId => id.startsWith('dev_');
+export const isNoteId = (id: string): id is AnnotationId => id.startsWith('ann_');
+
+/** Notes as React Flow nodes, positioned by their top-left corner, plus a note being written. */
+export function createNoteMapper() {
+  let cache = new Map<string, NoteFlowNode>();
+  return (
+    annotations: Topology['annotations'],
+    selected: ReadonlySet<AnnotationId>,
+    editing: AnnotationId | undefined,
+    draft: Point | undefined,
+  ): NoteFlowNode[] => {
+    const next = new Map<string, NoteFlowNode>();
+    const node = (id: string, note: Pick<Annotation, 'position' | 'text'>, isNew = false) => {
+      const isSelected = selected.has(id as AnnotationId);
+      const isEditing = isNew || editing === id;
+      const hit = cache.get(id);
+      const reused =
+        hit &&
+        hit.position === note.position &&
+        hit.data.text === note.text &&
+        hit.data.editing === isEditing &&
+        hit.selected === isSelected;
+      const made: NoteFlowNode = reused
+        ? hit
+        : {
+            id,
+            type: 'note',
+            position: note.position,
+            origin: [0, 0],
+            // A size up front shows the node before React Flow measures it, so a new note's
+            // field is on screen, and can take focus, the moment N is pressed.
+            initialWidth: NOTE_SIZE.width,
+            initialHeight: NOTE_SIZE.height,
+            data: { text: note.text, editing: isEditing },
+            selected: isSelected,
+            draggable: !isEditing,
+            ariaLabel: `Note: ${note.text}`,
+          };
+      next.set(id, made);
+      return made;
+    };
+    const nodes = Object.values(annotations).map((note) => node(note.id, note));
+    if (draft) nodes.push(node(NEW_NOTE_ID, { position: draft, text: '' }, true));
+    cache = next;
+    return nodes;
+  };
+}
+
+export type Moves = { devices: Move[]; notes: AnnotationMove[] };
+
+/** Node moves as store moves, split by what each node shows. */
+export function movesFrom(changes: readonly NodeChange<CanvasNode>[]): Moves {
+  const moves: Moves = { devices: [], notes: [] };
+  for (const change of changes) {
+    if (change.type !== 'position' || !change.position) continue;
+    if (isDeviceId(change.id)) moves.devices.push({ device: change.id, position: change.position });
+    else if (isNoteId(change.id)) {
+      moves.notes.push({ annotation: change.id, position: change.position });
+    }
+  }
+  return moves;
 }
 
 /** The selection after React Flow's select changes, or undefined when they change nothing. */
 export function applySelectChanges<Id extends string>(
   current: readonly Id[],
   changes: readonly (NodeChange | EdgeChange)[],
+  belongs: (id: string) => boolean = () => true,
 ): Id[] | undefined {
   const ids = new Set(current);
   for (const change of changes) {
-    if (change.type !== 'select') continue;
+    if (change.type !== 'select' || !belongs(change.id)) continue;
     if (change.selected) ids.add(change.id as Id);
     else ids.delete(change.id as Id);
   }

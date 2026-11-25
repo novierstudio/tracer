@@ -118,9 +118,9 @@ export function duplicateSelection() {
   if (fragment) insert(fragment, { x: PASTE_STEP, y: PASTE_STEP });
 }
 
-export const NUDGE = { near: GRID, far: GRID * 4 };
+const NUDGE = { near: GRID, far: GRID * 4 };
 
-const ARROWS: Record<string, Point> = {
+export const ARROWS: Record<string, Point> = {
   ArrowLeft: { x: -1, y: 0 },
   ArrowRight: { x: 1, y: 0 },
   ArrowUp: { x: 0, y: -1 },
