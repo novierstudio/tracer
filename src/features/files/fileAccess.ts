@@ -20,13 +20,14 @@ const SAVE_TYPES: PickerType[] = [
 export const isAbort = (error: unknown) =>
   error instanceof DOMException && error.name === 'AbortError';
 
-export function fileNameFor(labName: string): string {
+/** A file name from the lab name, with the characters file systems refuse replaced. */
+export function fileNameFor(labName: string, extension = NATIVE_EXTENSION): string {
   const base = labName
     .replace(/[\\/:*?"<>|\p{Cc}]/gu, '-')
     .replace(/\s+/g, ' ')
     .trim()
     .replace(/^\.+/, '');
-  return `${base || 'Untitled lab'}${NATIVE_EXTENSION}`;
+  return `${base || 'Untitled lab'}${extension}`;
 }
 
 export async function writeToHandle(handle: FileSystemFileHandle, text: string) {
@@ -41,7 +42,11 @@ export async function pickSaveHandle(suggestedName: string) {
 }
 
 export function download(text: string, fileName: string) {
-  const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
+  downloadBlob(new Blob([text], { type: 'application/json' }), fileName);
+}
+
+export function downloadBlob(blob: Blob, fileName: string) {
+  const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
   anchor.href = url;
   anchor.download = fileName;
