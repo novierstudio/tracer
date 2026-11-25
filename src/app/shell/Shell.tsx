@@ -2,6 +2,9 @@ import { MinimizeIcon } from 'lucide-react';
 import { useCallback, useEffect, useEffectEvent, useState } from 'react';
 import { Group, Panel, Separator, usePanelRef, type Layout } from 'react-resizable-panels';
 import { CanvasPlaceholder } from '@/features/canvas/CanvasPlaceholder';
+import { appCommands } from '@/features/command/appCommands';
+import { CommandPalette } from '@/features/command/CommandPalette';
+import { useRegisterCommands } from '@/features/command/registry';
 import { InspectorPanel } from '@/features/inspector/InspectorPanel';
 import { PalettePanel, type PaletteSection } from '@/features/palette/PalettePanel';
 import { BottomPanel } from '@/features/simulation/BottomPanel';
@@ -13,7 +16,7 @@ import { readJson, safeStorage } from '../storage';
 import { useMediaQuery } from '../useMediaQuery';
 import { HelpDialogs, type HelpDialog } from './HelpDialogs';
 import { Rail } from './Rail';
-import { formatShortcut, matchShortcut, type ShortcutId } from './shortcuts';
+import { formatShortcut, matchShortcut, SHORTCUTS, type ShortcutId } from './shortcuts';
 import { StatusBar } from './StatusBar';
 import { TopBar, type Mode } from './TopBar';
 
@@ -89,6 +92,7 @@ export function Shell() {
   const [drawer, setDrawer] = useState<SidePanel | null>(null);
   const [section, setSection] = useState<PaletteSection>('devices');
   const [help, setHelp] = useState<HelpDialog | null>(null);
+  const [commandsOpen, setCommandsOpen] = useState(false);
 
   const sideLayout = usePersistedLayout('side', ['palette', 'workspace', 'inspector']);
   const bottomLayout = usePersistedLayout('bottom', ['canvas', 'bottom'], {
@@ -129,6 +133,7 @@ export function Shell() {
       show();
     };
     const actions: Record<ShortcutId, () => void> = {
+      commandPalette: () => setCommandsOpen((open) => !open),
       togglePalette: panelAction(
         () => openSide('palette'),
         () => toggleSide('palette'),
@@ -146,9 +151,10 @@ export function Shell() {
   };
 
   const onKeyDown = useEffectEvent((event: KeyboardEvent) => {
-    if (event.defaultPrevented || isEditable(event.target)) return;
-    if (focus && event.key === 'Escape') return setFocus(false);
     const id = matchShortcut(event);
+    const typing = isEditable(event.target) && !(id && SHORTCUTS[id].inTextFields);
+    if (event.defaultPrevented || typing) return;
+    if (focus && event.key === 'Escape') return setFocus(false);
     if (!id) return;
     event.preventDefault();
     runShortcut(id);
@@ -158,6 +164,8 @@ export function Shell() {
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
+
+  useRegisterCommands(appCommands({ mode, runShortcut, openHelp: setHelp }));
 
   const workspace = (
     <Group
@@ -208,6 +216,7 @@ export function Shell() {
           mode={mode}
           onModeChange={changeMode}
           onOpenHelp={setHelp}
+          onOpenCommands={() => setCommandsOpen(true)}
           panels={{
             palette: {
               id: 'togglePalette',
@@ -291,6 +300,7 @@ export function Shell() {
         </>
       )}
       <HelpDialogs open={help} onOpenChange={setHelp} />
+      <CommandPalette open={commandsOpen} onOpenChange={setCommandsOpen} />
     </div>
   );
 }
