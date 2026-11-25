@@ -1,21 +1,35 @@
 import { MousePointer2Icon } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { DeviceId } from '@/model';
 import { useEditor } from '@/model/react';
 import { EmptyState } from '@/ui/empty-state';
 import { DeviceInspector, type DeviceTab } from './DeviceInspector';
 import './devHandle';
 import { LinkInspector } from './LinkInspector';
+import { consoleRequests, takeConsoleRequest } from './requests';
 import { SelectionInspector } from './SelectionInspector';
 import { inspectorView } from './view';
 
 export function InspectorPanel() {
   const topology = useEditor((state) => state.topology);
   const selection = useEditor((state) => state.selection);
+  // A request to open a device's console may be what mounted this panel, so the first render
+  // takes it up front; later ones arrive through the subscription.
+  const [opened] = useState(takeConsoleRequest);
   // Kept across selections, so stepping through devices stays on the same tab.
-  const [tab, setTab] = useState<DeviceTab>('overview');
+  const [tab, setTab] = useState<DeviceTab>(opened ? 'console' : 'overview');
   // The CLI takes focus when someone picks its tab, not when the selection moves to a device.
-  const [focusFor, setFocusFor] = useState<DeviceId>();
+  const [focusFor, setFocusFor] = useState<DeviceId | undefined>(opened?.device);
+  useEffect(
+    () =>
+      consoleRequests.subscribe(() => {
+        const request = takeConsoleRequest();
+        if (!request) return;
+        setTab('console');
+        setFocusFor(request.device);
+      }),
+    [],
+  );
   const view = inspectorView(topology, selection);
 
   return (
