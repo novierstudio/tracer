@@ -15,7 +15,7 @@ import { createEventLog, type EventLog } from './core/log';
 import { createEventQueue, type QueueEntry, type SavedEntry } from './core/queue';
 import { drawRandom } from './core/random';
 import { after, ms, START, type SimDuration, type SimTime } from './core/time';
-import type { EventId, SimEvent } from './events';
+import type { EventId, SentFrame, SimEvent } from './events';
 import type { Frame } from './frame';
 import { endUp } from './l1';
 import type { DeviceUnavailable, ModuleContext, SimModule, Stacks } from './module';
@@ -129,6 +129,8 @@ export function createEngine({
   let now = START;
   let generations = 0;
   let settings = DEFAULT_LAB_SETTINGS;
+  // What the device handling an arriving frame sends, while it handles it.
+  let handling: SentFrame[] | undefined;
 
   function random() {
     const draw = drawRandom(randomState);
@@ -141,6 +143,7 @@ export function createEngine({
     if (!state) return;
     const { link } = state;
     const to = sameEndpoint(link.a, from) ? link.b : link.a;
+    handling?.push({ port: from.port, frame });
     if (!state.up) {
       log.append({
         kind: 'frame',
@@ -305,6 +308,9 @@ export function createEngine({
         const state = links.get(item.link);
         const delivered = state?.up === true && state.generation === item.generation;
         const { link, from, to, frame, sentAt } = item;
+        // The device's sends fill in `sent` as it handles the frame, before the event leaves
+        // the engine.
+        const sent: SentFrame[] = [];
         log.append({
           kind: 'frame',
           time: now,
@@ -314,11 +320,14 @@ export function createEngine({
           to,
           frame,
           outcome: delivered ? 'delivered' : 'link-down',
+          ...(delivered && { sent }),
         });
         if (!delivered) return;
+        handling = sent;
         for (const slot of running.get(to.device) ?? []) {
           slot.module.onFrame?.(slot.ctx, to.port, frame);
         }
+        handling = undefined;
         return;
       }
       case 'timer':
