@@ -94,3 +94,36 @@ export function saveRecent(id: string): string[] {
 export function recentCommands(commands: readonly Command[], recents: readonly string[]) {
   return recents.flatMap((id) => commands.find((command) => command.id === id) ?? []);
 }
+
+function isSubsequence(needle: string, haystack: string): boolean {
+  let i = 0;
+  for (const ch of haystack) if (ch === needle[i]) i++;
+  return i === needle.length;
+}
+
+const words = (text: string) =>
+  text
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+
+/**
+ * cmdk filter. Every query word must start a word of the title or a keyword, or (for typos such
+ * as "drk") appear in order inside a title word. So "pan" finds "Toggle device palette" but not
+ * "Dark theme", whose keyword "appearance" only contains it. Title prefixes rank first.
+ */
+export function matchScore(search: string, keywords: readonly string[] = []): number {
+  const query = words(search);
+  if (query.length === 0) return 1;
+  const [title = '', ...rest] = keywords;
+  const titleWords = words(title);
+  const otherWords = rest.flatMap(words);
+  let score = 0;
+  for (const q of query) {
+    if (titleWords.some((w) => w.startsWith(q))) score += 2;
+    else if (otherWords.some((w) => w.startsWith(q))) score += 1;
+    else if (titleWords.some((w) => isSubsequence(q, w))) score += 0.5;
+    else return 0;
+  }
+  return score / (2 * query.length);
+}

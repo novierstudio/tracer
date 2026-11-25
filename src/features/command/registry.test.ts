@@ -8,6 +8,7 @@ import {
   recentCommands,
   saveRecent,
   type Command,
+  matchScore,
 } from './registry';
 
 const command = (id: string, extra: Partial<Command> = {}): Command => ({
@@ -86,5 +87,30 @@ describe('recents', () => {
   it('resolves recent ids to available commands only', () => {
     const available = [command('a'), command('b')];
     expect(ids(recentCommands(available, ['b', 'gone', 'a']))).toEqual(['b', 'a']);
+  });
+});
+
+describe('matchScore', () => {
+  const palette = ['Toggle device palette', 'View', 'panel', 'sidebar'];
+  const dark = ['Dark theme', 'Theme', 'appearance', 'night'];
+
+  it('needs every query word to start a word', () => {
+    expect(matchScore('pan', dark)).toBe(0);
+    expect(matchScore('pal', palette)).toBeGreaterThan(0);
+    expect(matchScore('dev pal', palette)).toBeGreaterThan(0);
+    expect(matchScore('dev xyz', palette)).toBe(0);
+  });
+
+  it('tolerates typos inside title words only', () => {
+    expect(matchScore('drk', dark)).toBeGreaterThan(0);
+    expect(matchScore('apnc', dark)).toBe(0);
+  });
+
+  it('ranks title matches above keyword-only matches', () => {
+    expect(matchScore('pal', palette)).toBeGreaterThan(matchScore('pan', palette));
+  });
+
+  it('matches everything on an empty query', () => {
+    expect(matchScore('  ', dark)).toBe(1);
   });
 });

@@ -9,6 +9,7 @@ import {
   enabledCommands,
   groupCommands,
   loadRecents,
+  matchScore,
   recentCommands,
   saveRecent,
   useCommands,
@@ -54,7 +55,13 @@ function PaletteBody({
   const recent = search ? [] : recentCommands(available, recents);
 
   return (
-    <Cmdk label="Command palette" loop vimBindings={false} className={headingClass}>
+    <Cmdk
+      label="Command palette"
+      loop
+      vimBindings={false}
+      filter={(_value, search, keywords) => matchScore(search, keywords)}
+      className={headingClass}
+    >
       <div className="flex items-center gap-2.5 border-b border-line px-3.5">
         <SearchIcon className="size-4 shrink-0 text-fg-3" aria-hidden />
         <Cmdk.Input
