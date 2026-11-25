@@ -20,7 +20,7 @@ const VLAN1 = VlanId.parse(1);
 /** Listening then learning on the default fast timers: a new port forwards 4 s after it comes up. */
 const CONVERGED = STP_CONVERGED;
 
-const FAST = { hello: 1, maxAge: 7, forwardDelay: 2 };
+const FAST = { hello: 2, maxAge: 8, forwardDelay: 2 };
 const IOS = { hello: 2, maxAge: 20, forwardDelay: 15 };
 
 const timersPatch = (stpTimers: StpTimers) => ({ devices: {}, links: {}, settings: { stpTimers } });
@@ -373,9 +373,9 @@ describe('BPDUs', () => {
         event.from.port === portToward(last, middle),
     );
     expect(fromBlocked).toEqual([]);
-    // 10 hellos, each out of 5 designated ports: the root's 2, and one toward each other bridge
+    // 5 hellos, each out of 5 designated ports: the root's 2, and one toward each other bridge
     // or PC that the runner-up and the last bridge are designated for.
-    expect(bpdus).toHaveLength(10 * 5);
+    expect(bpdus).toHaveLength(5 * 5);
     expect(engine.now).toBe(simTime(110_000));
   });
 });
@@ -454,7 +454,8 @@ describe('changing the timers setting while the lab runs', () => {
     expect(tree(root).times).toEqual(IOS);
     expect(tree(last).times).toEqual(FAST);
     expect(tree(last).bridgeTimes).toEqual(IOS);
-    runFor(FAST.hello * 1000);
+    // The hello leaves the root a hello time later and takes 2 ms to cross two hops.
+    runFor(FAST.hello * 1000 + 2);
     for (const id of [root, middle, last]) expect(tree(id).times).toEqual(IOS);
     expect(blocked()).toEqual(before);
 
