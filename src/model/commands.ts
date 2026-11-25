@@ -1,5 +1,5 @@
 import { produce, type Draft } from 'immer';
-import type { DeviceId, IdSource, LinkId } from './ids';
+import type { AnnotationId, DeviceId, IdSource, LinkId } from './ids';
 import { err, ok, type Result } from './result';
 import {
   factoryRouterLines,
@@ -7,6 +7,7 @@ import {
   findDeviceProblem,
   findLinkProblem,
   VirtualInterfaceId,
+  type Annotation,
   type Cable,
   type Device,
   type DeviceKind,
@@ -134,6 +135,75 @@ export function setLinkCable(topology: Topology, change: CableChange): CommandRe
 export function removeLinks(topology: Topology, ids: readonly LinkId[]): Topology {
   return produce(topology, (draft) => {
     for (const id of ids) delete draft.links[id];
+  });
+}
+
+export type Elements = {
+  devices?: readonly Device[];
+  links?: readonly Link[];
+  annotations?: readonly Annotation[];
+};
+
+/** Adds devices, then links, then annotations, all or nothing: one result for a paste. */
+export function addElements(topology: Topology, elements: Elements): CommandResult {
+  let next = topology;
+  for (const device of elements.devices ?? []) {
+    const result = addDevice(next, device);
+    if (!result.ok) return result;
+    next = result.value;
+  }
+  for (const link of elements.links ?? []) {
+    const result = addLink(next, link);
+    if (!result.ok) return result;
+    next = result.value;
+  }
+  for (const annotation of elements.annotations ?? []) {
+    const result = addAnnotation(next, annotation);
+    if (!result.ok) return result;
+    next = result.value;
+  }
+  return ok(next);
+}
+
+export function addAnnotation(topology: Topology, annotation: Annotation): CommandResult {
+  if (annotation.id in topology.annotations) {
+    return err({ kind: 'duplicate-id', id: annotation.id });
+  }
+  return ok(
+    produce(topology, (draft) => {
+      draft.annotations[annotation.id] = annotation;
+    }),
+  );
+}
+
+export function editNote(
+  topology: Topology,
+  { annotation, text }: { annotation: AnnotationId; text: string },
+): CommandResult {
+  const current = topology.annotations[annotation];
+  if (!current) return err({ kind: 'annotation-not-found', annotation });
+  if (current.text === text) return ok(topology);
+  return ok(
+    produce(topology, (draft) => {
+      draft.annotations[annotation] = { ...current, text };
+    }),
+  );
+}
+
+export type AnnotationMove = { annotation: AnnotationId; position: Point };
+
+export function moveAnnotations(topology: Topology, moves: readonly AnnotationMove[]): Topology {
+  return produce(topology, (draft) => {
+    for (const { annotation, position } of moves) {
+      const target = draft.annotations[annotation];
+      if (target) target.position = position;
+    }
+  });
+}
+
+export function removeAnnotations(topology: Topology, ids: readonly AnnotationId[]): Topology {
+  return produce(topology, (draft) => {
+    for (const id of ids) delete draft.annotations[id];
   });
 }
 

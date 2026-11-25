@@ -299,8 +299,9 @@ const CABLE_MEDIUM: Record<Cable, Medium> = {
 };
 
 export type TopologyError =
-  | { kind: 'duplicate-id'; id: DeviceId | LinkId }
+  | { kind: 'duplicate-id'; id: DeviceId | LinkId | AnnotationId }
   | { kind: 'device-not-found'; device: DeviceId }
+  | { kind: 'annotation-not-found'; annotation: AnnotationId }
   | { kind: 'device-kind-mismatch'; device: DeviceId; expected: DeviceKind; actual: DeviceKind }
   | { kind: 'link-not-found'; link: LinkId }
   | { kind: 'duplicate-port'; device: DeviceId; port: PortId }
@@ -370,6 +371,8 @@ export function describeTopologyError(error: TopologyError): string {
       return `ID ${error.id} is already in use`;
     case 'device-not-found':
       return `Device ${error.device} does not exist`;
+    case 'annotation-not-found':
+      return `Annotation ${error.annotation} does not exist`;
     case 'device-kind-mismatch':
       return `Device ${error.device} is a ${error.actual}, not a ${error.expected}`;
     case 'link-not-found':
