@@ -78,6 +78,28 @@ async function lastRowHop(page: Page) {
   return hops.get(Math.max(...hops.keys()));
 }
 
+/**
+ * The event list and the canvas in one read, so a check sees both at the same instant: how many
+ * events there are, the hop on the furthest row and whether it is current, and the chips.
+ */
+const moment = (page: Page) =>
+  page.evaluate(() => {
+    const grid = document.querySelector('[role="grid"][aria-label="Events"]');
+    const rows = [...(grid?.querySelectorAll('[role="rowgroup"] [role="row"]') ?? [])];
+    const index = (row: Element) => Number(row.getAttribute('aria-rowindex'));
+    const last = rows.reduce<Element | undefined>(
+      (furthest, row) => (furthest && index(furthest) > index(row) ? furthest : row),
+      undefined,
+    );
+    const cells = [...(last?.querySelectorAll('[role="gridcell"]') ?? [])];
+    return {
+      events: Number(grid?.getAttribute('aria-rowcount') ?? 1) - 1,
+      hop: cells.slice(1, 4).map((cell) => cell.textContent ?? ''),
+      current: last?.getAttribute('data-current') === 'true',
+      chips: (window as unknown as TrafficWindow).tracerTraffic.chips(),
+    };
+  });
+
 async function enterSimulation(page: Page) {
   await page.getByRole('radio', { name: 'Simulation' }).click();
   await expect(page.getByRole('toolbar', { name: 'Simulation timeline' })).toBeVisible();
@@ -130,36 +152,54 @@ test('Show traffic turns the chips off', async ({ page }) => {
   expect(await chips(page)).toEqual([]);
 });
 
-test('in Simulation mode, a cross-router ping steps hop by hop, forwards and back, in sync', async ({
-  page,
-}) => {
+/** Simulation mode, paused, with PC1's ping to PC2 queued and spanning tree out of the way. */
+async function pausedPing(page: Page) {
   await openRoutedLab(page);
   await enterSimulation(page);
   await expect(page.getByRole('button', { name: 'Step back' })).toBeDisabled();
   await skipNextHello(page);
   await pingPc2(page);
+}
+
+test('in Simulation mode, a cross-router ping steps forward hop by hop, list and canvas in sync', async ({
+  page,
+}) => {
+  await pausedPing(page);
   // Paused: nothing moves until a step.
   await page.waitForTimeout(200);
   await expectRowCount(page, 0);
 
   for (const [index, [from, to, type, link]] of HOPS.entries()) {
     await page.getByRole('button', { name: 'Step forward' }).click();
-    await expectRowCount(page, index + 1);
-    expect(await lastRowHop(page)).toEqual([from, to, type]);
-    await expect(eventRows(page).last()).toHaveAttribute('data-current', 'true');
-    await expect
-      .poll(() => chips(page))
-      .toEqual([expect.objectContaining({ link, protocol: type.toLowerCase(), motion: 'arrive' })]);
+    await expect.poll(() => moment(page)).toEqual({
+      events: index + 1,
+      hop: [from, to, type],
+      current: true,
+      chips: [expect.objectContaining({ link, protocol: type.toLowerCase(), motion: 'arrive' })],
+    });
   }
+});
+
+test('in Simulation mode, stepping back undoes the hops in turn, and forward again replays them', async ({
+  page,
+}) => {
+  await pausedPing(page);
+  for (let index = 0; index < HOPS.length; index++) await page.keyboard.press('ArrowRight');
+  await expectRowCount(page, HOPS.length);
 
   for (let index = HOPS.length - 2; index >= 0; index--) {
     await page.keyboard.press('ArrowLeft');
-    await expectRowCount(page, index + 1);
     const [from, to, type, link] = HOPS[index]!;
-    expect(await lastRowHop(page)).toEqual([from, to, type]);
     await expect
-      .poll(async () => (await chips(page)).filter((chip) => chip.motion === 'rest'))
-      .toEqual([expect.objectContaining({ link, protocol: type.toLowerCase() })]);
+      .poll(async () => {
+        const { events, hop, chips } = await moment(page);
+        return { events, hop, resting: chips.filter((chip) => chip.motion === 'rest') };
+      })
+      .toEqual({
+        events: index + 1,
+        hop: [from, to, type],
+        resting: [expect.objectContaining({ link, protocol: type.toLowerCase() })],
+      });
   }
 
   // Forward again replays the same hops.
