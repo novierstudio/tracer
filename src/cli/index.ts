@@ -13,6 +13,14 @@ export {
   type SessionState,
 } from './device/session';
 export { CLOCK_RATES } from './device/commands';
+export {
+  answerQuery,
+  type EngineAnswers,
+  type EngineQuery,
+  type EngineQueryKind,
+  type EngineSource,
+  type PortStates,
+} from './device/query';
 export { runningConfig, UNSUPPORTED_MARKER } from './device/show';
 export { formatError, formatHelp } from './format';
 export { expandInterfaceRange, INTERFACE_TYPES, normalizeInterface } from './interfaces';

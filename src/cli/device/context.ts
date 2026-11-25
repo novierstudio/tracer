@@ -37,6 +37,7 @@ export interface RouterContext extends DeviceContext {
 
 export interface SwitchContext extends DeviceContext {
   readonly device: Draft<SwitchDevice>;
+  query<K extends EngineQueryKind>(kind: K, render: Render<K, SwitchDevice>): readonly string[];
 }
 
 export const INVALID_INPUT = "% Invalid input detected at '^' marker.";

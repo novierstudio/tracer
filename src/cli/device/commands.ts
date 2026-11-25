@@ -56,6 +56,13 @@ import {
   showStartupConfig,
   showVersion,
 } from './show';
+import { showArp, showIpRoute, showSwitchIpRoute } from './showRouting';
+import {
+  showInterfacesSwitchport,
+  showInterfacesTrunk,
+  showMacAddressTable,
+  showVlanBrief,
+} from './showSwitching';
 
 const EXEC = ['user-exec', 'priv-exec'] as const;
 const PRIV = ['priv-exec'] as const;
@@ -81,6 +88,9 @@ const routerCommand = defineCommand<RouterContext>();
 const switchCommand = defineCommand<SwitchContext>();
 
 const show = keyword('show', 'Show running system information');
+const showIp = keyword('ip', 'IP information');
+const showInterfacesKw = keyword('interfaces', 'Interface status and configuration');
+const showSwitchport = keyword('switchport', 'Show interface switchport information');
 const interfaceKw = keyword('interface', 'Select an interface to configure');
 const globalIp = keyword('ip', 'Global IP configuration subcommands');
 const interfaceIp = keyword('ip', 'Interface Internet Protocol config commands');
@@ -351,26 +361,33 @@ export const commonCommands = [
     modes: EXEC,
     path: [
       show,
-      keyword('ip', 'IP information'),
+      showIp,
       keyword('interface', 'IP interface status and configuration'),
       keyword('brief', 'Brief summary of IP status and configuration'),
     ],
-    run: (_a, ctx) => showIpInterfaceBrief(ctx.device),
+    run: (_a, ctx) => ctx.query('ports', (ports, device) => showIpInterfaceBrief(device, ports)),
   }),
   command({
     modes: EXEC,
-    path: [show, keyword('interfaces', 'Interface status and configuration')],
-    run: (_a, ctx) => showInterfaces(ctx.device) ?? NOTHING,
+    path: [show, showInterfacesKw],
+    run: (_a, ctx) =>
+      ctx.query('ports', (ports, device) => showInterfaces(device, undefined, ports) ?? NOTHING),
   }),
   command({
     modes: EXEC,
-    path: [
-      show,
-      keyword('interfaces', 'Interface status and configuration'),
-      iface('name', 'Interface name'),
-    ],
-    run: ({ name }, ctx) => showInterfaces(ctx.device, name) ?? ctx.reject(INVALID_INPUT),
+    path: [show, showInterfacesKw, iface('name', 'Interface name')],
+    run: ({ name }, ctx) =>
+      findInterface(ctx.device, name)
+        ? ctx.query('ports', (ports, device) => showInterfaces(device, name, ports) ?? NOTHING)
+        : ctx.reject(INVALID_INPUT),
   }),
+  ...[[keyword('arp', 'ARP table')], [showIp, keyword('arp', 'IP ARP table')]].map((words) =>
+    command({
+      modes: EXEC,
+      path: [show, ...words],
+      run: (_a, ctx) => ctx.query('arp', showArp),
+    }),
+  ),
 
   // Every config mode
   command({
@@ -729,8 +746,15 @@ function transportCommands() {
   ];
 }
 
+const routeKeyword = keyword('route', 'IP routing table');
+
 export const routerCommands = [
   ...commonCommands,
+  routerCommand({
+    modes: EXEC,
+    path: [show, showIp, routeKeyword],
+    run: (_a, ctx) => ctx.query('routes', showIpRoute),
+  }),
   routerCommand({
     modes: GLOBAL,
     path: [lineKw, keyword('aux', 'Auxiliary line'), num('number', 0, 0, 'First Line number')],
@@ -988,8 +1012,58 @@ function allowedVlanCommands() {
   ];
 }
 
+/** Show commands only a switch has: its VLANs, trunks and learned addresses. */
+const switchShowCommands = [
+  switchCommand({
+    modes: EXEC,
+    path: [show, showIp, routeKeyword],
+    run: (_a, ctx) => showSwitchIpRoute(ctx.device),
+  }),
+  ...[
+    [keyword('mac', 'MAC configuration'), keyword('address-table', 'MAC forwarding table')],
+    [keyword('mac-address-table', 'MAC forwarding table')],
+  ].map((words) =>
+    switchCommand({
+      modes: EXEC,
+      path: [show, ...words],
+      run: (_a, ctx) => ctx.query('macTable', showMacAddressTable),
+    }),
+  ),
+  switchCommand({
+    modes: EXEC,
+    path: [
+      show,
+      keyword('vlan', 'VTP VLAN status'),
+      keyword('brief', 'VTP all VLAN status in brief'),
+    ],
+    run: (_a, ctx) => showVlanBrief(ctx.device),
+  }),
+  switchCommand({
+    modes: EXEC,
+    path: [show, showInterfacesKw, keyword('trunk', 'Show interface trunk information')],
+    run: (_a, ctx) => ctx.query('ports', (ports, device) => showInterfacesTrunk(device, ports)),
+  }),
+  switchCommand({
+    modes: EXEC,
+    path: [show, showInterfacesKw, showSwitchport],
+    run: (_a, ctx) =>
+      ctx.query('ports', (ports, device) => showInterfacesSwitchport(device, undefined, ports)),
+  }),
+  switchCommand({
+    modes: EXEC,
+    path: [show, showInterfacesKw, iface('name', 'Interface name'), showSwitchport],
+    run: ({ name }, ctx) => {
+      const target = findInterface(ctx.device, name);
+      if (target?.kind !== 'switched') return ctx.reject(INVALID_INPUT);
+      const port = target.port.id;
+      return ctx.query('ports', (ports, device) => showInterfacesSwitchport(device, port, ports));
+    },
+  }),
+];
+
 export const switchCommands = [
   ...commonCommands,
+  ...switchShowCommands,
   switchCommand({
     modes: GLOBAL,
     path: [keyword('vlan', 'Vlan commands'), num('vlan', 1, 4094, 'ISL VLAN IDs 1-1005')],
