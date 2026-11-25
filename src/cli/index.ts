@@ -12,6 +12,7 @@ export {
   type SessionResult,
   type SessionState,
 } from './device/session';
+export { CLOCK_RATES } from './device/commands';
 export { runningConfig, UNSUPPORTED_MARKER } from './device/show';
 export { formatError, formatHelp } from './format';
 export { expandInterfaceRange, INTERFACE_TYPES, normalizeInterface } from './interfaces';
