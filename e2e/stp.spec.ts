@@ -141,7 +141,7 @@ test('a lab pings within seconds of loading, and Lab settings switches it to the
     await page.keyboard.press('Enter');
   };
   await showSpanningTree();
-  await expect.poll(shown).toContain('HelloTime1secMaxAge7secForwardDelay2sec');
+  await expect.poll(shown).toContain('HelloTime2secMaxAge8secForwardDelay2sec');
 
   await page.getByRole('button', { name: 'Tracer menu' }).click();
   await page.getByRole('menuitem', { name: 'Lab settings…' }).click();

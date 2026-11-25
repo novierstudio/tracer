@@ -38,8 +38,8 @@ const VLAN1_ROOT: SpanningTreeVlan = {
   rootCost: 0,
   rootPort: undefined,
   bridge: { priority: 32769, mac: mac('02:00:00:00:00:11') },
-  times: { hello: 1, maxAge: 7, forwardDelay: 2 },
-  bridgeTimes: { hello: 1, maxAge: 7, forwardDelay: 2 },
+  times: { hello: 2, maxAge: 8, forwardDelay: 2 },
+  bridgeTimes: { hello: 2, maxAge: 8, forwardDelay: 2 },
   agingTime: 300,
   ports: [
     {
@@ -69,7 +69,7 @@ const VLAN10_BLOCKING: SpanningTreeVlan = {
   bridge: { priority: 32778, mac: mac('02:00:00:00:00:11') },
   // A root on the IOS timers that this bridge, set to fast, has not become.
   times: { hello: 2, maxAge: 20, forwardDelay: 15 },
-  bridgeTimes: { hello: 1, maxAge: 7, forwardDelay: 2 },
+  bridgeTimes: { hello: 2, maxAge: 8, forwardDelay: 2 },
   agingTime: 15,
   ports: [
     {
@@ -101,11 +101,11 @@ describe('show spanning-tree', () => {
       '  Root ID    Priority    32769',
       '             Address     0200.0000.0011',
       '             This bridge is the root',
-      '             Hello Time  1 sec  Max Age 7 sec  Forward Delay 2 sec',
+      '             Hello Time  2 sec  Max Age 8 sec  Forward Delay 2 sec',
       '',
       '  Bridge ID  Priority    32769  (priority 32768 sys-id-ext 1)',
       '             Address     0200.0000.0011',
-      '             Hello Time  1 sec  Max Age 7 sec  Forward Delay 2 sec',
+      '             Hello Time  2 sec  Max Age 8 sec  Forward Delay 2 sec',
       '             Aging Time  300 sec',
       '',
       'Interface        Role Sts Cost      Prio.Nbr Type',
@@ -123,7 +123,7 @@ describe('show spanning-tree', () => {
       '',
       '  Bridge ID  Priority    32778  (priority 32768 sys-id-ext 10)',
       '             Address     0200.0000.0011',
-      '             Hello Time  1 sec  Max Age 7 sec  Forward Delay 2 sec',
+      '             Hello Time  2 sec  Max Age 8 sec  Forward Delay 2 sec',
       '             Aging Time  15 sec',
       '',
       'Interface        Role Sts Cost      Prio.Nbr Type',
@@ -194,8 +194,8 @@ describe('show spanning-tree timers', () => {
     };
 
     expect(timers()).toEqual([
-      '             Hello Time  1 sec  Max Age 7 sec  Forward Delay 2 sec',
-      '             Hello Time  1 sec  Max Age 7 sec  Forward Delay 2 sec',
+      '             Hello Time  2 sec  Max Age 8 sec  Forward Delay 2 sec',
+      '             Hello Time  2 sec  Max Age 8 sec  Forward Delay 2 sec',
     ]);
     sim.applyPatch({ devices: {}, links: {}, settings: { stpTimers: 'ios' } });
     expect(timers()).toEqual([

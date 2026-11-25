@@ -21,19 +21,20 @@ export type StpTimes = {
 
 /**
  * Tracer's default: a new port listens for 2 s and learns for 2 s, so a lab pings within seconds.
+ * Only forward delay stands between a new port and forwarding, so hello stays at the IOS 2 s and
+ * a lab sends no more BPDUs than on the real timers.
  *
  * 802.1D asks for max age >= 2 x (hello + 1), so the root's information outlives a lost hello:
- * 7 >= 4 holds. It also asks for 2 x (forward delay - 1) >= max age, so the information about a
+ * 8 >= 6 holds. It also asks for 2 x (forward delay - 1) >= max age, so the information about a
  * failed path has aged out across the network before a port that replaces it forwards, allowing
- * a second per hop for BPDUs to cross it: 2 >= 7 does not hold. Tracer moves a BPDU across a hop
+ * a second per hop for BPDUs to cross it: 2 >= 8 does not hold. Tracer moves a BPDU across a hop
  * in 1 ms and never loses one, so news of a change reaches every bridge within one forward delay.
  *
- * Each bridge adds 1 to a BPDU's message age, and a bridge drops the root's information once it
- * is a hello short of max age, so bridges up to 6 hops from the root keep hearing it. That is a
- * line of 7 switches with the root at one end, the diameter IOS plans its own defaults for; at 6,
- * the seventh switch would lose the root every second.
+ * Each bridge adds 1 to a BPDU's message age, and a bridge drops the root's information when the
+ * next hello would arrive too late, so bridges up to 6 hops from the root keep hearing it. That
+ * is a line of 7 switches with the root at one end, the diameter IOS plans its own defaults for.
  */
-const FAST_TIMES: StpTimes = { hello: 1, maxAge: 7, forwardDelay: 2 };
+const FAST_TIMES: StpTimes = { hello: 2, maxAge: 8, forwardDelay: 2 };
 
 /** The timers each bridge is configured with, by the lab's setting: 4 s or 30 s to forwarding. */
 export const STP_TIMES: Record<StpTimers, StpTimes> = {
