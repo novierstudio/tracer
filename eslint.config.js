@@ -19,7 +19,9 @@ export default defineConfig([
     languageOptions: { globals: globals.node },
   },
   {
-    files: ['src/engine/**', 'src/cli/**', 'src/importers/**', 'src/workers/**'],
+    files: ['src/engine/**', 'src/cli/**', 'src/importers/**', 'src/workers/**', 'src/model/**'],
+    // The model's one React binding.
+    ignores: ['src/model/react.ts', 'src/model/react.test.ts'],
     rules: {
       'no-restricted-imports': [
         'error',
