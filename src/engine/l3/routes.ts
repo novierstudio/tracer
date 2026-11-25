@@ -1,10 +1,10 @@
-import {
+import type {
+  Device,
+  InterfaceId,
   Ipv4Address,
+  Ipv4Cidr,
   PrefixLength,
-  type Device,
-  type InterfaceId,
-  type Ipv4Cidr,
-  type StaticRoute,
+  StaticRoute,
 } from '@/model';
 import type { IpInterface } from './interfaces';
 import { compareAddresses, inPrefix, networkOf } from './ipv4';
@@ -25,12 +25,13 @@ export type Route =
 /** Where to hand a packet: out this interface, to the neighbour at this address. */
 export type NextHop = { readonly interface: IpInterface; readonly address: Ipv4Address };
 
+// Literals, not schema parses, so the worker bundle does not pull in zod and the model schemas.
 const DEFAULT_ROUTE: Ipv4Cidr = {
-  address: Ipv4Address.parse('0.0.0.0'),
-  prefixLength: PrefixLength.parse(0),
+  address: '0.0.0.0' as Ipv4Address,
+  prefixLength: 0 as PrefixLength,
 };
 
-const HOST_PREFIX = PrefixLength.parse(32);
+const HOST_PREFIX = 32 as PrefixLength;
 
 /** IOS gives up resolving a next hop through other static routes after this many levels. */
 const MAX_RECURSION = 8;

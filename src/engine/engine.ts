@@ -1,14 +1,5 @@
-import {
-  err,
-  ok,
-  type Device,
-  type DeviceId,
-  type Endpoint,
-  type Link,
-  type LinkId,
-  type Result,
-  type Topology,
-} from '@/model';
+import type { Device, DeviceId, Endpoint, Link, LinkId, Topology } from '@/model';
+import { err, ok, type Result } from '@/model/result';
 import { createEventLog, type EventLog } from './core/log';
 import { createEventQueue, type QueueEntry } from './core/queue';
 import { createRandom } from './core/random';
