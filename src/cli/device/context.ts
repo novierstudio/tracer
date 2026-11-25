@@ -1,5 +1,6 @@
 import type { Draft } from 'immer';
 import type { Device } from '../../model';
+import type { EngineQueryKind, Render } from './query';
 
 export type IosDevice = Extract<Device, { kind: 'router' | 'switch' }>;
 export type RouterDevice = Extract<Device, { kind: 'router' }>;
@@ -23,6 +24,11 @@ export interface DeviceContext {
   reject(message: string): readonly string[];
   /** Holds the mode and reads the next lines as `pending` input. Returns the lines to print. */
   ask(pending: Pending): readonly string[];
+  /**
+   * Marks the command as a show command that reads live simulation state of `kind`. Returns the
+   * config-only output, `render(undefined)`, for the handler to return.
+   */
+  query<K extends EngineQueryKind>(kind: K, render: Render<K>): readonly string[];
 }
 
 export interface RouterContext extends DeviceContext {
