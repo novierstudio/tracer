@@ -1,13 +1,15 @@
 import { useEffect, useState } from 'react';
 import { editorStore } from '@/model/store';
+import { connectSimulation } from './controller';
 import { exposeSimClient } from './devHandle';
 import { trackLinkStates } from './linkState';
 
 export type EngineState = 'starting' | 'ready' | 'failed';
 
 /**
- * Starts the simulation worker, which then follows every edit to the editor's topology, and feeds
- * its link states to the canvas link lights. Mount it once: the status bar's EngineStatus does.
+ * Starts the simulation worker, which then follows every edit to the editor's topology, feeds
+ * its link states to the canvas link lights, and connects the timeline, event list and traffic
+ * overlay. Mount it once: the status bar's EngineStatus does.
  */
 export function useEngine(): EngineState {
   const [state, setState] = useState<EngineState>('starting');
@@ -15,12 +17,14 @@ export function useEngine(): EngineState {
   useEffect(() => {
     let active = true;
     let stopTracking: (() => void) | undefined;
+    let disconnect: (() => void) | undefined;
     import('@/engine/client')
       .then(({ startEngine }) => startEngine(editorStore))
       .then(
         (client) => {
           if (!active) return;
           stopTracking = trackLinkStates(client);
+          disconnect = connectSimulation(client);
           exposeSimClient(client);
           setState('ready');
         },
@@ -32,6 +36,7 @@ export function useEngine(): EngineState {
     return () => {
       active = false;
       stopTracking?.();
+      disconnect?.();
     };
   }, []);
 
