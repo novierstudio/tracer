@@ -1,14 +1,22 @@
-import type { Ipv4Address } from '@/model';
-import type { PingEvent, PingListener, SimAPI, SimEventBatch } from './api';
+import { ok, type DeviceId, type Result } from '@/model';
+import type {
+  DeviceUnavailable,
+  PingEvent,
+  ProbeHandle,
+  SimAPI,
+  SimEventBatch,
+  TraceEvent,
+} from './api';
 import { after, ms } from './core/time';
 import type { Engine } from './engine';
 import type { EventId } from './events';
 import { createHistory, stepInstant, type History, type Input } from './history';
 import { macTable, spanningTreeOf, switchingModule } from './l2/switching';
-import { arpTable } from './l3/arp';
-import { routesOf } from './l3/context';
-import { ipModule } from './l3/ip';
-import { startPing } from './l3/ping';
+import { arpTable, clearArp } from './l3/arp';
+import { routesOf, type IpContext } from './l3/context';
+import { ipModule, stopProbe } from './l3/ip';
+import { pingSummary, startPing } from './l3/ping';
+import { startTrace } from './l3/traceroute';
 
 /** The wall clock and frame timer that drive playback. The worker passes the real ones. */
 export type FrameClock = {
@@ -35,40 +43,47 @@ const sameStatus = (left: Status, right: Status) =>
   left.canStepBack === right.canStepBack;
 
 /**
- * Wraps a ping's listener so it hears each request's fate once, however often stepping back
- * replays it. If the history forgets the ping, it ends with a summary of what it heard.
+ * Wraps a listener so it hears each event once, however often stepping back replays it. `order`
+ * places an event in the run, Infinity for the last one. If the history forgets the run, the
+ * listener hears `ending`, the last event as it would be after what it heard.
  */
-function hearOnce(target: Ipv4Address, listener: PingListener) {
-  let heard = 0;
-  const replies: number[] = [];
+function hearOnce<E>(
+  listener: (event: E) => void,
+  order: (event: E) => number,
+  ending: (heard: readonly E[]) => E,
+) {
+  let last = 0;
+  const heard: E[] = [];
+  const once = (event: E) => {
+    const at = order(event);
+    if (at <= last) return;
+    last = at;
+    heard.push(event);
+    listener(event);
+  };
   return {
-    listener(event: PingEvent) {
-      const order = event.kind === 'summary' ? Infinity : event.seq;
-      if (order <= heard) return;
-      heard = order;
-      if (event.kind === 'reply') replies.push(event.timeMs);
-      listener(event);
-    },
+    listener: once,
     forget() {
-      if (heard === Infinity) return;
-      const sent = heard;
-      heard = Infinity;
-      const total = replies.reduce((sum, time) => sum + time, 0);
-      listener({
-        kind: 'summary',
-        target,
-        sent,
-        received: replies.length,
-        ...(replies.length > 0 && {
-          rtt: {
-            minMs: Math.min(...replies),
-            avgMs: total / replies.length,
-            maxMs: Math.max(...replies),
-          },
-        }),
-      });
+      if (last !== Infinity) once(ending(heard));
     },
   };
+}
+
+const pingOrder = (event: PingEvent) => (event.kind === 'summary' ? Infinity : event.seq);
+
+const traceOrder = (probesPerHop: number) => (event: TraceEvent) =>
+  event.kind === 'done' ? Infinity : (event.hop - 1) * probesPerHop + event.probe;
+
+function checkCount(name: string, count: number) {
+  if (!Number.isInteger(count) || count < 1) {
+    throw new RangeError(`${name} must be a whole number >= 1, got ${count}`);
+  }
+}
+
+function checkTimeout(timeoutMs: number) {
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    throw new RangeError(`Timeout must be a finite number of milliseconds > 0, got ${timeoutMs}`);
+  }
 }
 
 /** Implements SimAPI on top of an engine. Batches go to the listener at most once per frame. */
@@ -85,6 +100,9 @@ export function createSimService({
   let flushed = 0 as EventId;
   let sent: Status | undefined;
   let framePending = false;
+  /** How to cancel each ping and traceroute that has not ended. */
+  const cancels = new Map<ProbeHandle, () => void>();
+  let nextHandle = 1;
 
   /** Applies an input now. In Simulation mode the history records it, so replays repeat it. */
   function input(entry: Input) {
@@ -146,6 +164,47 @@ export function createSimService({
     frames.request(onFrame);
   }
 
+  /**
+   * Starts a ping or traceroute on `device` as an input, so a replay starts it again, and returns
+   * the handle that cancels it. `start` returns the run's id in the device's IP stack.
+   */
+  function startProbe<E>(
+    device: DeviceId,
+    listener: (event: E) => void,
+    order: (event: E) => number,
+    ending: (heard: readonly E[]) => E,
+    start: (ctx: IpContext, listener: (event: E) => void) => number,
+  ): Result<ProbeHandle, DeviceUnavailable> {
+    const handle = nextHandle++ as ProbeHandle;
+    const once = hearOnce(
+      (event: E) => {
+        if (order(event) === Infinity) cancels.delete(handle);
+        listener(event);
+      },
+      order,
+      ending,
+    );
+    let id = 0;
+    let started: Result<void, DeviceUnavailable> | undefined;
+    input({
+      apply: () => {
+        started = engine.withModule(
+          device,
+          ipModule,
+          (ctx) => void (id = start(ctx, once.listener)),
+        );
+      },
+      forget: once.forget,
+    });
+    requestFrame();
+    if (!started!.ok) return started!;
+    cancels.set(handle, () => {
+      input({ apply: () => void engine.withModule(device, ipModule, (ctx) => stopProbe(ctx, id)) });
+      requestFrame();
+    });
+    return ok(handle);
+  }
+
   function play(speed: number) {
     if (!Number.isFinite(speed) || speed <= 0) {
       throw new RangeError(`Speed must be a finite number > 0, got ${speed}`);
@@ -200,27 +259,45 @@ export function createSimService({
     },
     runCommand: () => ({ kind: 'not-implemented' }),
     ping(device, target, options, listener) {
-      const { count, timeoutMs } = options;
-      if (!Number.isInteger(count) || count < 1) {
-        throw new RangeError(`Count must be a whole number >= 1, got ${count}`);
-      }
-      if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
-        throw new RangeError(
-          `Timeout must be a finite number of milliseconds > 0, got ${timeoutMs}`,
-        );
-      }
-      const once = hearOnce(target, listener);
-      let started: ReturnType<SimAPI['ping']> | undefined;
+      if (options.count !== Infinity) checkCount('Count', options.count);
+      checkTimeout(options.timeoutMs);
+      return startProbe(
+        device,
+        listener,
+        pingOrder,
+        (heard) =>
+          pingSummary(
+            target,
+            heard.length,
+            heard.flatMap((event) => (event.kind === 'reply' ? [event.timeMs] : [])),
+          ),
+        (ctx, once) => startPing(ctx, target, options, once),
+      );
+    },
+    traceroute(device, target, options, listener) {
+      checkCount('Max hops', options.maxHops);
+      checkCount('Probes per hop', options.probesPerHop);
+      checkTimeout(options.timeoutMs);
+      return startProbe(
+        device,
+        listener,
+        traceOrder(options.probesPerHop),
+        (): TraceEvent => ({ kind: 'done' }),
+        (ctx, once) => startTrace(ctx, target, options, once),
+      );
+    },
+    cancel(handle) {
+      cancels.get(handle)?.();
+    },
+    clearArp(device, address) {
+      let cleared: Result<number, DeviceUnavailable> | undefined;
       input({
         apply: () => {
-          started = engine.withModule(device, ipModule, (ctx) =>
-            startPing(ctx, target, options, once.listener),
-          );
+          cleared = engine.withModule(device, ipModule, (ctx) => clearArp(ctx, address));
         },
-        forget: once.forget,
       });
       requestFrame();
-      return started!;
+      return cleared!;
     },
     arpTable: (device) => engine.withModule(device, ipModule, arpTable),
     routes: (device) => engine.withModule(device, ipModule, (ctx) => routesOf(ctx).routes),

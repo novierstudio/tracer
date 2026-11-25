@@ -27,18 +27,18 @@ export function transmit(
 }
 
 /**
- * Sends a packet the device itself creates, from `src` or else from the interface it leaves by.
- * A packet for one of the device's own addresses loops back on the next tick. Returns false when
- * there is no route, and the packet is dropped.
+ * Sends a packet the device itself creates, from `src` or else from the interface it leaves by,
+ * with the device's initial TTL unless `ttl` says otherwise. A packet for one of the device's own
+ * addresses loops back on the next tick. Returns false when there is no route, and the packet is
+ * dropped.
  */
 export function originate(
   ctx: IpContext,
   dst: Ipv4Address,
   payload: Ipv4Payload,
-  src?: Ipv4Address,
+  { src, ttl = INITIAL_TTL[ctx.device.kind] }: { src?: Ipv4Address; ttl?: number } = {},
 ): boolean {
   const { interfaces, routes } = routesOf(ctx);
-  const ttl = INITIAL_TTL[ctx.device.kind];
   if (ownsAddress(interfaces, dst)) {
     ctx.state.loopback.push({
       kind: 'ipv4',

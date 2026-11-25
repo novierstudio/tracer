@@ -1,20 +1,45 @@
 import type { SimModule } from '../module';
 import { BROADCAST_MAC, type Ipv4Packet } from '../pdu';
 import { forgetPort, onArp, onArpTimer } from './arp';
-import { interfacesOf, parseTimer, routesOf, type IpContext, type IpState } from './context';
+import {
+  interfacesOf,
+  parseTimer,
+  routesOf,
+  type IpContext,
+  type IpState,
+  type Probe,
+} from './context';
+import { matchAnswer, type EchoAnswer } from './echo';
 import { lanInterfaceFor, ownsAddress, serialOn } from './interfaces';
 import { originate, reportError, transmit } from './output';
-import { endPings, onPingAnswer, onPingTimer } from './ping';
+import { finishPing, onPingAnswer, onPingTimer } from './ping';
 import { nextHop } from './routes';
+import { finishTrace, onTraceAnswer } from './traceroute';
+
+function onProbeAnswer(ctx: IpContext, probe: Probe, answer: EchoAnswer) {
+  if (probe.kind === 'ping') onPingAnswer(ctx, probe, answer);
+  else onTraceAnswer(ctx, probe, answer);
+}
+
+/**
+ * Ends the ping or traceroute `id`, if it still runs: no more requests go out, and its listener
+ * hears a summary of what came back so far.
+ */
+export function stopProbe(ctx: IpContext, id: number) {
+  const probe = ctx.state.probes.get(id);
+  if (probe?.kind === 'ping') finishPing(ctx, probe);
+  else if (probe?.kind === 'trace') finishTrace(ctx, probe);
+}
 
 function deliver(ctx: IpContext, packet: Ipv4Packet) {
   const message = packet.payload;
   if (message.type === 'echo-request') {
     const reply = { kind: 'icmp', type: 'echo-reply', id: message.id, seq: message.seq } as const;
-    originate(ctx, packet.src, reply, packet.dst);
-  } else {
-    onPingAnswer(ctx, packet, message);
+    originate(ctx, packet.src, reply, { src: packet.dst });
+    return;
   }
+  const answered = matchAnswer(ctx, packet, message);
+  if (answered) onProbeAnswer(ctx, answered.probe, answered.answer);
 }
 
 /**
@@ -48,8 +73,8 @@ function receive(ctx: IpContext, packet: Ipv4Packet) {
 }
 
 /**
- * IPv4 on a router or an end host: ARP, forwarding, ICMP and ping in one module, since every
- * part reads the same ARP cache and the module boundary keeps state private. The device's
+ * IPv4 on a router or an end host: ARP, forwarding, ICMP, ping and traceroute in one module, since
+ * every part reads the same ARP cache and the module boundary keeps state private. The device's
  * interfaces and routing table are derived from its config and link state on each use, so a
  * config edit or a link change takes effect on the next packet with nothing to invalidate.
  */
@@ -58,10 +83,10 @@ export const ipModule: SimModule<IpState> = {
   init: () => ({
     arp: new Map(),
     resolving: new Map(),
-    pings: new Map(),
+    probes: new Map(),
     loopback: [],
     nextPacketId: 1,
-    nextPingId: 1,
+    nextProbeId: 1,
   }),
   onFrame(ctx, port, frame) {
     switch (frame.kind) {
@@ -87,9 +112,12 @@ export const ipModule: SimModule<IpState> = {
       case 'arp':
         onArpTimer(ctx, timer.address);
         return;
-      case 'ping':
-        onPingTimer(ctx, timer.id);
+      case 'probe': {
+        const probe = ctx.state.probes.get(timer.id);
+        if (probe?.kind === 'ping') onPingTimer(ctx, probe);
+        else if (probe) onProbeAnswer(ctx, probe, { kind: 'timeout' });
         return;
+      }
       case 'loopback':
         for (const packet of ctx.state.loopback.splice(0)) deliver(ctx, packet);
         return;
@@ -100,5 +128,8 @@ export const ipModule: SimModule<IpState> = {
   onLinkChange(ctx, port, up) {
     if (!up) forgetPort(ctx, port);
   },
-  onStop: endPings,
+  /** The device is going away: every ping and traceroute it runs ends with what it got so far. */
+  onStop(ctx) {
+    for (const id of [...ctx.state.probes.keys()]) stopProbe(ctx, id);
+  },
 };

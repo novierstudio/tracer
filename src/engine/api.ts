@@ -7,6 +7,7 @@ import type { PortRole, PortState, SpanningTreePort, StpTimes } from './l2/stp';
 import type { ArpTableEntry } from './l3/arp';
 import type { PingEvent, PingListener, PingOptions, PingReply, PingSummary } from './l3/ping';
 import type { Route } from './l3/routes';
+import type { TraceEvent, TraceListener, TraceOptions, TraceProbe } from './l3/traceroute';
 import type { DeviceUnavailable } from './module';
 import type { TopologyPatch } from './patch';
 
@@ -27,7 +28,16 @@ export type {
   SpanningTreePort,
   SpanningTreeVlan,
   StpTimes,
+  TraceEvent,
+  TraceListener,
+  TraceOptions,
+  TraceProbe,
 };
+
+declare const probeHandleBrand: unique symbol;
+
+/** Names a ping or traceroute that `ping` or `traceroute` started, so `cancel` can stop it. */
+export type ProbeHandle = number & { readonly [probeHandleBrand]: true };
 
 export type SimMode = 'realtime' | 'simulation';
 
@@ -85,15 +95,37 @@ export interface SimAPI {
    * apart, each waiting up to `timeoutMs`. Each request's fate, then a summary, goes to `listener`
    * as the simulation runs; nothing arrives while it is paused. The listener hears each fate once
    * even when stepping back replays it, and a ping that a step back un-starts ends with a summary
-   * of what it heard. Throws a RangeError for a count that is not a whole number >= 1 or a timeout
-   * that is not > 0.
+   * of what it heard. A count of Infinity pings until cancelled. Throws a RangeError for a count
+   * that is not a whole number >= 1 or Infinity, or a timeout that is not > 0.
    */
   ping(
     device: DeviceId,
     target: Ipv4Address,
     options: PingOptions,
     listener: PingListener,
-  ): Result<void, DeviceUnavailable>;
+  ): Result<ProbeHandle, DeviceUnavailable>;
+  /**
+   * Traces the route to `target` from a router or host: `probesPerHop` echo requests with TTL 1,
+   * then 2, and on up to `maxHops`, each waiting up to `timeoutMs`. Each probe's fate, then `done`,
+   * goes to `listener` as the simulation runs, heard once as with `ping`. Throws a RangeError for
+   * a hop or probe count that is not a whole number >= 1, or a timeout that is not > 0.
+   */
+  traceroute(
+    device: DeviceId,
+    target: Ipv4Address,
+    options: TraceOptions,
+    listener: TraceListener,
+  ): Result<ProbeHandle, DeviceUnavailable>;
+  /**
+   * Stops a ping or traceroute now: no more requests go out, and its listener hears the summary
+   * so far, or `done`. One that has ended already is left alone.
+   */
+  cancel(handle: ProbeHandle): void;
+  /**
+   * Forgets one learned address on a router or host, or all of them, as `arp -d` does, so the
+   * next packet to that neighbour asks ARP again. Returns how many entries went.
+   */
+  clearArp(device: DeviceId, address?: Ipv4Address): Result<number, DeviceUnavailable>;
   /** A router or host's own Ethernet addresses and the ones it has learned, by address. */
   arpTable(device: DeviceId): Result<ArpTableEntry[], DeviceUnavailable>;
   /** The routes a router or host uses now, by network, for `show ip route`. */

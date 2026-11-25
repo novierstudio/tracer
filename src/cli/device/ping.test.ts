@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { PingEvent, PingListener } from '../../engine/api';
+import type { PingEvent, PingListener, ProbeHandle } from '../../engine/api';
 import { Ipv4Address } from '../../model';
 import { openStream, type EngineStream, type StreamSource } from './query';
 import { consoleOn, router, switchDevice } from './testing';
@@ -39,7 +39,7 @@ function scripted() {
   const source: StreamSource = {
     ping: async (_target, _options, next) => {
       listener = next;
-      return { ok: true, value: undefined };
+      return { ok: true, value: 1 as ProbeHandle };
     },
   };
   return {

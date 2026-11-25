@@ -194,3 +194,15 @@ export function arpTable(ctx: IpContext): ArpTableEntry[] {
   );
   return [...own, ...learned].sort((a, b) => compareAddresses(a.address, b.address));
 }
+
+/**
+ * Forgets the learned address `address`, or every learned address, as `arp -d` does. The next
+ * packet for a forgotten neighbour asks ARP again. Returns how many entries went.
+ */
+export function clearArp(ctx: IpContext, address?: Ipv4Address): number {
+  const { arp } = ctx.state;
+  if (address !== undefined) return arp.delete(address) ? 1 : 0;
+  const cleared = arp.size;
+  arp.clear();
+  return cleared;
+}

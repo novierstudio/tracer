@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { DeviceId, StaticRoute, Topology } from '@/model';
-import type { PingEvent } from '../api';
+import type { PingEvent, TraceEvent } from '../api';
 import { ms, simTime } from '../core/time';
 import { createEngine, type Engine } from '../engine';
 import type { EventId } from '../events';
@@ -37,8 +37,42 @@ function simulate(topology: Topology) {
     if (!result.ok) throw new Error(result.error);
     return result.value;
   };
-  return { engine, sim, ping, startPing, value };
+  /** Starts a traceroute. Its events land in `events` as the engine runs. */
+  const startTrace = (
+    from: DeviceId,
+    target: string,
+    { maxHops = 30, probesPerHop = 3, timeoutMs = 1000 } = {},
+  ) => {
+    const events: TraceEvent[] = [];
+    const options = { maxHops, probesPerHop, timeoutMs };
+    const handle = value(sim.traceroute(from, ip(target), options, (event) => events.push(event)));
+    return { events, handle };
+  };
+  /** Traces and runs the simulation until the traceroute is done. */
+  const trace = (from: DeviceId, target: string, options?: Parameters<typeof startTrace>[2]) => {
+    const { events } = startTrace(from, target, options);
+    while (!events.some((event) => event.kind === 'done') && engine.nextTime() !== undefined) {
+      engine.step();
+    }
+    return events;
+  };
+  return { engine, sim, ping, startPing, startTrace, trace, value };
 }
+
+/** Each hop of a traceroute: who answered each probe, or `*` for none. */
+function hopsOf(events: TraceEvent[]): string[][] {
+  const hops: string[][] = [];
+  for (const event of events) {
+    if (event.kind === 'done') continue;
+    const answer = event.kind === 'timeout' ? '*' : event.from;
+    (hops[event.hop - 1] ??= []).push(answer);
+  }
+  return hops;
+}
+
+/** The frames `device` sent since `since`. */
+const framesFrom = (engine: Engine, since: EventId, device: DeviceId) =>
+  engine.log.since(since).filter((event) => event.kind === 'frame' && event.from.device === device);
 
 const replies = (events: PingEvent[]) => events.filter((event) => event.kind !== 'summary');
 const summary = (events: PingEvent[]) => events.find((event) => event.kind === 'summary');
@@ -393,7 +427,7 @@ describe('SimAPI.ping', () => {
     });
     expect(sim.ping(pc1, ip('192.168.1.20'), options, () => {})).toEqual({
       ok: true,
-      value: undefined,
+      value: expect.any(Number),
     });
   });
 
@@ -419,5 +453,222 @@ describe('SimAPI.ping', () => {
 
     expect(events.map((event) => event.kind)).toEqual(['reply', 'reply', 'summary']);
     expect(summary(events)).toMatchObject({ sent: 2, received: 2 });
+  });
+});
+
+describe('SimAPI.cancel', () => {
+  it('stops a ping: no more echo requests go out, and the summary says what came back', () => {
+    const { lab, pc1 } = oneLan();
+    const { engine, sim, value } = simulate(lab.topology);
+    const events: PingEvent[] = [];
+    const handle = value(
+      sim.ping(pc1, ip('192.168.1.20'), { count: 4, timeoutMs: 1000 }, (e) => events.push(e)),
+    );
+
+    engine.runUntil(simTime(engine.now + 1500));
+    const mark = engine.log.lastId;
+    sim.cancel(handle);
+    engine.runUntil(simTime(engine.now + 10_000));
+
+    expect(events.map((event) => event.kind)).toEqual(['reply', 'reply', 'summary']);
+    expect(summary(events)).toMatchObject({ sent: 2, received: 2 });
+    expect(framesFrom(engine, mark, pc1)).toEqual([]);
+  });
+
+  it('runs a ping of Infinity requests until cancelled, as ping -t does', () => {
+    const { lab, pc1 } = oneLan();
+    const { engine, sim, value } = simulate(lab.topology);
+    const events: PingEvent[] = [];
+    const options = { count: Infinity, timeoutMs: 1000 };
+    const handle = value(sim.ping(pc1, ip('192.168.1.20'), options, (e) => events.push(e)));
+
+    engine.runUntil(simTime(engine.now + 9_500));
+    expect(replies(events)).toHaveLength(10);
+    sim.cancel(handle);
+    const mark = engine.log.lastId;
+    engine.runUntil(simTime(engine.now + 60_000));
+
+    expect(summary(events)).toMatchObject({ sent: 10, received: 10 });
+    expect(framesFrom(engine, mark, pc1)).toEqual([]);
+  });
+
+  it('counts the request in flight as sent, and ignores a second cancel', () => {
+    const { lab, pc1, pc2 } = oneLan();
+    const { engine, sim, value } = simulate(lab.topology);
+    engine.applyPatch({ devices: { [pc2]: { ...lab.device(pc2), powered: false } }, links: {} });
+    const events: PingEvent[] = [];
+    const handle = value(
+      sim.ping(pc1, ip('192.168.1.20'), { count: 4, timeoutMs: 1000 }, (e) => events.push(e)),
+    );
+
+    engine.runUntil(simTime(engine.now + 500));
+    sim.cancel(handle);
+    sim.cancel(handle);
+
+    expect(events).toEqual([{ kind: 'summary', target: '192.168.1.20', sent: 1, received: 0 }]);
+  });
+
+  it('stops a traceroute, which then says it is done', () => {
+    const { lab, pc1 } = routedLab([staticRoute('10.99.0.0/16', '192.168.2.99')]);
+    const { engine, sim, startTrace } = simulate(lab.topology);
+    const { events, handle } = startTrace(pc1, '10.99.0.1', { timeoutMs: 1000 });
+
+    engine.runUntil(simTime(engine.now + 2500));
+    const mark = engine.log.lastId;
+    sim.cancel(handle);
+    engine.runUntil(simTime(engine.now + 60_000));
+
+    // Two probes of hop 2 time out a second apart; the third is in flight when it is cancelled.
+    expect(hopsOf(events)).toEqual([
+      ['192.168.1.1', '192.168.1.1', '192.168.1.1'],
+      ['*', '*'],
+    ]);
+    expect(events.at(-1)).toEqual({ kind: 'done' });
+    // R1 gives up on ARP for the missing next hop, but PC1 sends nothing more.
+    expect(framesFrom(engine, mark, pc1)).toEqual([]);
+  });
+});
+
+describe('SimAPI.traceroute', () => {
+  const linked = () =>
+    twoRouters({
+      between: 'ethernet',
+      r1Routes: [staticRoute('192.168.2.0/24', '10.0.12.2')],
+      r2Routes: [staticRoute('192.168.1.0/24', '10.0.12.1')],
+    });
+
+  it('lists each router across two of them, then the target, three probes per hop', () => {
+    const { lab, pc1 } = linked();
+    const { trace } = simulate(lab.topology);
+
+    const events = trace(pc1, '192.168.2.10');
+
+    expect(hopsOf(events)).toEqual([
+      ['192.168.1.1', '192.168.1.1', '192.168.1.1'],
+      ['10.0.12.2', '10.0.12.2', '10.0.12.2'],
+      ['192.168.2.10', '192.168.2.10', '192.168.2.10'],
+    ]);
+    expect(events.map((event) => event.kind)).toEqual([
+      ...Array<string>(6).fill('ttl-expired'),
+      ...Array<string>(3).fill('reply'),
+      'done',
+    ]);
+  });
+
+  it('starts from a router too, whose first hop is its neighbour', () => {
+    const { lab, r1 } = linked();
+    const { trace } = simulate(lab.topology);
+
+    expect(hopsOf(trace(r1, '192.168.2.10'))).toEqual([
+      ['10.0.12.2', '10.0.12.2', '10.0.12.2'],
+      ['192.168.2.10', '192.168.2.10', '192.168.2.10'],
+    ]);
+  });
+
+  it('shows * for hops past a black hole, up to the hop limit', () => {
+    const { lab, pc1 } = twoRouters({
+      between: 'ethernet',
+      r1Routes: [staticRoute('10.99.0.0/16', '10.0.12.2')],
+      // 192.168.2.99 does not exist, so R2 drops what it routes there when ARP gives up.
+      r2Routes: [
+        staticRoute('10.99.0.0/16', '192.168.2.99'),
+        staticRoute('192.168.1.0/24', '10.0.12.1'),
+      ],
+    });
+    const { trace } = simulate(lab.topology);
+
+    const events = trace(pc1, '10.99.0.1', { maxHops: 4 });
+
+    expect(hopsOf(events)).toEqual([
+      ['192.168.1.1', '192.168.1.1', '192.168.1.1'],
+      ['10.0.12.2', '10.0.12.2', '10.0.12.2'],
+      ['*', '*', '*'],
+      ['*', '*', '*'],
+    ]);
+    expect(events.at(-1)).toEqual({ kind: 'done' });
+  });
+
+  it('ends at a Destination Unreachable', () => {
+    const { lab, pc1 } = routedLab();
+    const { trace } = simulate(lab.topology);
+
+    const events = trace(pc1, '10.99.0.1');
+
+    // R1 checks the TTL before it looks for a route, so the first hop still expires.
+    expect(hopsOf(events)).toEqual([
+      ['192.168.1.1', '192.168.1.1', '192.168.1.1'],
+      ['192.168.1.1'],
+    ]);
+    expect(events.slice(-2)).toEqual([
+      { kind: 'unreachable', hop: 2, probe: 1, from: '192.168.1.1', code: 'network', timeMs: 4 },
+      { kind: 'done' },
+    ]);
+  });
+
+  it('repeats the hops of a routing loop until the hop limit', () => {
+    const { lab, pc1 } = twoRouters({
+      between: 'ethernet',
+      r1Routes: [staticRoute('10.99.0.0/16', '10.0.12.2')],
+      r2Routes: [
+        staticRoute('10.99.0.0/16', '10.0.12.1'),
+        staticRoute('192.168.1.0/24', '10.0.12.1'),
+      ],
+    });
+    const { trace } = simulate(lab.topology);
+
+    const answers = hopsOf(trace(pc1, '10.99.0.1', { maxHops: 6, probesPerHop: 1 }));
+
+    // R1 answers from the interface the error leaves by, which faces PC1.
+    expect(answers.flat()).toEqual([
+      '192.168.1.1',
+      '10.0.12.2',
+      '192.168.1.1',
+      '10.0.12.2',
+      '192.168.1.1',
+      '10.0.12.2',
+    ]);
+  });
+
+  it('rejects hop and probe counts that are not whole numbers >= 1', () => {
+    const { lab, pc1 } = routedLab();
+    const { sim } = simulate(lab.topology);
+    const options = { maxHops: 30, probesPerHop: 3, timeoutMs: 1000 };
+
+    for (const bad of [{ maxHops: 0 }, { probesPerHop: 1.5 }, { timeoutMs: 0 }]) {
+      expect(() =>
+        sim.traceroute(pc1, ip('192.168.2.10'), { ...options, ...bad }, () => {}),
+      ).toThrow(RangeError);
+    }
+  });
+});
+
+describe('SimAPI.clearArp', () => {
+  it('forgets every learned address, so the next ping asks ARP again', () => {
+    const { lab, pc1 } = oneLan();
+    const { engine, sim, ping, value } = simulate(lab.topology);
+    ping(pc1, '192.168.1.20', { count: 1 });
+    ping(pc1, '192.168.1.30', { count: 1 });
+    expect(arpRequestsFrom(engine, pc1)).toBe(2);
+
+    expect(value(sim.clearArp(pc1))).toBe(2);
+    expect(value(sim.arpTable(pc1)).map((entry) => entry.kind)).toEqual(['interface']);
+
+    ping(pc1, '192.168.1.20', { count: 1 });
+    expect(arpRequestsFrom(engine, pc1)).toBe(3);
+  });
+
+  it('forgets one address, and says when it knew none', () => {
+    const { lab, pc1 } = oneLan();
+    const { sim, ping, value } = simulate(lab.topology);
+    ping(pc1, '192.168.1.20', { count: 1 });
+    ping(pc1, '192.168.1.30', { count: 1 });
+
+    expect(value(sim.clearArp(pc1, ip('192.168.1.20')))).toBe(1);
+    expect(value(sim.clearArp(pc1, ip('192.168.1.20')))).toBe(0);
+    expect(value(sim.arpTable(pc1)).map((entry) => entry.address)).toEqual([
+      '192.168.1.10',
+      '192.168.1.30',
+    ]);
+    expect(sim.clearArp('dev_gone' as DeviceId)).toEqual({ ok: false, error: 'unknown-device' });
   });
 });
