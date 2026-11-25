@@ -11,6 +11,7 @@ import { BottomPanel } from '@/features/simulation/BottomPanel';
 import { Button } from '@/ui/button';
 import { cn } from '@/ui/cn';
 import { Dialog, SheetContent } from '@/ui/dialog';
+import { editorStore } from '@/model/store';
 import { Kbd } from '@/ui/kbd';
 import { readJson, safeStorage } from '../storage';
 import { useMediaQuery } from '../useMediaQuery';
@@ -134,6 +135,8 @@ export function Shell() {
     };
     const actions: Record<ShortcutId, () => void> = {
       commandPalette: () => setCommandsOpen((open) => !open),
+      undo: () => editorStore.getState().undo(),
+      redo: () => editorStore.getState().redo(),
       togglePalette: panelAction(
         () => openSide('palette'),
         () => toggleSide('palette'),
