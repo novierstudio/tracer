@@ -3,9 +3,23 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { createIdSource, Topology, type Device, type Endpoint, type RouterConfig } from '@/model';
+import {
+  createIdSource,
+  Hostname,
+  Topology,
+  type Device,
+  type Endpoint,
+  type RouterConfig,
+} from '@/model';
 import { encryptPkt } from './codec';
-import { importPkt, mapPktXml, type MapOptions, type PktImport, type ReplayConfig } from './mapper';
+import {
+  importPkt,
+  keepLinesAsUnknown,
+  mapPktXml,
+  type MapOptions,
+  type PktImport,
+  type ReplayConfig,
+} from './mapper';
 import type { ReportEntry } from './report';
 
 const NOW = new Date('2026-11-25T00:00:00.000Z');
@@ -436,8 +450,16 @@ describe('mapPktXml', () => {
     expect(byHostname(topology, 'B').position).toEqual({ x: 149.5, y: 0 });
   });
 
-  it('keeps running-config lines as unknown lines by default', () => {
+  it('applies the running-config through the IOS commands by default', () => {
     const result = imported(networkXml([fastSwitch('S1')]));
+    const device = byHostname(result.topology, 'S1');
+    expect(device.config).toMatchObject({ hostname: 'S1', unknownLines: [] });
+    expect(device.kind === 'switch' && device.config.virtualInterfaces).toHaveProperty('Vlan1');
+    expect(entriesOf(result, 'config-kept')).toEqual([]);
+  });
+
+  it('keeps running-config lines verbatim with keepLinesAsUnknown', () => {
+    const result = imported(networkXml([fastSwitch('S1')]), { replayConfig: keepLinesAsUnknown });
     const device = byHostname(result.topology, 'S1');
     const lines = [
       'hostname Switch',
@@ -454,9 +476,10 @@ describe('mapPktXml', () => {
 
   it('replays the running-config through replayConfig and keeps the canvas label as hostname', () => {
     const calls: { config: unknown; lines: readonly string[] }[] = [];
-    const replayConfig: ReplayConfig = (config, lines) => {
-      calls.push({ config, lines });
-      return { ...config, hostname: 'FromConfig', unknownLines: ['banner motd #hi#'] };
+    const replayConfig: ReplayConfig = (device, lines) => {
+      calls.push({ config: device.config, lines });
+      const hostname = Hostname.parse('FromConfig');
+      return { ...device.config, hostname, unknownLines: ['banner motd #hi#'] };
     };
     const result = imported(
       networkXml([
@@ -476,7 +499,7 @@ describe('mapPktXml', () => {
       ]),
       { replayConfig },
     );
-    expect(calls).toEqual([
+    expect(calls).toMatchObject([
       {
         config: {
           hostname: 'R1',
@@ -683,11 +706,12 @@ describe('importPkt', () => {
       });
     });
 
-    it('keeps each running-config as unknown lines until the CLI can replay it', () => {
+    it('replays each running-config, keeping only the lines Tracer does not support yet', () => {
       const kept = entriesOf(eigrp, 'config-kept');
       expect(kept).toHaveLength(4);
-      expect(kept[0]?.lines).toContain('hostname R1');
-      expect(kept[0]?.lines).toContain(' ip address 10.1.1.1 255.255.255.0');
+      expect(kept[0]?.lines).toContain('ip cef');
+      expect(kept[0]?.lines).not.toContain('hostname R1');
+      expect(kept[0]?.lines).not.toContain(' ip address 10.1.1.1 255.255.255.0');
     });
 
     it('passes the Topology schema', () => {
