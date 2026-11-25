@@ -61,7 +61,7 @@ function router(id: string, hostname: string, x: number, console?: { password: s
   };
 }
 
-function switch24(id: string, hostname: string, x: number) {
+export function switch24(id: string, hostname: string, x: number, y = 0) {
   const ports = [
     ...ethernet('fastEthernet', range('FastEthernet0/', 1, 24)),
     ...ethernet('gigabitEthernet', range('GigabitEthernet0/', 1, 2)),
@@ -70,7 +70,7 @@ function switch24(id: string, hostname: string, x: number) {
     id,
     kind: 'switch',
     model: 'switch-24',
-    position: { x, y: 0 },
+    position: { x, y },
     powered: true,
     ports,
     config: {
