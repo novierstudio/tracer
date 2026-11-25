@@ -23,7 +23,8 @@ import type {
   SwitchContext,
   SwitchDevice,
 } from './context';
-import { bindQuery, type EngineQuery } from './query';
+import { applyModifier, pipeComplete, pipeHelp, readPipe } from './pipe';
+import { bindQuery, mapQuery, type EngineQuery } from './query';
 import { blankLine } from './show';
 
 const ROUTER_TREE = buildTree<RouterContext>(routerCommands);
@@ -357,12 +358,22 @@ export function createDeviceSession(start: SessionState = { mode: USER_EXEC }): 
     prompt: promptOf,
     run(device, line) {
       const width = promptOf(device).length;
-      const result = step(device, state, line);
+      const piped = state.pending
+        ? { kind: 'none' as const }
+        : readPipe(line, state.mode, treeOf(device), width);
+      if (piped.kind === 'error') return { output: piped.output, update: undefined };
+      const result = step(device, state, piped.kind === 'piped' ? piped.command : line);
       state = result.state;
       const update = result.device === device ? undefined : toConfigUpdate(result.device);
       switch (result.outcome.kind) {
-        case 'done':
-          return { output: result.output, update, ...(result.query && { query: result.query }) };
+        case 'done': {
+          if (piped.kind === 'none') {
+            return { output: result.output, update, ...(result.query && { query: result.query }) };
+          }
+          const filter = (lines: readonly string[]) => applyModifier(piped.modifier, lines);
+          const query = result.query && mapQuery(result.query, filter);
+          return { output: filter(result.output), update, ...(query && { query }) };
+        }
         case 'invalid':
           return { output: formatError(result.outcome.error, width), update };
         case 'rejected':
@@ -371,11 +382,16 @@ export function createDeviceSession(start: SessionState = { mode: USER_EXEC }): 
     },
     help(device, line) {
       if (state.pending) return [];
-      return formatHelp(help(line, state.mode, treeOf(device)), promptOf(device).length);
+      const width = promptOf(device).length;
+      const tree = treeOf(device);
+      return (
+        pipeHelp(line, state.mode, tree, width) ?? formatHelp(help(line, state.mode, tree), width)
+      );
     },
     complete(device, line) {
       if (state.pending) return { line: undefined, candidates: [] };
-      return complete(line, state.mode, treeOf(device));
+      const tree = treeOf(device);
+      return pipeComplete(line, state.mode, tree) ?? complete(line, state.mode, tree);
     },
   };
 }

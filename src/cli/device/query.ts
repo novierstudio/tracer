@@ -45,6 +45,16 @@ export function bindQuery<K extends EngineQueryKind>(
   return { kind, render: (answer: EngineAnswers[K]) => render(answer, device) } as EngineQuery;
 }
 
+/** The query with `map` applied to its output, such as an output modifier's filter. */
+export function mapQuery(
+  query: EngineQuery,
+  map: (lines: readonly string[]) => readonly string[],
+): EngineQuery {
+  // Each member's render takes its own answer; the union's call signature takes their intersection.
+  const render = query.render as (answer: never) => readonly string[];
+  return { kind: query.kind, render: (answer: never) => map(render(answer)) } as EngineQuery;
+}
+
 /** Asks the simulation for each kind of state on one device. Undefined when it cannot answer. */
 export type EngineSource = {
   readonly [K in EngineQueryKind]: () => Promise<EngineAnswers[K] | undefined>;
