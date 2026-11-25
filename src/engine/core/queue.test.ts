@@ -90,3 +90,36 @@ describe('createEventQueue', () => {
     expect(drain(queue)).toEqual(['new']);
   });
 });
+
+describe('save and restore', () => {
+  it('rebuilds the same pop order, ties included, and keeps counting pushes from where it was', () => {
+    const queue = createEventQueue<string>();
+    queue.push(simTime(2), 'tie one');
+    const gone = queue.push(simTime(1), 'cancelled');
+    queue.push(simTime(2), 'tie two');
+    queue.push(simTime(0), 'first');
+    queue.cancel(gone);
+    const saved = queue.save();
+
+    queue.push(simTime(0), 'after the save');
+    const restored = queue.restore(saved.entries, saved.seq);
+    expect(restored.map((entry) => entry.value).sort()).toEqual(['first', 'tie one', 'tie two']);
+    queue.push(simTime(2), 'tie three');
+
+    expect(drain(queue)).toEqual(['first', 'tie one', 'tie two', 'tie three']);
+  });
+
+  it('hands back live handles, so a restored entry can be cancelled', () => {
+    const queue = createEventQueue<string>();
+    queue.push(simTime(1), 'a');
+    queue.push(simTime(2), 'b');
+    const saved = queue.save();
+
+    const [a] = queue.restore(
+      saved.entries.filter((entry) => entry.value === 'a'),
+      saved.seq,
+    );
+    queue.cancel(a!);
+    expect(drain(queue)).toEqual([]);
+  });
+});

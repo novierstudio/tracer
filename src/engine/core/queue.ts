@@ -7,6 +7,9 @@ export type QueueEntry<T> = {
   readonly queued: boolean;
 };
 
+/** What a snapshot keeps of one queued entry. */
+export type SavedEntry<T> = { readonly time: SimTime; readonly seq: number; readonly value: T };
+
 export type EventQueue<T> = {
   push(time: SimTime, value: T): QueueEntry<T>;
   /** Removes a queued entry. Harmless on one that was already popped or cancelled. */
@@ -14,6 +17,10 @@ export type EventQueue<T> = {
   peek(): QueueEntry<T> | undefined;
   pop(): QueueEntry<T> | undefined;
   clear(): void;
+  /** The queued entries in no particular order, and the push counter, for a snapshot. */
+  save(): { entries: SavedEntry<T>[]; seq: number };
+  /** Replaces the contents with saved entries. Returns their new handles, in the order given. */
+  restore(entries: readonly SavedEntry<T>[], seq: number): QueueEntry<T>[];
 };
 
 type Entry<T> = { -readonly [K in keyof QueueEntry<T>]: QueueEntry<T>[K] };
@@ -103,6 +110,20 @@ export function createEventQueue<T>(): EventQueue<T> {
       heap = [];
       seq = 0;
       cancelled = 0;
+    },
+    save() {
+      const entries = heap
+        .filter((entry) => entry.queued)
+        .map(({ time, seq, value }) => ({ time, seq, value }));
+      return { entries, seq };
+    },
+    restore(entries, nextSeq) {
+      const restored = entries.map(({ time, seq, value }) => ({ time, seq, value, queued: true }));
+      heap = [...restored];
+      seq = nextSeq;
+      cancelled = 0;
+      for (let index = (heap.length >> 1) - 1; index >= 0; index--) siftDown(index);
+      return restored;
     },
   };
 }
