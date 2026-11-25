@@ -22,7 +22,9 @@ const GRID_DOTS = {
 };
 
 function CanvasSkeleton() {
-  return <div aria-busy aria-label="Loading canvas" className="absolute inset-0" style={GRID_DOTS} />;
+  return (
+    <div aria-busy aria-label="Loading canvas" className="absolute inset-0" style={GRID_DOTS} />
+  );
 }
 
 type CanvasProps = { fullscreen: boolean; children?: ReactNode };

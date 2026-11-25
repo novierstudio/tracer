@@ -20,7 +20,7 @@ import { editorStore } from '@/model/store';
 import type { Command } from '@/features/command/registry';
 import { cableTool } from './cableTool';
 import type { CableFlowEdge, DeviceFlowNode } from './flow';
-import { GRID } from './geometry';
+import { GRID, snap } from './geometry';
 
 type CanvasHandle = {
   flow: ReactFlowInstance<DeviceFlowNode, CableFlowEdge>;
@@ -63,8 +63,6 @@ export function zoomBy(direction: 'in' | 'out') {
 export function zoomToActualSize() {
   void mounted?.flow.zoomTo(1, { duration: motion() });
 }
-
-const snap = (value: number) => Math.round(value / GRID) * GRID;
 
 /** The nearest grid point at or after `point`, stepping diagonally past devices already there. */
 function freeSpot(point: Point, taken: readonly Point[]): Point {
