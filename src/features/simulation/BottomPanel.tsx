@@ -1,5 +1,5 @@
 import { ChevronDownIcon, ListIcon, MailIcon, PlayIcon, TerminalIcon } from 'lucide-react';
-import { useState } from 'react';
+import { lazy, Suspense, useState } from 'react';
 import { formatShortcut } from '@/app/shell/shortcuts';
 import { HostPrompt } from '@/features/desktop/HostPrompt';
 import { DeviceTerminal } from '@/features/terminal/Terminal';
@@ -12,9 +12,13 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/ui/tabs';
 import { Tooltip } from '@/ui/tooltip';
 import { simulation } from './controller';
 import { EventList } from './EventList';
-import { PduInspector } from './PduInspector';
 import { selectedFrame, useSimulation } from './store';
 import { Timeline } from './Timeline';
+
+// Most sessions never open a packet, so the inspector loads on first use.
+const PduInspector = lazy(() =>
+  import('./PduInspector').then(({ PduInspector }) => ({ default: PduInspector })),
+);
 
 const emptyClass =
   'flex flex-col items-center justify-center gap-1 overflow-y-auto px-6 pb-4 text-center text-xs text-balance text-fg-2';
@@ -63,7 +67,11 @@ function SimulationEvents() {
           >
             <EventList />
           </div>
-          {selected && <PduInspector key={selected.id} event={selected} />}
+          {selected && (
+            <Suspense>
+              <PduInspector key={selected.id} event={selected} />
+            </Suspense>
+          )}
         </div>
       )}
     </>
