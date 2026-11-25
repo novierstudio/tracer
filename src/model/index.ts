@@ -4,3 +4,4 @@ export * from './ids';
 export * from './result';
 export * from './topology';
 export * from './values';
+export * from './vlans';

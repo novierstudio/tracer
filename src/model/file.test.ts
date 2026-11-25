@@ -120,6 +120,7 @@ describe('topology files', () => {
       'domainLookup',
       'lines',
       'staticRoutes',
+      'subinterfaces',
     ];
     for (const id of [r1.id, sw.id]) {
       for (const field of added) delete document.devices[id].config[field];
@@ -134,6 +135,7 @@ describe('topology files', () => {
       servicePasswordEncryption: false,
       domainLookup: true,
       staticRoutes: [],
+      subinterfaces: {},
     });
     expect(routerConfig?.lines.aux.login).toBe('none');
     expect(routerConfig?.lines.vty).toHaveLength(16);

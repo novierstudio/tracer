@@ -285,6 +285,7 @@ export function createDevice(
           interfaces: Object.fromEntries(
             ports.map((port): [PortId, RoutedInterface] => [port.id, { shutdown: true }]),
           ),
+          subinterfaces: {},
           lines: factoryRouterLines(),
           staticRoutes: [],
           ...spec.config,
