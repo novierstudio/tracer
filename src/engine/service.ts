@@ -71,7 +71,7 @@ export function createSimService({
     if (events.length === 0 && sent && sameStatus(sent, status)) return;
     flushed = engine.log.lastId;
     sent = status;
-    listener({ ...status, events });
+    listener({ ...status, events, links: engine.linkStates() });
   }
 
   function onFrame() {
