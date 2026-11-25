@@ -1,4 +1,4 @@
-import type { DeviceId, Endpoint, LinkId } from '@/model';
+import type { DeviceId, Endpoint, LinkId, PortId } from '@/model';
 import type { SimTime } from './core/time';
 import type { Frame } from './frame';
 
@@ -8,6 +8,9 @@ declare const eventIdBrand: unique symbol;
 export type EventId = number & { readonly [eventIdBrand]: true };
 
 export type FrameOutcome = 'delivered' | 'link-down';
+
+/** A frame a device sent out of one of its ports. */
+export type SentFrame = { readonly port: PortId; readonly frame: Frame };
 
 /** One frame on one link, logged when its fate is known: on arrival, or at once if the link is down. */
 export type FrameEvent = {
@@ -20,6 +23,11 @@ export type FrameEvent = {
   to: Endpoint;
   frame: Frame;
   outcome: FrameOutcome;
+  /**
+   * What the receiving device sent while it handled the frame, in order: a forwarded copy, a
+   * reply, an error. Empty when it kept or dropped the frame. Only delivered frames have it.
+   */
+  sent?: readonly SentFrame[];
 };
 
 export type LinkEvent = { kind: 'link'; id: EventId; time: SimTime; link: LinkId; up: boolean };

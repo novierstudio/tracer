@@ -140,6 +140,31 @@ describe('load', () => {
 });
 
 describe('a hello frame', () => {
+  it('lists what the receiving device sent while it handled the frame', () => {
+    const { topology, pc, sw } = lab();
+    // Sends every frame back out of the port it came in on, and once more out of Fa0/2.
+    const echo: SimModule<null> = {
+      id: 'echo',
+      init: () => null,
+      onFrame(ctx, ingress, frame) {
+        ctx.send(ingress, frame);
+        ctx.send(port('FastEthernet0/2'), frame);
+      },
+    };
+    const engine = engineFor(stacksOf({ pc: [helloModule()], switch: [echo] }));
+    engine.load(topology);
+
+    const [arrival] = frames(engine.runUntil(simTime(3)));
+    const hello = { kind: 'hello', origin: pc.id, seq: 1 };
+    expect(arrival).toMatchObject({
+      to: end(sw, 'FastEthernet0/1'),
+      sent: [
+        { port: 'FastEthernet0/1', frame: hello },
+        { port: 'FastEthernet0/2', frame: hello },
+      ],
+    });
+  });
+
   it('reaches the peer port after the link delay and is logged with its outcome', () => {
     const { topology, pc, sw, pcLink } = lab();
     const engine = engineFor(stacksOf({ pc: [helloModule()], switch: [listenerModule] }));
@@ -160,6 +185,7 @@ describe('a hello frame', () => {
         to: end(sw, 'FastEthernet0/1'),
         frame: { kind: 'hello', origin: pc.id, seq: 1 },
         outcome: 'delivered',
+        sent: [],
       },
       {
         id: expect.any(Number),
