@@ -10,7 +10,9 @@ export type Pending =
   /** `banner motd #` without the closing `#`: later lines are banner text. */
   | { readonly kind: 'banner'; readonly delimiter: string; readonly text: string }
   /** `enable` on a device with an enable secret or password. */
-  | { readonly kind: 'enable-password'; readonly attempts: number };
+  | { readonly kind: 'enable-password'; readonly attempts: number }
+  /** Opening the console when its line has `login` and a password. */
+  | { readonly kind: 'login'; readonly attempts: number };
 
 export type IosDraft = Draft<RouterDevice> | Draft<SwitchDevice>;
 

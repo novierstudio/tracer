@@ -90,6 +90,25 @@ function checkEnablePassword<D extends IosDevice>(
   };
 }
 
+const LOGIN_ATTEMPTS = 3;
+
+/** IOS asks again after three wrong passwords, as a console does after `% Bad passwords`. */
+function checkLoginPassword<D extends IosDevice>(
+  device: D,
+  state: SessionState,
+  pending: Extract<Pending, { kind: 'login' }>,
+  line: string,
+): Step<D> {
+  const { password } = device.config.lines.console;
+  if (password === undefined || line === password) {
+    return { device, state: { mode: state.mode }, output: [], outcome: DONE };
+  }
+  const attempts = pending.attempts + 1;
+  const output = attempts >= LOGIN_ATTEMPTS ? ['% Bad passwords'] : [];
+  const next = { kind: 'login', attempts: attempts % LOGIN_ATTEMPTS } as const;
+  return { device, state: { mode: state.mode, pending: next }, output, outcome: DONE };
+}
+
 const isComment = (line: string) => /^\s*!/.test(line);
 
 function stepWith<D extends IosDevice>(
@@ -101,6 +120,7 @@ function stepWith<D extends IosDevice>(
   const { pending } = state;
   if (pending?.kind === 'banner') return continueBanner(device, state, pending, line);
   if (pending?.kind === 'enable-password') return checkEnablePassword(device, state, pending, line);
+  if (pending?.kind === 'login') return checkLoginPassword(device, state, pending, line);
   if (isComment(line)) return { device, state, output: [], outcome: DONE };
 
   const parsed = parse(line, state.mode, tree);
@@ -295,10 +315,12 @@ export interface DeviceSession {
 const treeOf = (device: IosDevice): CommandTree<never> =>
   (device.kind === 'router' ? ROUTER_TREE : SWITCH_TREE) as CommandTree<never>;
 
-export function createDeviceSession(start: Mode = USER_EXEC): DeviceSession {
-  let state: SessionState = { mode: start };
+export function createDeviceSession(start: SessionState = { mode: USER_EXEC }): DeviceSession {
+  let state = start;
+  const readingPassword = () =>
+    state.pending?.kind === 'enable-password' || state.pending?.kind === 'login';
   const promptOf = (device: IosDevice) => {
-    if (state.pending?.kind === 'enable-password') return 'Password: ';
+    if (readingPassword()) return 'Password: ';
     if (state.pending?.kind === 'banner') return '';
     return prompt(device.config.hostname, state.mode);
   };
@@ -307,7 +329,7 @@ export function createDeviceSession(start: Mode = USER_EXEC): DeviceSession {
       return state;
     },
     get readingPassword() {
-      return state.pending?.kind === 'enable-password';
+      return readingPassword();
     },
     prompt: promptOf,
     run(device, line) {
@@ -333,4 +355,29 @@ export function createDeviceSession(start: Mode = USER_EXEC): DeviceSession {
       return complete(line, state.mode, treeOf(device));
     },
   };
+}
+
+export interface Console {
+  readonly session: DeviceSession;
+  /** What the console prints before the first prompt. */
+  readonly greeting: readonly string[];
+}
+
+/**
+ * Connects to the device's console line, as plugging in a console cable does: the MOTD banner,
+ * then the line password when the line has `login` and a password. `login local` lets the
+ * console in, since the model has no usernames yet.
+ */
+export function openConsole(device: IosDevice): Console {
+  const { bannerMotd, lines } = device.config;
+  const locked = lines.console.login === 'password' && lines.console.password !== undefined;
+  const greeting = [
+    ...(bannerMotd === undefined ? [] : bannerMotd.split('\n')),
+    ...(locked ? ['', 'User Access Verification', ''] : []),
+  ];
+  const session = createDeviceSession({
+    mode: USER_EXEC,
+    ...(locked && { pending: { kind: 'login', attempts: 0 } }),
+  });
+  return { session, greeting };
 }

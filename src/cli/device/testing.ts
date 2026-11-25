@@ -8,7 +8,7 @@ import {
 } from '../../model';
 import { createEditorStore } from '../../model/store';
 import type { IosDevice, RouterDevice, SwitchDevice } from './context';
-import { createDeviceSession } from './session';
+import { openConsole } from './session';
 
 const KIND_BY_PREFIX: Record<string, PortSpec['kind']> = {
   FastEthernet: 'fastEthernet',
@@ -74,11 +74,12 @@ export function consoleOn<D extends IosDevice>(device: D) {
     },
     ids: createIdSource(1),
   });
-  const session = createDeviceSession();
+  const { session, greeting } = openConsole(device);
   const current = () => store.getState().topology.devices[device.id] as D;
   return {
     store,
     session,
+    greeting,
     get device() {
       return current();
     },
