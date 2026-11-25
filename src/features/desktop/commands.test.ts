@@ -21,8 +21,8 @@ describe('parseCommand', () => {
     expect(parsed('ping /n 1 10.0.0.2')).toMatchObject({ count: 1 });
   });
 
-  it('pings until stopped with -t', () => {
-    expect(parsed('ping -t 10.0.0.2')).toMatchObject({ count: Infinity });
+  it('has no -t, since the engine cannot stop a ping yet', () => {
+    expect(parsed('ping -t 10.0.0.2')).toEqual({ error: ['Bad option -t.', ...PING_USAGE] });
   });
 
   it('rejects bad ping arguments with the Windows wording', () => {

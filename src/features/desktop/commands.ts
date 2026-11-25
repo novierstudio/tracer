@@ -1,6 +1,6 @@
 import { err, Ipv4Address, ok, type Result } from '@/model';
 
-/** A Command Prompt line, parsed. `count` is `Infinity` for `ping -t`. */
+/** A Command Prompt line, parsed. */
 export type HostCommand =
   | { kind: 'empty' }
   | { kind: 'ping'; target: Ipv4Address; count: number }
@@ -18,11 +18,9 @@ const MAX_PING_COUNT = 4294967295;
 
 export const PING_USAGE = [
   '',
-  'Usage: ping [-t] [-n count] target_name',
+  'Usage: ping [-n count] target_name',
   '',
   'Options:',
-  '    -t             Ping the specified host until stopped.',
-  '                   To stop, press Control-C.',
   '    -n count       Number of echo requests to send.',
   '',
 ];
@@ -60,8 +58,7 @@ export const HELP = [
   '  help            Show this list.',
   '  ipconfig        Show the IP address, subnet mask and default gateway.',
   '  ipconfig /all   Also show the MAC address, DHCP and DNS settings.',
-  '  ping <ip>       Send 4 echo requests. -n <count> sends more or fewer,',
-  '                  -t keeps going until Ctrl+C.',
+  '  ping <ip>       Send 4 echo requests. -n <count> sends more or fewer.',
   '',
   'Up and Down recall earlier commands. Ctrl+C stops a running command.',
   '',
@@ -81,8 +78,6 @@ function parsePing(args: readonly string[]): Result<HostCommand, ParseError> {
       target = word;
     } else if (option === '?') {
       return err(PING_USAGE);
-    } else if (option === 't') {
-      count = Infinity;
     } else if (option === 'n') {
       const value = args[++i];
       if (value === undefined) return err([`Value must be supplied for option ${word}.`]);
