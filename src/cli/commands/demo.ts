@@ -29,7 +29,6 @@ export const DEFAULT_HOSTNAME = 'Router';
 
 const EXEC = ['user-exec', 'priv-exec'] as const;
 const CONFIG = ['global-config', 'interface-config', 'line-config', 'router-config'] as const;
-const SELECT = ['global-config', 'interface-config'] as const;
 
 const command = defineCommand<DemoContext>();
 const show = keyword('show', 'Show running system information');
@@ -83,12 +82,12 @@ export const demoCommands = [
     },
   }),
   command({
-    modes: SELECT,
+    modes: ['global-config'],
     path: [interfaceKw, iface('name', 'Interface name')],
     to: ({ name }) => ({ kind: 'interface-config', interfaces: [name] }),
   }),
   command({
-    modes: SELECT,
+    modes: ['global-config'],
     path: [
       interfaceKw,
       keyword('range', 'interface range command'),
