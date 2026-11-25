@@ -8,6 +8,9 @@ import {
   SubnetMask,
   VlanId,
   formatSubnetMask,
+  ipv4ToUint32,
+  prefixMask,
+  uint32ToIpv4,
 } from './values';
 
 describe('Ipv4Address', () => {
@@ -52,6 +55,25 @@ describe('SubnetMask', () => {
     for (let prefix = 0; prefix <= 32; prefix++) {
       expect(SubnetMask.parse(formatSubnetMask(PrefixLength.parse(prefix)))).toBe(prefix);
     }
+  });
+});
+
+describe('IPv4 numbers', () => {
+  it.each([
+    ['0.0.0.0', 0],
+    ['10.0.0.1', 167772161],
+    ['255.255.255.255', 4294967295],
+  ])('%s is %i', (text, value) => {
+    expect(ipv4ToUint32(text)).toBe(value);
+    expect(uint32ToIpv4(value)).toBe(text);
+  });
+
+  it.each([
+    [0, 0],
+    [24, 0xffffff00],
+    [32, 0xffffffff],
+  ])('/%i masks with %i', (prefix, mask) => {
+    expect(prefixMask(PrefixLength.parse(prefix))).toBe(mask);
   });
 });
 

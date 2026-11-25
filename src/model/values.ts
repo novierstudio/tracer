@@ -13,7 +13,8 @@ export type PrefixLength = z.infer<typeof PrefixLength>;
 export const Ipv4Cidr = z.object({ address: Ipv4Address, prefixLength: PrefixLength });
 export type Ipv4Cidr = z.infer<typeof Ipv4Cidr>;
 
-function ipv4ToUint32(address: string): number {
+/** `10.0.0.1` as the 32-bit number 167772161. */
+export function ipv4ToUint32(address: string): number {
   return address.split('.').reduce((acc, octet) => acc * 256 + Number(octet), 0);
 }
 
@@ -29,9 +30,17 @@ export const SubnetMask = z
   })
   .pipe(PrefixLength);
 
+export function uint32ToIpv4(value: number): Ipv4Address {
+  return [24, 16, 8, 0].map((shift) => (value >>> shift) & 0xff).join('.') as Ipv4Address;
+}
+
+/** The netmask of a prefix length as a 32-bit number: /24 is 0xffffff00. */
+export function prefixMask(prefixLength: PrefixLength): number {
+  return prefixLength === 0 ? 0 : (0xffffffff << (32 - prefixLength)) >>> 0;
+}
+
 export function formatSubnetMask(prefixLength: PrefixLength): string {
-  const bits = prefixLength === 0 ? 0 : (0xffffffff << (32 - prefixLength)) >>> 0;
-  return [24, 16, 8, 0].map((shift) => (bits >>> shift) & 0xff).join('.');
+  return uint32ToIpv4(prefixMask(prefixLength));
 }
 
 const MAC_PATTERN =
