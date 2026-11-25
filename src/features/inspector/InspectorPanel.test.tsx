@@ -101,7 +101,8 @@ describe('InspectorPanel', () => {
     renderPanel();
     select([lab.pc.id]);
     openTab('Desktop');
-    expect(screen.getByText('Desktop comes with the engine')).toBeVisible();
+    expect(screen.getByRole('button', { name: /IP Configuration/ })).toBeVisible();
+    expect(screen.getByRole('button', { name: /Command Prompt/ })).toBeVisible();
   });
 
   it('renames on Enter, and undo restores the old name in the field', () => {
