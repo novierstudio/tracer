@@ -350,10 +350,8 @@ describe('host IP configuration', () => {
     expect(hostIpv4()).toMatchObject({ gateway: '192.168.1.1' });
   });
 
-  it('switches to DHCP', () => {
-    fireEvent.click(screen.getByRole('radio', { name: 'DHCP' }));
-    expect(screen.getByText(/will come from a DHCP server/)).toBeVisible();
-    apply();
-    expect(hostIpv4()).toEqual({ mode: 'dhcp' });
+  it('keeps DHCP off until there are DHCP servers', () => {
+    expect(screen.getByRole('radio', { name: 'DHCP' })).toBeDisabled();
+    expect(screen.getByText(/DHCP arrives with DHCP servers/)).toBeVisible();
   });
 });

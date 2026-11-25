@@ -6,7 +6,13 @@ type SegmentedProps<V extends string> = {
   label: string;
   value: V;
   onValueChange: (value: V) => void;
-  options: readonly { value: V; label: string; icon?: ReactNode; activeClassName?: string }[];
+  options: readonly {
+    value: V;
+    label: string;
+    icon?: ReactNode;
+    activeClassName?: string;
+    disabled?: boolean;
+  }[];
   hideLabelsBelow?: 'sm' | 'md';
   className?: string;
 };
@@ -36,8 +42,9 @@ export function Segmented<V extends string>({
           key={option.value}
           value={option.value}
           aria-label={option.label}
+          disabled={option.disabled}
           className={cn(
-            'inline-flex h-full cursor-default items-center gap-1.5 rounded-[5px] px-2 text-xs font-medium text-fg-2 transition-colors duration-150 select-none hover:text-fg-1 data-[state=on]:bg-surface-1 data-[state=on]:text-fg-1 data-[state=on]:shadow-xs [&_svg]:size-3.5 [&_svg]:shrink-0',
+            'inline-flex h-full cursor-default items-center gap-1.5 rounded-[5px] px-2 text-xs font-medium text-fg-2 transition-colors duration-150 select-none hover:text-fg-1 disabled:opacity-45 disabled:hover:text-fg-2 data-[state=on]:bg-surface-1 data-[state=on]:text-fg-1 data-[state=on]:shadow-xs [&_svg]:size-3.5 [&_svg]:shrink-0',
             option.activeClassName,
           )}
         >
