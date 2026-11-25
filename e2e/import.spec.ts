@@ -65,7 +65,8 @@ test('imports a Packet Tracer file in a worker, after showing its report', async
   await expect(report).toHaveAccessibleDescription(/Packet Tracer 8\.2\.2\.0400/);
   await expect(stat(page, 'Devices')).toHaveText('Devices31 skipped');
   await expect(stat(page, 'Links')).toHaveText('Links20 dropped');
-  await expect(stat(page, 'Config lines')).toHaveText('Config lines12kept as-is');
+  // Each switch's spanning-tree mode and extend system-id lines are understood, not kept.
+  await expect(stat(page, 'Config lines')).toHaveText('Config lines6kept as-is');
   await report.getByText('Skipped devices').click();
   await expect(
     report.getByText('Power Distribution Device: Power Distribution Device0'),

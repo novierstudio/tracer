@@ -3,6 +3,7 @@ import {
   formatSubnetMask,
   formatVlans,
   INTERFACE_TYPES,
+  normalizeVlans,
   parentPort,
   VTY_LINE_COUNT,
   type InterfaceId,
@@ -13,8 +14,10 @@ import {
   type StaticRoute,
   type Subinterface,
   type SubinterfaceId,
+  type SwitchConfig,
   type SwitchInterface,
   type VlanId,
+  type VlanRange,
 } from '../../model';
 import { encodeType7 } from '../passwords';
 import type { IosDevice } from './context';
@@ -130,7 +133,31 @@ function interfaceBlock(entry: InterfaceEntry): string[] {
   if (entry.kind === 'routed' && entry.config.clockRate)
     lines.push(` clock rate ${entry.config.clockRate}`);
   if (config.shutdown) lines.push(' shutdown');
+  if (entry.kind === 'switched') {
+    if (entry.config.portfast) lines.push(' spanning-tree portfast');
+    if (entry.config.stpCost) lines.push(` spanning-tree cost ${entry.config.stpCost}`);
+  }
   return lines;
+}
+
+/**
+ * A switch's global spanning tree lines: the mode, then one line per priority with its VLANs.
+ * VLAN keys iterate in ascending order, so the lines follow each priority's lowest VLAN.
+ */
+function spanningTreeLines(config: SwitchConfig): string[] {
+  const byPriority = new Map<number, VlanRange[]>();
+  for (const [vlan, priority] of Object.entries(config.stpPriorities ?? {})) {
+    const id = Number(vlan) as VlanId;
+    byPriority.set(priority, [...(byPriority.get(priority) ?? []), { first: id, last: id }]);
+  }
+  return [
+    'spanning-tree mode pvst',
+    'spanning-tree extend system-id',
+    ...[...byPriority].map(
+      ([priority, vlans]) =>
+        `spanning-tree vlan ${formatVlans(normalizeVlans(vlans))} priority ${priority}`,
+    ),
+  ];
 }
 
 function routeLine({ prefix, nextHop, distance }: StaticRoute): string {
@@ -209,6 +236,7 @@ export function runningConfig(device: IosDevice): string[] {
     out.push(`enable password ${passwordText(device, config.enablePassword)}`);
   if (!config.domainLookup) out.push('no ip domain-lookup');
   out.push('!');
+  if (device.kind === 'switch') out.push(...spanningTreeLines(device.config), '!');
   for (const entry of interfaceEntries(device)) out.push(...interfaceBlock(entry), '!');
   if (device.kind === 'router' && device.config.staticRoutes.length > 0) {
     out.push(...device.config.staticRoutes.map(routeLine), '!');

@@ -57,6 +57,7 @@ import {
   showVersion,
 } from './show';
 import { showArp, showIpRoute, showSwitchIpRoute } from './showRouting';
+import { spanningTreeCommands } from './spanningTree';
 import {
   showInterfacesSwitchport,
   showInterfacesTrunk,
@@ -1066,6 +1067,7 @@ const switchShowCommands = [
 export const switchCommands = [
   ...commonCommands,
   ...switchShowCommands,
+  ...spanningTreeCommands,
   switchCommand({
     modes: GLOBAL,
     path: [keyword('vlan', 'Vlan commands'), num('vlan', 1, 4094, 'ISL VLAN IDs 1-1005')],
