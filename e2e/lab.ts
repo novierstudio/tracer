@@ -144,8 +144,14 @@ export async function fastForward(page: Page, seconds = STP_CONVERGENCE_S + 1) {
   }, seconds * 1000);
 }
 
-/** Opens the app and waits for the canvas, which loads after the shell. */
+/**
+ * Opens the app and waits for the canvas, which loads after the shell. The welcome card starts
+ * dismissed, so tests get the bare canvas; `onboarding.spec.ts` covers the first visit.
+ */
 export async function gotoCanvas(page: Page) {
+  await page.addInitScript(() => {
+    localStorage.setItem('tracer.onboarding', JSON.stringify({ welcomeDismissed: true }));
+  });
   await page.goto('./');
   await expect(page.locator('.react-flow__pane')).toBeVisible();
 }

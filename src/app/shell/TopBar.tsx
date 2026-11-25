@@ -2,6 +2,7 @@ import {
   ChevronDownIcon,
   InfoIcon,
   KeyboardIcon,
+  LayoutGridIcon,
   PanelBottomIcon,
   PanelLeftIcon,
   PanelRightIcon,
@@ -9,12 +10,14 @@ import {
   RadioIcon,
   Redo2Icon,
   SearchIcon,
+  SparklesIcon,
   Undo2Icon,
 } from 'lucide-react';
 import { useState } from 'react';
 import { FileMenuItems } from '@/features/files/FileMenuItems';
 import { fileSession } from '@/features/files/session';
 import { ShareButton } from '@/features/files/ShareDialogs';
+import { onboarding } from '@/features/onboarding/store';
 import { ShowTrafficToggle } from '@/features/simulation/ShowTrafficToggle';
 import { Button } from '@/ui/button';
 import {
@@ -81,6 +84,14 @@ function AppMenu({ onOpenHelp }: Pick<TopBarProps, 'onOpenHelp'>) {
       <DropdownMenuContent align="start" className="min-w-56">
         <FileMenuItems />
         <DropdownMenuSeparator />
+        <DropdownMenuItem onSelect={onboarding.openGallery}>
+          <LayoutGridIcon />
+          Sample labs…
+        </DropdownMenuItem>
+        <DropdownMenuItem onSelect={onboarding.showWelcome}>
+          <SparklesIcon />
+          Welcome
+        </DropdownMenuItem>
         <DropdownMenuItem onSelect={() => onOpenHelp('shortcuts')}>
           <KeyboardIcon />
           Keyboard shortcuts
