@@ -12,7 +12,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/ui/tabs';
 import { Tooltip } from '@/ui/tooltip';
 import { simulation } from './controller';
 import { EventList } from './EventList';
-import { useSimulation } from './store';
+import { PduInspector } from './PduInspector';
+import { selectedFrame, useSimulation } from './store';
 import { Timeline } from './Timeline';
 
 const emptyClass =
@@ -34,6 +35,7 @@ type BottomPanelProps = { onCollapse: () => void; collapseShortcut: string };
 
 function SimulationEvents() {
   const empty = useSimulation((state) => state.frames.length === 0);
+  const selected = useSimulation(selectedFrame);
   return (
     <>
       <Timeline />
@@ -50,7 +52,19 @@ function SimulationEvents() {
           </Button>
         </div>
       ) : (
-        <EventList />
+        <div className="flex min-h-0 flex-1">
+          <div
+            className={cn(
+              'flex min-h-0 flex-col',
+              selected
+                ? 'w-[32%] max-w-[30rem] min-w-[18rem] shrink-0 border-r border-line'
+                : 'flex-1',
+            )}
+          >
+            <EventList />
+          </div>
+          {selected && <PduInspector key={selected.id} event={selected} />}
+        </div>
       )}
     </>
   );

@@ -2,7 +2,7 @@ import './simulation.css';
 import { Panel, useReactFlow, useStoreApi } from '@xyflow/react';
 import { MailIcon } from 'lucide-react';
 import { useEffect, useRef, type RefObject } from 'react';
-import type { EventId, FrameEvent } from '@/engine/events';
+import type { EventId } from '@/engine/events';
 import { hostnameLabelSize, type DeviceNodeData } from '@/features/canvas/flow';
 import type { DeviceId } from '@/model';
 import { editorStore } from '@/model/store';
@@ -20,7 +20,7 @@ import {
   type Scene,
 } from './draw';
 import { protocolOf } from './protocols';
-import { simulationStore, useSimulation } from './store';
+import { findFrame, simulationStore, useSimulation } from './store';
 import type { ChipPlace } from './traffic';
 
 declare global {
@@ -39,20 +39,6 @@ declare global {
       }[];
     };
   }
-}
-
-/** Frames are sorted by id, so the selected one is a binary search away. */
-function findFrame(frames: readonly FrameEvent[], id: EventId): FrameEvent | undefined {
-  let low = 0;
-  let high = frames.length - 1;
-  while (low <= high) {
-    const middle = (low + high) >> 1;
-    const frame = frames[middle]!;
-    if (frame.id === id) return frame;
-    if (frame.id < id) low = middle + 1;
-    else high = middle - 1;
-  }
-  return undefined;
 }
 
 type FlowStore = ReturnType<typeof useStoreApi>;
