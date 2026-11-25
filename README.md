@@ -6,7 +6,7 @@ Tracer is a network simulator that runs in the browser. It aims to be a better-l
 
 Live site: https://novierstudio.github.io/tracer/
 
-Tracer is in early development. The current build is a placeholder.
+Tracer is in early development. The current build is the empty app shell: panels, theme and layout, with no devices yet.
 
 ## Development
 
@@ -21,10 +21,12 @@ pnpm typecheck
 pnpm lint
 pnpm format
 pnpm test         # unit tests (Vitest)
-pnpm test:e2e     # browser smoke test (Playwright)
+pnpm test:e2e     # browser tests (Playwright)
 ```
 
-Before the first `pnpm test:e2e`, install the browser with `pnpm exec playwright install chromium`.
+Before the first `pnpm test:e2e`, install the browser with `pnpm exec playwright install chromium`. Set `E2E_PORT` to run it on a port other than 4173.
+
+The design system gallery at `#/dev/ui` shows every colour token and UI component in both themes. Colour tokens live in `src/ui/tokens.css`, and a unit test fails if a text colour drops below WCAG AA contrast.
 
 ## Disclaimer
 
