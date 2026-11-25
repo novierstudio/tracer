@@ -1,4 +1,4 @@
-import type { InterfaceId } from '../model';
+import type { InterfaceId, VlanId } from '../model';
 
 /** The lines a `line` command selects. A vty range runs from `first` to `last`. */
 export type LineRef =
@@ -12,6 +12,7 @@ export type Mode =
   | { readonly kind: 'global-config' }
   | { readonly kind: 'interface-config'; readonly interfaces: readonly InterfaceId[] }
   | { readonly kind: 'line-config'; readonly line: LineRef }
+  | { readonly kind: 'vlan-config'; readonly vlan: VlanId }
   | { readonly kind: 'router-config'; readonly protocol: string };
 
 export type ModeKind = Mode['kind'];
@@ -39,6 +40,7 @@ const MODES: { readonly [K in ModeKind]: ModeSpec<K> } = {
     config: true,
   },
   'line-config': { suffix: () => '(config-line)#', exit: GLOBAL_CONFIG, config: true },
+  'vlan-config': { suffix: () => '(config-vlan)#', exit: GLOBAL_CONFIG, config: true },
   'router-config': { suffix: () => '(config-router)#', exit: GLOBAL_CONFIG, config: true },
 };
 
