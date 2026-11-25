@@ -2,7 +2,14 @@ import { useStore } from 'zustand';
 import { createStore } from 'zustand/vanilla';
 import type { DeviceId, Endpoint, PortId } from '@/model';
 import { editorStore, type EditorStore } from '@/model/store';
-import { describeCableError, onlyPort, planLink, requiredMedium, type CableChoice } from './cables';
+import {
+  describeCableError,
+  onlyPort,
+  planLink,
+  planQuickCable,
+  requiredMedium,
+  type CableChoice,
+} from './cables';
 
 /** Where a cable in progress is. A null step means the select tool is active. */
 export type CableStep =
@@ -27,6 +34,10 @@ export type CableToolState = {
   /** Esc: drops the cable in progress, or leaves the tool. False when there was nothing to do. */
   escape(): boolean;
   clearNotice(id: number): void;
+  /** Shows a short message by the tool hint. */
+  notify(message: string): void;
+  /** Quick cable: joins two devices on their first free compatible ports, with Auto. */
+  quickConnect(a: DeviceId, b: DeviceId): void;
 };
 
 let noticeId = 0;
@@ -95,6 +106,14 @@ export function createCableTool(editor: EditorStore) {
       },
       clearNotice: (id) => {
         if (get().notice?.id === id) set({ notice: null });
+      },
+      notify,
+      quickConnect: (a, b) => {
+        const { topology, addLink, select } = editor.getState();
+        const plan = planQuickCable(topology, a, b);
+        const result = plan.ok ? addLink(plan.value) : plan;
+        if (result.ok) select({ devices: [], links: [result.value] });
+        else notify(describeCableError(topology, result.error));
       },
     };
   });

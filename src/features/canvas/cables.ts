@@ -129,7 +129,49 @@ export function onlyPort(
     : undefined;
 }
 
-export type CableError = TopologyError | { kind: 'same-device'; device: DeviceId };
+export type CableError =
+  | TopologyError
+  | { kind: 'same-device'; device: DeviceId }
+  | { kind: 'no-free-port'; device: DeviceId }
+  | { kind: 'no-shared-medium'; a: DeviceId; b: DeviceId };
+
+const freePorts = (topology: Topology, device: DeviceId) =>
+  (topology.devices[device]?.ports ?? []).filter(
+    (port) => !linkAt(topology, { device, port: port.id }),
+  );
+
+/**
+ * Quick cable: the first free port on `a`, in catalog order, that a free port on `b` can take,
+ * joined to the first such port on `b`, with the cable Auto picks.
+ */
+export function planQuickCable(
+  topology: Topology,
+  a: DeviceId,
+  b: DeviceId,
+): Result<LinkSpec, CableError> {
+  if (a === b) return err({ kind: 'same-device', device: a });
+  const ours = freePorts(topology, a);
+  const theirs = freePorts(topology, b);
+  for (const [device, free] of [
+    [a, ours],
+    [b, theirs],
+  ] as const) {
+    if (!topology.devices[device]) return err({ kind: 'device-not-found', device });
+    if (free.length === 0) return err({ kind: 'no-free-port', device });
+  }
+  for (const port of ours) {
+    const match = theirs.find((other) => PORT_MEDIUM[other.kind] === PORT_MEDIUM[port.kind]);
+    if (match) {
+      return planLink(
+        topology,
+        'auto',
+        { device: a, port: port.id },
+        { device: b, port: match.id },
+      );
+    }
+  }
+  return err({ kind: 'no-shared-medium', a, b });
+}
 
 /** The link to ask the store for. The store still validates it; this only resolves Auto. */
 export function planLink(
@@ -191,6 +233,10 @@ export function describeCableError(topology: Topology, error: CableError): strin
       return `${hostname(topology, error.endpoint.device)} has no port ${error.endpoint.port}.`;
     case 'device-not-found':
       return 'That device no longer exists.';
+    case 'no-free-port':
+      return `${hostname(topology, error.device)} has no free ports.`;
+    case 'no-shared-medium':
+      return `${hostname(topology, error.a)} and ${hostname(topology, error.b)} have no free ports that take the same cable.`;
     default:
       return describeTopologyError(error);
   }
