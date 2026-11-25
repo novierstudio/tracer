@@ -50,7 +50,8 @@ export function DialogContent({
         {...props}
       >
         <div className="flex items-start justify-between gap-4">
-          <div className="flex flex-col gap-1">
+          {/* File names in titles can be one long word, so they wrap anywhere. */}
+          <div className="flex min-w-0 flex-col gap-1 [overflow-wrap:anywhere]">
             <D.Title className="text-base font-semibold">{title}</D.Title>
             {description && (
               <D.Description className="text-sm text-fg-2">{description}</D.Description>
