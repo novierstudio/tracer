@@ -16,8 +16,9 @@ function setup() {
   const backend: HostBackend = {
     ping: (_device, _target, _options, _onReply, signal) =>
       new Promise<void>(() => signal.addEventListener('abort', aborted)),
+    traceroute: () => new Promise<void>(() => {}),
     arpTable: async () => [],
-    clearArp: async () => {},
+    clearArp: async () => 0,
   };
   return { ...lab, store, aborted, prompts: createHostPromptRegistry(store, backend) };
 }

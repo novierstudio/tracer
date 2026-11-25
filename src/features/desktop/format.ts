@@ -5,7 +5,7 @@ import {
   type MacAddress,
   type Port,
 } from '@/model';
-import type { ArpTableEntry, PingReply } from './backend';
+import type { ArpTableEntry, PingReply, TraceProbe } from './backend';
 
 export type HostDevice = Extract<Device, { kind: 'pc' | 'server' }>;
 
@@ -131,4 +131,49 @@ export function pingSummary(target: Ipv4Address, replies: readonly PingReply[]):
     'Approximate round trip times in milli-seconds:',
     `    Minimum = ${Math.min(...times)}ms, Maximum = ${Math.max(...times)}ms, Average = ${Math.floor(total / times.length)}ms`,
   ];
+}
+
+export const tracertHeader = (target: Ipv4Address, maxHops: number) => [
+  '',
+  `Tracing route to ${target} over a maximum of ${maxHops} hops`,
+  '',
+];
+
+const unreachable = (code: 'network' | 'host') => (code === 'network' ? 'net' : 'host');
+
+/**
+ * Windows tracert's hop lines, a column at a time as each probe settles: the hop number, a 9
+ * character column per probe (`<1 ms`, `4 ms` or `*`), then who answered, or `Request timed out.`
+ * when nobody did. A Destination Unreachable ends the line, and the trace, with the router's report.
+ */
+export function tracertLines(probesPerHop: number) {
+  let open = false;
+  let from: Ipv4Address | undefined;
+  return {
+    /** The text for one probe. A line ends with `\n`. */
+    next(probe: TraceProbe): string {
+      let text = '';
+      if (!open) {
+        text = String(probe.hop).padStart(3);
+        open = true;
+        from = undefined;
+      }
+      if (probe.kind === 'unreachable') {
+        open = false;
+        return `${text}  ${probe.from}  reports: Destination ${unreachable(probe.code)} unreachable.\n`;
+      }
+      if (probe.kind === 'timeout') {
+        text += '     *   ';
+      } else {
+        const time = probe.timeMs < 1 ? '<1' : String(Math.round(probe.timeMs));
+        text += `  ${time.padStart(4)} ms`;
+        from = probe.from;
+      }
+      if (probe.probe < probesPerHop) return text;
+      open = false;
+      return `${text}  ${from ?? 'Request timed out.'}\n`;
+    },
+    /** Ends a line that a Ctrl+C cut short. */
+    close: () => (open ? '\n' : ''),
+  };
 }

@@ -30,7 +30,7 @@ const APPS: Record<App, { title: string; blurb: string; icon: LucideIcon; tile: 
   },
   prompt: {
     title: 'Command Prompt',
-    blurb: 'ping, ipconfig and arp',
+    blurb: 'ping, tracert, ipconfig and arp',
     icon: SquareTerminalIcon,
     tile: 'bg-fg-1 text-surface-1',
   },
