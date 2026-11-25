@@ -4,7 +4,7 @@ import { addLink, createLink, updateConfig, type LinkSpec } from './commands';
 import { parseTopology, parseTopologyJson, serializeTopology } from './file';
 import { AnnotationId } from './ids';
 import { buildLab, end, expectOk, port } from './testing';
-import { BridgePriority, PathCost, type Topology } from './topology';
+import { BridgePriority, labSettings, PathCost, type Topology } from './topology';
 import { Ipv4Address, PrefixLength, VlanId } from './values';
 
 function richLab() {
@@ -215,6 +215,31 @@ describe('topology files', () => {
       'console',
       'vty',
     ]);
+  });
+
+  it('read a file from before lab settings as fast spanning tree timers', () => {
+    const { topology } = richLab();
+    const document = JSON.parse(serializeTopology(topology));
+    expect(document).not.toHaveProperty('settings');
+
+    const read = expectOk(parseTopology(document));
+
+    expect(labSettings(read)).toEqual({ stpTimers: 'fast' });
+  });
+
+  it('keep the real IOS timers setting through a save and load', () => {
+    const { topology } = richLab();
+    const ios: Topology = { ...topology, settings: { stpTimers: 'ios' } };
+
+    expect(expectOk(parseTopologyJson(serializeTopology(ios)))).toEqual(ios);
+  });
+
+  it('reject a spanning tree timers setting it does not know', () => {
+    const { topology } = richLab();
+
+    const result = reparse({ ...topology, settings: { stpTimers: 'slow' } });
+
+    expect(result.ok || result.error.message).toContain('settings.stpTimers');
   });
 
   it('report text that is not JSON', () => {

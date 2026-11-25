@@ -20,7 +20,13 @@ import {
   type LinkId,
 } from './ids';
 import { ok, type Result } from './result';
-import { emptyTopology, type Annotation, type Topology, type TopologyError } from './topology';
+import {
+  emptyTopology,
+  type Annotation,
+  type LabSettings,
+  type Topology,
+  type TopologyError,
+} from './topology';
 import type { Hostname } from './values';
 
 export const HISTORY_LIMIT = 200;
@@ -41,6 +47,7 @@ export type EditorState = {
   removeLinks(ids: readonly LinkId[]): void;
   setLinkCable(change: CableChange): Result<void, TopologyError>;
   renameLab(name: string): void;
+  updateLabSettings(update: Partial<LabSettings>): void;
   /** Ids, MACs and names must already be fresh: the batch goes in as given, or not at all. */
   addElements(elements: Elements): Result<void, TopologyError>;
   addAnnotation(spec: AnnotationSpec): Result<AnnotationId, TopologyError>;
@@ -138,6 +145,7 @@ export function createEditorStore({
           removeLinks: (linkIds) => commit(commands.removeLinks(get().topology, linkIds)),
           setLinkCable: (change) => apply(commands.setLinkCable(get().topology, change)),
           renameLab: (name) => commit(commands.renameLab(get().topology, { name, now: now() })),
+          updateLabSettings: (update) => commit(commands.updateLabSettings(get().topology, update)),
           addElements: (elements) => apply(commands.addElements(get().topology, elements)),
           addAnnotation: (spec) => {
             const annotation = commands.createAnnotation(spec, { ids, topology: get().topology });
