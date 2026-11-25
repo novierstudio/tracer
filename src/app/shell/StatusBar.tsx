@@ -1,5 +1,6 @@
 import { KeyboardIcon } from 'lucide-react';
 import { SaveStatus } from '@/features/files/SaveStatus';
+import { EngineStatus } from '@/features/simulation/EngineStatus';
 import { cn } from '@/ui/cn';
 import type { HelpDialog } from './HelpDialogs';
 import type { Mode } from './TopBar';
@@ -23,6 +24,7 @@ export function StatusBar({ mode, onOpenHelp, inert }: StatusBarProps) {
         {mode === 'realtime' ? 'Realtime' : 'Simulation · paused'}
       </span>
       <span className="max-sm:hidden">Empty lab</span>
+      <EngineStatus />
       <div className="ml-auto flex h-full items-center">
         <SaveStatus />
         <button type="button" className={linkClass} onClick={() => onOpenHelp('shortcuts')}>
