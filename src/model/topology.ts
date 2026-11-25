@@ -369,12 +369,27 @@ export const Annotation = z.discriminatedUnion('kind', [
 export type Annotation = z.infer<typeof Annotation>;
 export type AnnotationKind = Annotation['kind'];
 
+/**
+ * How long spanning tree holds a new switch port. `fast` gets it forwarding in about 4 s, still
+ * through listening and learning; `ios` runs the real IOS timers and takes 30 s.
+ */
+export const StpTimers = z.enum(['fast', 'ios']);
+export type StpTimers = z.infer<typeof StpTimers>;
+
+/** Settings for the whole lab rather than any one device. They never reach a running-config. */
+export const LabSettings = z.object({ stpTimers: StpTimers });
+export type LabSettings = z.infer<typeof LabSettings>;
+
+export const DEFAULT_LAB_SETTINGS: LabSettings = { stpTimers: 'fast' };
+
 const TopologyShape = z.object({
   version: z.literal(TOPOLOGY_VERSION),
   meta: z.object({ name: z.string(), createdAt: z.iso.datetime(), updatedAt: z.iso.datetime() }),
   devices: z.record(DeviceId, Device),
   links: z.record(LinkId, Link),
   annotations: z.record(AnnotationId, Annotation),
+  /** Absent in files from before lab settings, and in labs that keep the defaults. */
+  settings: LabSettings.optional(),
 });
 export type Topology = z.infer<typeof TopologyShape>;
 
@@ -405,6 +420,10 @@ export const Topology = TopologyShape.superRefine((topology, ctx) => {
     }
   }
 });
+
+/** The lab's settings, with the defaults for a lab that names none. */
+export const labSettings = (topology: Topology): LabSettings =>
+  topology.settings ?? DEFAULT_LAB_SETTINGS;
 
 export function emptyTopology({ name, now }: { name: string; now: Date }): Topology {
   const timestamp = now.toISOString();

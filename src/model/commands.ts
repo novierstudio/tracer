@@ -6,11 +6,13 @@ import {
   factorySwitchLines,
   findDeviceProblem,
   findLinkProblem,
+  labSettings,
   VirtualInterfaceId,
   type Annotation,
   type Cable,
   type Device,
   type DeviceKind,
+  type LabSettings,
   type Link,
   type Point,
   type Port,
@@ -228,6 +230,17 @@ export function renameLab(
   return produce(topology, (draft) => {
     draft.meta.name = name;
     draft.meta.updatedAt = now.toISOString();
+  });
+}
+
+/** Changes some of the lab's settings. The values it already has change nothing. */
+export function updateLabSettings(topology: Topology, update: Partial<LabSettings>): Topology {
+  const current = labSettings(topology);
+  const next = { ...current, ...update };
+  const keys = Object.keys(next) as (keyof LabSettings)[];
+  if (keys.every((key) => next[key] === current[key])) return topology;
+  return produce(topology, (draft) => {
+    draft.settings = next;
   });
 }
 

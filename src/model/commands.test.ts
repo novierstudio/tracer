@@ -13,11 +13,12 @@ import {
   setLinkCable,
   setPowered,
   updateConfig,
+  updateLabSettings,
   type LinkSpec,
 } from './commands';
 import { DeviceId, LinkId, createIdSource } from './ids';
 import { buildLab, end, expectOk, port } from './testing';
-import { linkAt, type Topology } from './topology';
+import { labSettings, linkAt, type Topology } from './topology';
 import { Hostname, Ipv4Address, PrefixLength, VlanId } from './values';
 
 const linkIds = createIdSource(99);
@@ -448,6 +449,29 @@ describe('renameLab', () => {
   it('returns the same topology for the same name', () => {
     const { topology } = buildLab();
     expect(renameLab(topology, { name: topology.meta.name, now })).toBe(topology);
+  });
+});
+
+describe('updateLabSettings', () => {
+  it('reads a lab without settings as fast spanning tree timers', () => {
+    const { topology } = buildLab();
+    expect(topology.settings).toBeUndefined();
+    expect(labSettings(topology)).toEqual({ stpTimers: 'fast' });
+  });
+
+  it('switches to the real IOS timers and back', () => {
+    const { topology } = buildLab();
+
+    const ios = updateLabSettings(topology, { stpTimers: 'ios' });
+    expect(ios.settings).toEqual({ stpTimers: 'ios' });
+    expect(labSettings(updateLabSettings(ios, { stpTimers: 'fast' }))).toEqual({
+      stpTimers: 'fast',
+    });
+  });
+
+  it('returns the same topology when nothing changes, so no undo step records it', () => {
+    const { topology } = buildLab();
+    expect(updateLabSettings(topology, { stpTimers: 'fast' })).toBe(topology);
   });
 });
 
