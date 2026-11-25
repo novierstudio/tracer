@@ -12,6 +12,7 @@ import { InspectorPanel } from '@/features/inspector/InspectorPanel';
 import { consoleRequests } from '@/features/inspector/requests';
 import { OnboardingLayer } from '@/features/onboarding/OnboardingLayer';
 import { PalettePanel, type PaletteSection } from '@/features/palette/PalettePanel';
+import { LabSettingsDialog } from '@/features/settings/LabSettings';
 import { BottomPanel } from '@/features/simulation/BottomPanel';
 import { simulation } from '@/features/simulation/controller';
 import { useSimulation } from '@/features/simulation/store';
@@ -327,6 +328,7 @@ export function Shell() {
       <HelpDialogs open={help} onOpenChange={setHelp} />
       <CommandPalette open={commandsOpen} onOpenChange={setCommandsOpen} />
       <FileDialogs />
+      <LabSettingsDialog />
     </div>
   );
 }
