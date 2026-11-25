@@ -3,7 +3,7 @@ import { openRoutedLab, type DevWindow } from './routed';
 
 test.use({ viewport: { width: 1440, height: 900 } });
 
-type Chip = { event: number; link: string; protocol: string; motion: string };
+type Chip = { event: number; link: string; protocol: string; motion: string; x: number; y: number };
 type TrafficWindow = DevWindow & { tracerTraffic: { chips(): Chip[] } };
 
 const chips = (page: Page) =>
@@ -239,4 +239,88 @@ test('the Add simple PDU tool queues an echo from the clicked source to the clic
   await page.getByRole('button', { name: 'Play' }).click();
   await expect(status).toHaveText('PC1 → PC2 successful', { timeout: 10_000 });
   await expectRowCount(page, HOPS.length);
+});
+
+const inspector = (page: Page) => page.getByRole('complementary', { name: 'PDU inspector' });
+const fieldRow = (page: Page, id: string) => inspector(page).locator(`[data-field="${id}"]`);
+const decision = (page: Page) =>
+  inspector(page).getByRole('status', { name: 'What the device did' });
+
+/** Selects the event at `index` in the whole list, scrolling the virtualised list to it first. */
+async function selectRow(page: Page, index: number) {
+  await eventGrid(page)
+    .getByRole('rowgroup')
+    .evaluate((element, top) => (element.scrollTop = top), index * 28);
+  await eventGrid(page)
+    .locator(`[role="row"][aria-rowindex="${index + 2}"]`)
+    .click();
+}
+
+test('the PDU inspector shows what R1 did with the echo reply, and an ARP request field by field', async ({
+  page,
+}) => {
+  await openRoutedLab(page);
+  await enterSimulation(page);
+  await skipNextHello(page);
+  await pingPc2(page);
+  for (let index = 0; index < HOPS.length; index++) {
+    await page.getByRole('button', { name: 'Step forward' }).click();
+  }
+  await expectRowCount(page, HOPS.length);
+
+  // Hop 14: the echo reply arrives at R1 from SW2, and R1 routes it on toward PC1.
+  expect(HOPS[13]).toEqual(['SW2', 'R1', 'ICMP', 'lnk_3']);
+  await selectRow(page, 13);
+  await expect(decision(page)).toHaveText(
+    'R1 forwarded it out Gi0/0 and lowered the TTL from 128 to 127.',
+  );
+  await expect(inspector(page).getByRole('tab', { name: /IPv4/ })).toHaveAttribute(
+    'aria-selected',
+    'true',
+  );
+  await expect(fieldRow(page, 'ipv4.ttl')).toContainText('128');
+  await inspector(page).getByRole('tab', { name: 'Out Gi0/0' }).click();
+  await expect(fieldRow(page, 'ipv4.ttl')).toContainText('127');
+  await expect(fieldRow(page, 'ipv4.ttl')).toContainText('was 128');
+  // Hovering the field lights its byte: the TTL is byte 22, after 14 of Ethernet and 8 of IPv4.
+  await fieldRow(page, 'ipv4.ttl').hover();
+  const ttlByte = inspector(page).locator('[data-byte="22"]:visible');
+  await expect(ttlByte).toHaveText('7f');
+  await expect(ttlByte).toHaveClass(/bg-accent/);
+
+  await inspector(page).getByRole('button', { name: 'Close inspector' }).click();
+  await expect(inspector(page)).toHaveCount(0);
+
+  // Hop 2: PC1's ARP request for its gateway reaches R1, which answers it.
+  await selectRow(page, 1);
+  await expect(decision(page)).toHaveText(
+    'R1 owns the address asked for, so it sent an ARP reply with its MAC out Gi0/0.',
+  );
+  await expect(inspector(page).getByRole('tab', { name: /ARP/ })).toHaveAttribute(
+    'aria-selected',
+    'true',
+  );
+  await expect(fieldRow(page, 'arp.op')).toContainText('1 (request)');
+  await expect(fieldRow(page, 'arp.senderIp')).toContainText('192.168.1.10');
+  await expect(fieldRow(page, 'arp.targetIp')).toContainText('192.168.1.1');
+  await expect(fieldRow(page, 'arp.targetMac')).toContainText('00:00:00:00:00:00');
+});
+
+test('clicking a packet on the canvas opens it in the PDU inspector', async ({ page }) => {
+  await openRoutedLab(page);
+  await enterSimulation(page);
+  await skipNextHello(page);
+  await pingPc2(page);
+  await page.getByRole('button', { name: 'Step forward' }).click();
+  await expectRowCount(page, 1);
+
+  // Let the chip finish its slide before aiming at it.
+  await expect.poll(async () => (await chips(page)).length).toBe(1);
+  await page.waitForTimeout(600);
+  const [chip] = await chips(page);
+  await page.mouse.click(chip!.x, chip!.y);
+  await expect(decision(page)).toHaveText(
+    'SW1 flooded it out 1 port (Gi0/1): a broadcast goes to every port in VLAN 1 except the one it came in on.',
+  );
+  await expect(page.locator('.react-flow__node.selected')).toHaveCount(0);
 });
