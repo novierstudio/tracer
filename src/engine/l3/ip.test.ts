@@ -6,7 +6,7 @@ import { createEngine, type Engine } from '../engine';
 import type { EventId } from '../events';
 import { createSimService } from '../service';
 import { STACKS } from '../stacks';
-import { ip, labBuilder, staticRoute } from '../testing';
+import { ip, labBuilder, routedLab, staticRoute } from '../testing';
 
 function simulate(topology: Topology) {
   const engine = createEngine({ seed: 1, stacks: STACKS, linkDelay: ms(1) });
@@ -65,25 +65,6 @@ function oneLan() {
     return pc;
   }) as [DeviceId, DeviceId, DeviceId];
   return { lab, sw1, pc1, pc2, pc3 };
-}
-
-/** PC1 192.168.1.10 on SW1, R1 between 192.168.1.0/24 and 192.168.2.0/24, PC2 192.168.2.10 on SW2. */
-function twoLans(r1Routes: StaticRoute[] = []) {
-  const lab = labBuilder();
-  const sw1 = lab.switch('SW1');
-  const sw2 = lab.switch('SW2');
-  const pc1 = lab.host('pc', 'PC1', '192.168.1.10/24', '192.168.1.1');
-  const pc2 = lab.host('pc', 'PC2', '192.168.2.10/24', '192.168.2.1');
-  const r1 = lab.router(
-    'R1',
-    { 'GigabitEthernet0/0': '192.168.1.1/24', 'GigabitEthernet0/1': '192.168.2.1/24' },
-    r1Routes,
-  );
-  lab.connect(pc1, 'FastEthernet0', sw1, 'FastEthernet0/1');
-  lab.connect(sw1, 'GigabitEthernet0/1', r1, 'GigabitEthernet0/0');
-  lab.connect(r1, 'GigabitEthernet0/1', sw2, 'GigabitEthernet0/1');
-  lab.connect(pc2, 'FastEthernet0', sw2, 'FastEthernet0/1');
-  return { lab, pc1, pc2, r1 };
 }
 
 /**
@@ -220,7 +201,7 @@ describe('ping on one LAN', () => {
 
 describe('ping across a router', () => {
   it('reaches the far LAN through the default gateway, one hop off the TTL', () => {
-    const { lab, pc1 } = twoLans();
+    const { lab, pc1 } = routedLab();
     const { ping } = simulate(lab.topology);
 
     const events = ping(pc1, '192.168.2.10');
@@ -232,7 +213,7 @@ describe('ping across a router', () => {
   });
 
   it("reaches both of the router's own addresses", () => {
-    const { lab, pc1 } = twoLans();
+    const { lab, pc1 } = routedLab();
     const { ping } = simulate(lab.topology);
 
     expect(replies(ping(pc1, '192.168.1.1', { count: 1 }))).toMatchObject([
@@ -244,7 +225,7 @@ describe('ping across a router', () => {
   });
 
   it('gets Destination Unreachable from a router with no route', () => {
-    const { lab, pc1 } = twoLans();
+    const { lab, pc1 } = routedLab();
     const { ping } = simulate(lab.topology);
 
     const events = ping(pc1, '10.99.0.1');
@@ -312,7 +293,7 @@ describe('ping across a router', () => {
   });
 
   it('never forwards through a host, even one a router uses as its next hop', () => {
-    const { lab, pc1 } = twoLans([staticRoute('10.99.0.0/16', '192.168.2.10')]);
+    const { lab, pc1 } = routedLab([staticRoute('10.99.0.0/16', '192.168.2.10')]);
     const { ping } = simulate(lab.topology);
 
     // Forwarding, PC2 would send it back to its gateway R1, and the loop would end in Time Exceeded.
@@ -340,7 +321,7 @@ describe('ping across a router', () => {
 
 describe('routes', () => {
   it("lists a router's connected, local and usable static routes by network", () => {
-    const { lab, r1 } = twoLans([
+    const { lab, r1 } = routedLab([
       staticRoute('10.0.0.0/8', '192.168.2.254'),
       staticRoute('172.16.0.0/16', '203.0.113.1'),
     ]);
@@ -360,7 +341,7 @@ describe('routes', () => {
   });
 
   it("lists a host's subnet and its default gateway", () => {
-    const { lab, pc1 } = twoLans();
+    const { lab, pc1 } = routedLab();
     const { sim, value } = simulate(lab.topology);
 
     expect(value(sim.routes(pc1))).toEqual([
@@ -379,15 +360,10 @@ describe('routes', () => {
   });
 
   it('drops the connected route of an interface whose link goes down', () => {
-    const { lab, r1, pc2 } = twoLans();
+    const { lab, r1, sw2 } = routedLab();
     const { engine, sim, value } = simulate(lab.topology);
-    engine.applyPatch({ devices: { [pc2]: { ...lab.device(pc2), powered: false } }, links: {} });
 
-    // R1 still reaches SW2, so Gi0/1 stays up; powering SW2 off takes it down.
-    const sw2 = Object.values(lab.topology.devices).find(
-      (device) => device.config.hostname === 'SW2',
-    )!;
-    engine.applyPatch({ devices: { [sw2.id]: { ...sw2, powered: false } }, links: {} });
+    engine.applyPatch({ devices: { [sw2]: { ...lab.device(sw2), powered: false } }, links: {} });
 
     expect(value(sim.routes(r1)).map((route) => route.prefix.address)).toEqual([
       '192.168.1.0',
