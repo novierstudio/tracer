@@ -10,6 +10,8 @@ import {
 } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
 import { ThemeMenu } from '@/app/ThemeMenu';
+import { DEVICE_MODELS, type DeviceIconName } from '@/devices/catalog';
+import { DeviceIcon } from '@/devices/icons';
 import { Button } from '@/ui/button';
 import { cn } from '@/ui/cn';
 import { Dialog, DialogClose, DialogContent, DialogTrigger, SheetContent } from '@/ui/dialog';
@@ -260,6 +262,32 @@ function Foundations() {
   );
 }
 
+const DEVICE_ICONS = [...new Set(DEVICE_MODELS.map((model) => model.icon))];
+const ICON_SIZES = [24, 32, 48, 64, 96];
+
+function DeviceIcons() {
+  return (
+    <Section title="Device icons">
+      <div className="flex flex-col gap-3 overflow-x-auto" data-testid="device-icons">
+        {DEVICE_ICONS.map((name: DeviceIconName) => (
+          <div key={name} className="flex items-end gap-4">
+            <code className="w-14 shrink-0 self-center font-mono text-2xs text-fg-3">{name}</code>
+            {ICON_SIZES.map((size) => (
+              <DeviceIcon
+                key={size}
+                name={name}
+                width={size}
+                height={size}
+                className="shrink-0 text-fg-1"
+              />
+            ))}
+          </div>
+        ))}
+      </div>
+    </Section>
+  );
+}
+
 function ThemePane({ theme }: { theme: 'light' | 'dark' }) {
   return (
     <div
@@ -271,6 +299,7 @@ function ThemePane({ theme }: { theme: 'light' | 'dark' }) {
     >
       <p className="text-xs font-medium text-fg-2 capitalize">{theme} theme</p>
       <Foundations />
+      <DeviceIcons />
       <Components />
     </div>
   );
