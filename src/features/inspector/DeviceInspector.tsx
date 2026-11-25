@@ -10,6 +10,7 @@ import { EmptyState } from '@/ui/empty-state';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/ui/tabs';
 import { Tooltip } from '@/ui/tooltip';
 import { deleteItems } from './actions';
+import { IosConfigTab } from './config/ConfigTab';
 import { HostAddressForm } from './HostAddressForm';
 import { HostnameField } from './HostnameField';
 import { InterfacesTab } from './InterfacesTab';
@@ -248,88 +249,12 @@ function PortLegend() {
 }
 
 function ConfigTab({ device, rows }: { device: Device; rows: PortRow[] }) {
-  const shutDown = rows.filter((row) => row.admin === 'down').map((row) => shortPortName(row.id));
-  switch (device.kind) {
-    case 'pc':
-    case 'server':
-      return (
-        <Section title="IP configuration">
-          <HostAddressForm key={device.id} device={device} />
-        </Section>
-      );
-    case 'router': {
-      const addressed = rows.flatMap((row) =>
-        row.layer === 'routed' && row.ipv4 ? [[shortPortName(row.id), row.ipv4] as const] : [],
-      );
-      return (
-        <>
-          <Section title="Summary">
-            <Facts
-              rows={[
-                ['Hostname', <Mono>{device.config.hostname}</Mono>],
-                ['Addressed', `${addressed.length} of ${rows.length} interfaces`],
-                ['Shut down', shutDown.length ? <Mono>{shutDown.join(', ')}</Mono> : 'None'],
-              ]}
-            />
-          </Section>
-          <Section title="Interface addresses" className="border-t border-line">
-            {addressed.length === 0 ? (
-              <p className="text-xs text-fg-3">
-                No addresses yet. Set one from the Interfaces tab.
-              </p>
-            ) : (
-              <Facts
-                rows={addressed.map(([port, cidr]) => [
-                  port,
-                  <Mono key={port}>{formatCidr(cidr)}</Mono>,
-                ])}
-              />
-            )}
-          </Section>
-          <UnknownLines lines={device.config.unknownLines} />
-        </>
-      );
-    }
-    case 'switch': {
-      const trunks = rows.filter((row) => row.layer === 'switched' && row.vlan === 'Trunk');
-      return (
-        <>
-          <Section title="Summary">
-            <Facts
-              rows={[
-                ['Hostname', <Mono>{device.config.hostname}</Mono>],
-                ['Ports', `${rows.length - trunks.length} access, ${trunks.length} trunk`],
-                ['Shut down', shutDown.length ? <Mono>{shutDown.join(', ')}</Mono> : 'None'],
-              ]}
-            />
-          </Section>
-          <Section title="VLANs" className="border-t border-line">
-            <Facts
-              rows={Object.entries(device.config.vlans).map(([vlan, { name }]) => [
-                `VLAN ${vlan}`,
-                name,
-              ])}
-            />
-          </Section>
-          <UnknownLines lines={device.config.unknownLines} />
-        </>
-      );
-    }
-    default: {
-      const exhaustive: never = device;
-      return exhaustive;
-    }
+  if (device.kind === 'router' || device.kind === 'switch') {
+    return <IosConfigTab key={device.id} device={device} rows={rows} />;
   }
-}
-
-/** Lines an import or the CLI kept verbatim because the model has no field for them. */
-function UnknownLines({ lines }: { lines: string[] }) {
-  if (lines.length === 0) return null;
   return (
-    <Section title={`Unrecognised lines (${lines.length})`} className="border-t border-line">
-      <pre className="overflow-x-auto rounded-md bg-surface-2 p-2 font-mono text-[0.6875rem] text-fg-2">
-        {lines.join('\n')}
-      </pre>
+    <Section title="IP configuration">
+      <HostAddressForm key={device.id} device={device} />
     </Section>
   );
 }

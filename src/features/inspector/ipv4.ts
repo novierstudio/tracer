@@ -49,7 +49,7 @@ export function classfulMask(text: string): string | undefined {
 }
 
 /** Accepts `255.255.255.0`, `/24` or `24`. */
-function parseMask(text: string): Result<PrefixLength, string> {
+export function parseMask(text: string): Result<PrefixLength, string> {
   const prefix = /^\/?(\d{1,2})$/.exec(text)?.[1];
   const parsed = prefix ? PrefixLength.safeParse(Number(prefix)) : SubnetMask.safeParse(text);
   return parsed.success ? ok(parsed.data) : err(firstIssue(parsed.error));
