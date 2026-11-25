@@ -10,7 +10,7 @@ import { ip, labBuilder } from '@/engine/testing';
 import { createIdSource } from '@/model';
 import { createEditorStore } from '@/model/store';
 import { createConsoleRegistry } from './registry';
-import type { SimQueries } from './session';
+import type { SimLink } from './session';
 import { createTty, type Tty } from './tty';
 
 const SIZE = { cols: 100, rows: 200 };
@@ -49,11 +49,12 @@ function lab() {
     synced = topology;
     if (patch) sim.applyPatch(patch);
   });
-  const queries: SimQueries = {
+  const queries: SimLink = {
     routes: async (device) => sim.routes(device),
     arpTable: async (device) => sim.arpTable(device),
     macTable: async (device) => sim.macTable(device),
     portStates: async (device) => sim.portStates(device),
+    now: () => engine.now,
   };
   const consoles = createConsoleRegistry(store, async () => queries);
   /** Pings and runs the simulation until the ping is over. */

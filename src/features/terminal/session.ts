@@ -34,19 +34,26 @@ export type SimQueries = {
   readonly [K in 'routes' | 'arpTable' | 'macTable' | 'portStates']: Remote<SimAPI[K]>;
 };
 
+/** What a console reads from the simulation. */
+export type SimLink = SimQueries & {
+  /** The simulated clock as of the latest batch, in milliseconds since the run started. */
+  readonly now: () => number;
+};
+
 /** Where to reach the simulation. It rejects when there is none, as in a test without a worker. */
-export type EngineLink = () => Promise<SimQueries>;
+export type EngineLink = () => Promise<SimLink>;
 
 const valueOf = <T>(result: Result<T, unknown>): T | undefined =>
   result.ok ? result.value : undefined;
 
 /** The simulation's answers for one device. A device it cannot run gives no answer. */
-export function engineSource(sim: SimQueries, device: DeviceId): EngineSource {
+export function engineSource(sim: SimLink, device: DeviceId): EngineSource {
   return {
     routes: () => sim.routes(device).then(valueOf),
     arp: () => sim.arpTable(device).then(valueOf),
     macTable: () => sim.macTable(device).then(valueOf),
     ports: () => sim.portStates(device).then(valueOf),
+    clock: async () => sim.now(),
   };
 }
 

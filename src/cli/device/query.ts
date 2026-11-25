@@ -11,6 +11,8 @@ export interface EngineAnswers {
   readonly arp: readonly ArpTableEntry[];
   readonly macTable: readonly MacTableEntry[];
   readonly ports: PortStates;
+  /** The simulated clock, in milliseconds since the run started. */
+  readonly clock: number;
 }
 
 export type EngineQueryKind = keyof EngineAnswers;
