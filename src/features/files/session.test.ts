@@ -1,4 +1,7 @@
 import 'fake-indexeddb/auto';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { IDBFactory } from 'fake-indexeddb';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { serializeTopology, type Topology } from '@/model';
@@ -168,11 +171,11 @@ describe('save and open', () => {
     await session.openFile(new File(['{"version":1,"meta":{}}'], 'bad.tracer.json'));
     const problem = session.state.getState().problem;
     expect(problem?.title).toContain('bad.tracer.json');
-    expect(problem?.message).toMatch(/meta/);
+    expect(problem?.detail).toMatch(/meta/);
     expect(topology()).toBe(lab);
 
     await session.openFile(new File(['not json'], 'worse.tracer.json'));
-    expect(session.state.getState().problem?.message).toMatch(/not valid JSON/);
+    expect(session.state.getState().problem?.detail).toMatch(/not valid JSON/);
   });
 
   it('opens a file picked through the picker', async () => {
@@ -182,6 +185,69 @@ describe('save and open', () => {
     await session.restored();
     await session.open();
     expect(topology()).toEqual(lab);
+  });
+});
+
+const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), '../../importers/pkt/__fixtures__');
+const vtpFile = () => new File([readFileSync(join(FIXTURES, 'pt8.2-vtp-lab.pkt'))], 'VTP lab.pkt');
+
+describe('Packet Tracer import', () => {
+  it('shows the report, then opens the lab and keeps the old one in Recent labs', async () => {
+    const { session, edit, topology } = startSession();
+    await session.restored();
+    const before = named(buildLab().topology, 'Before');
+    edit(before);
+
+    await session.openFile(vtpFile());
+    const flow = session.state.getState().importing;
+    expect(flow).toMatchObject({
+      step: 'review',
+      fileName: 'VTP lab.pkt',
+      report: { devices: { imported: 3, skipped: 1 } },
+    });
+    expect(topology()).toBe(before);
+
+    await session.confirmImport();
+    expect(session.state.getState().importing).toBeUndefined();
+    expect(topology().meta.name).toBe('VTP lab');
+    expect(Object.values(topology().devices).map((d) => d.kind)).toEqual([
+      'switch',
+      'switch',
+      'switch',
+    ]);
+    expect(session.state.getState().recents.map((lab) => lab.name)).toEqual(['Before']);
+  });
+
+  it('keeps the current lab when the report is cancelled', async () => {
+    const { session, edit, topology } = startSession();
+    await session.restored();
+    const before = named(buildLab().topology, 'Before');
+    edit(before);
+
+    await session.openFile(vtpFile());
+    session.cancelImport();
+    expect(session.state.getState().importing).toBeUndefined();
+    expect(topology()).toBe(before);
+  });
+
+  it('drops an import cancelled while it runs', async () => {
+    const { session, topology } = startSession();
+    await session.restored();
+    const before = topology();
+    const opening = session.openFile(vtpFile());
+    session.cancelImport();
+    await opening;
+    expect(session.state.getState().importing).toBeUndefined();
+    expect(session.state.getState().problem).toBeUndefined();
+    expect(topology()).toBe(before);
+  });
+
+  it('shows a problem for a file that is not from Packet Tracer', async () => {
+    const { session } = startSession();
+    await session.restored();
+    await session.openFile(new File(['just some text'.repeat(20)], 'notes.pkt'));
+    expect(session.state.getState().importing).toBeUndefined();
+    expect(session.state.getState().problem?.title).toBe('Not a Packet Tracer file');
   });
 });
 
