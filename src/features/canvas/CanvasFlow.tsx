@@ -36,6 +36,7 @@ import { findDeviceModel, type DeviceModelId } from '@/devices/catalog';
 import { useRegisterCommands } from '@/features/command/registry';
 import { openDeviceConsole } from '@/features/inspector/requests';
 import { DEVICE_DRAG_TYPE, NOTE_DRAG_TYPE } from '@/features/palette/PalettePanel';
+import { TrafficOverlay } from '@/features/simulation/TrafficOverlay';
 import type { AnnotationId, DeviceId, LinkId } from '@/model';
 import { useEditor } from '@/model/react';
 import { editorStore } from '@/model/store';
@@ -328,6 +329,7 @@ function Flow({ element }: { element: RefObject<HTMLElement | null> }) {
             gap={sparseGrid ? GRID * 4 : GRID}
             size={1.25}
           />
+          <TrafficOverlay />
           <Panel position="top-center">
             <Toolbar />
           </Panel>

@@ -14,6 +14,7 @@ import {
 import { useState } from 'react';
 import { FileMenuItems } from '@/features/files/FileMenuItems';
 import { fileSession } from '@/features/files/session';
+import { ShowTrafficToggle } from '@/features/simulation/ShowTrafficToggle';
 import { Button } from '@/ui/button';
 import {
   DropdownMenu,
@@ -180,6 +181,7 @@ export function TopBar({ mode, onModeChange, panels, onOpenHelp, onOpenCommands 
           />
         </div>
       </Tooltip>
+      <ShowTrafficToggle />
 
       <div className="flex flex-1 items-center justify-end gap-1">
         <Button
