@@ -63,7 +63,7 @@ test('the bottom Terminal tab follows the selected router or switch', async ({ p
   await page.getByRole('button', { name: 'Toggle bottom panel' }).click();
   const panel = page.getByRole('region', { name: 'Bottom panel' });
   await panel.getByRole('tab', { name: 'Terminal' }).click();
-  await expect(panel).toContainText('Select a router or switch');
+  await expect(panel).toContainText('Select a device');
 
   await select(page, 'dev_SW1');
   const terminal = terminalIn(page, panel);
