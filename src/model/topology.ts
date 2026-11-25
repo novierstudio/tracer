@@ -116,8 +116,28 @@ export const Switchport = z.discriminatedUnion('mode', [
 ]);
 export type Switchport = z.infer<typeof Switchport>;
 
-export const SwitchInterface = z.object({ ...interfaceFields, switchport: Switchport });
+/** `spanning-tree cost`: what a port adds to the path cost to the root, from 1 to 200000000. */
+export const PathCost = z.int().min(1).max(200_000_000).brand<'PathCost'>();
+export type PathCost = z.infer<typeof PathCost>;
+
+export const SwitchInterface = z.object({
+  ...interfaceFields,
+  switchport: Switchport,
+  /** `spanning-tree portfast`. An access port with it forwards as soon as its link comes up. */
+  portfast: z.literal(true).optional(),
+  /** `spanning-tree cost`. Absent means the cost of the port's speed. */
+  stpCost: PathCost.optional(),
+});
 export type SwitchInterface = z.infer<typeof SwitchInterface>;
+
+/** `spanning-tree vlan <id> priority`: lower wins the root election. A multiple of 4096 up to 61440. */
+export const BridgePriority = z
+  .int()
+  .min(0)
+  .max(61440)
+  .multipleOf(4096, 'Bridge priority must be a multiple of 4096')
+  .brand<'BridgePriority'>();
+export type BridgePriority = z.infer<typeof BridgePriority>;
 
 /** `encapsulation dot1Q <vlan> [native]`: the VLAN a subinterface tags, or sends untagged when native. */
 export const Dot1q = z.object({ vlan: VlanId, native: z.boolean() });
@@ -225,6 +245,8 @@ export const SwitchConfig = z.object({
   vlans: z.record(VlanId, z.object({ name: z.string().min(1).max(32) })),
   lines: SwitchLines.default(factorySwitchLines),
   defaultGateway: Ipv4Address.optional(),
+  /** Bridge priority by VLAN. A VLAN without one has DEFAULT_BRIDGE_PRIORITY. */
+  stpPriorities: z.record(VlanId, BridgePriority).optional(),
 });
 export type SwitchConfig = z.infer<typeof SwitchConfig>;
 

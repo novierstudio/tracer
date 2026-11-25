@@ -4,7 +4,7 @@ import { addLink, createLink, updateConfig, type LinkSpec } from './commands';
 import { parseTopology, parseTopologyJson, serializeTopology } from './file';
 import { AnnotationId } from './ids';
 import { buildLab, end, expectOk, port } from './testing';
-import type { Topology } from './topology';
+import { BridgePriority, PathCost, type Topology } from './topology';
 import { Ipv4Address, PrefixLength, VlanId } from './values';
 
 function richLab() {
@@ -64,9 +64,12 @@ function richLab() {
           [port('FastEthernet0/1')]: {
             shutdown: false,
             switchport: { mode: 'access', vlan: vlan10 },
+            portfast: true,
+            stpCost: PathCost.parse(10),
           },
         },
         vlans: { ...sw.config.vlans, [vlan10]: { name: 'Staff' } },
+        stpPriorities: { [vlan10]: BridgePriority.parse(24576) },
       },
     }),
   );
@@ -185,6 +188,17 @@ describe('topology files', () => {
     expect(result.ok || result.error.kind).toBe('invalid-topology');
     expect(result.ok || result.error.message).toContain(
       `✖ Invalid IPv4 address\n  → at devices.${r1.id}.config.interfaces["GigabitEthernet0/0"].ipv4.address`,
+    );
+  });
+
+  it('reject a bridge priority that is not a multiple of 4096', () => {
+    const { topology, sw } = richLab();
+    const text = serializeTopology(topology).replace('"10": 24576', '"10": 24000');
+
+    const result = parseTopologyJson(text);
+
+    expect(result.ok || result.error.message).toContain(
+      `✖ Bridge priority must be a multiple of 4096\n  → at devices.${sw.id}.config.stpPriorities.10`,
     );
   });
 
