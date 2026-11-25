@@ -76,7 +76,7 @@ export function DeviceHoverCard({ device, disabled, children }: Props) {
           align="start"
           sideOffset={14}
           collisionPadding={12}
-          className="pointer-events-none z-40 w-64 animate-fade-in rounded-lg border border-line bg-surface-1 px-3 py-2 text-xs shadow-pop"
+          className="device-hover-card z-40 w-64 animate-fade-in rounded-lg border border-line bg-surface-1 px-3 py-2 text-xs shadow-pop"
         >
           <DeviceSummary device={device} />
         </HoverCard.Content>

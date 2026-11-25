@@ -46,6 +46,23 @@ test('copying a cabled pair and pasting it adds two devices and the link between
   await expect(device(page, 'R0')).toBeVisible();
 });
 
+test("a device's hover card never takes a click meant for the device under it", async ({
+  page,
+}) => {
+  await openLab(page);
+  const card = page.getByRole('list', { name: 'Interfaces' });
+  await tile(page, 'R1').hover();
+  await expect(card).toBeVisible();
+  const sw1 = await centreOf(page, 'SW1');
+  const cardBox = (await card.boundingBox())!;
+  // The card opens to the right of R1, over SW1.
+  expect(sw1.x).toBeGreaterThan(cardBox.x);
+  expect(sw1.x).toBeLessThan(cardBox.x + cardBox.width);
+
+  await page.mouse.click(sw1.x, sw1.y);
+  await expect(page.locator('.react-flow__node.selected')).toHaveAccessibleName(/^SW1,/);
+});
+
 test('auto-layout rearranges the lab and one undo puts every device back', async ({ page }) => {
   await openLab(page);
   const before = await positions(page);
