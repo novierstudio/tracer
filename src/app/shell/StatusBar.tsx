@@ -1,6 +1,7 @@
 import { KeyboardIcon } from 'lucide-react';
 import { SaveStatus } from '@/features/files/SaveStatus';
 import { EngineStatus } from '@/features/simulation/EngineStatus';
+import { useEditor } from '@/model/react';
 import { cn } from '@/ui/cn';
 import type { HelpDialog } from './HelpDialogs';
 import type { Mode } from './TopBar';
@@ -9,6 +10,18 @@ type StatusBarProps = { mode: Mode; onOpenHelp: (dialog: HelpDialog) => void; in
 
 const linkClass =
   'flex h-full cursor-default items-center gap-1 px-1.5 hover:bg-surface-2 hover:text-fg-1';
+
+const count = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`;
+
+function LabCounts() {
+  const devices = useEditor((state) => Object.keys(state.topology.devices).length);
+  const links = useEditor((state) => Object.keys(state.topology.links).length);
+  return (
+    <span className="max-sm:hidden">
+      {devices === 0 ? 'Empty lab' : `${count(devices, 'device')} · ${count(links, 'link')}`}
+    </span>
+  );
+}
 
 export function StatusBar({ mode, onOpenHelp, inert }: StatusBarProps) {
   return (
@@ -23,7 +36,7 @@ export function StatusBar({ mode, onOpenHelp, inert }: StatusBarProps) {
         />
         {mode === 'realtime' ? 'Realtime' : 'Simulation · paused'}
       </span>
-      <span className="max-sm:hidden">Empty lab</span>
+      <LabCounts />
       <EngineStatus />
       <div className="ml-auto flex h-full items-center">
         <SaveStatus />
