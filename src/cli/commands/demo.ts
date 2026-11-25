@@ -1,28 +1,19 @@
-import type { InterfaceName } from '../interfaces';
+import type { InterfaceId, Ipv4Address, PrefixLength } from '../../model';
 import { exitMode, GLOBAL_CONFIG, PRIV_EXEC, USER_EXEC } from '../modes';
-import {
-  iface,
-  ifaceRange,
-  ipv4,
-  keyword,
-  mask,
-  word,
-  type Ipv4Address,
-  type SubnetMask,
-} from '../params';
+import { iface, ifaceRange, ipv4, keyword, mask, word } from '../params';
 import { buildTree, defineCommand } from '../tree';
 
 export interface InterfaceAddress {
   readonly ip: Ipv4Address;
-  readonly mask: SubnetMask;
+  readonly mask: PrefixLength;
 }
 
 /** What the demo commands read and change. A later issue implements it over DeviceConfig. */
 export interface DemoContext {
   readonly hostname: string;
   setHostname(name: string): void;
-  setAddress(name: InterfaceName, address: InterfaceAddress | undefined): void;
-  setShutdown(name: InterfaceName, shutdown: boolean): void;
+  setAddress(name: InterfaceId, address: InterfaceAddress | undefined): void;
+  setShutdown(name: InterfaceId, shutdown: boolean): void;
 }
 
 export const DEFAULT_HOSTNAME = 'Router';

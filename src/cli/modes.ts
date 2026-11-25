@@ -1,10 +1,10 @@
-import type { InterfaceName } from './interfaces';
+import type { InterfaceId } from '../model';
 
 export type Mode =
   | { readonly kind: 'user-exec' }
   | { readonly kind: 'priv-exec' }
   | { readonly kind: 'global-config' }
-  | { readonly kind: 'interface-config'; readonly interfaces: readonly InterfaceName[] }
+  | { readonly kind: 'interface-config'; readonly interfaces: readonly InterfaceId[] }
   | { readonly kind: 'line-config'; readonly line: string }
   | { readonly kind: 'router-config'; readonly protocol: string };
 

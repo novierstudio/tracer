@@ -1,10 +1,5 @@
 export { formatError, formatHelp } from './format';
-export {
-  expandInterfaceRange,
-  INTERFACE_TYPES,
-  normalizeInterface,
-  type InterfaceName,
-} from './interfaces';
+export { expandInterfaceRange, INTERFACE_TYPES, normalizeInterface } from './interfaces';
 export {
   endMode,
   exitMode,
@@ -18,6 +13,7 @@ export {
   type ModeOf,
 } from './modes';
 export {
+  choice,
   iface,
   ifaceRange,
   ipv4,
@@ -27,8 +23,6 @@ export {
   num,
   word,
   type HelpEntry,
-  type Ipv4Address,
-  type SubnetMask,
 } from './params';
 export {
   complete,

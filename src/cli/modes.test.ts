@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import type { InterfaceName } from './interfaces';
+import type { InterfaceId } from '../model';
 import { endMode, exitMode, GLOBAL_CONFIG, PRIV_EXEC, prompt, USER_EXEC, type Mode } from './modes';
 
-const g00 = 'GigabitEthernet0/0' as InterfaceName;
-const g01 = 'GigabitEthernet0/1' as InterfaceName;
+const g00 = 'GigabitEthernet0/0' as InterfaceId;
+const g01 = 'GigabitEthernet0/1' as InterfaceId;
 const IF: Mode = { kind: 'interface-config', interfaces: [g00] };
 const IF_RANGE: Mode = { kind: 'interface-config', interfaces: [g00, g01] };
 const LINE: Mode = { kind: 'line-config', line: 'console 0' };

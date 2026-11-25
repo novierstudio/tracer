@@ -10,7 +10,6 @@ describe('normalizeInterface', () => {
     ['gigabitethernet 0/0', 'GigabitEthernet0/0'],
     ['fa0/1', 'FastEthernet0/1'],
     ['f0/01', 'FastEthernet0/1'],
-    ['e0', 'Ethernet0'],
     ['s0/0/0', 'Serial0/0/0'],
     ['lo0', 'Loopback0'],
     ['vlan1', 'Vlan1'],
@@ -18,9 +17,12 @@ describe('normalizeInterface', () => {
     expect(normalizeInterface(input)).toBe(expected);
   });
 
-  it.each(['x0/0', 'g', 'g0/', '0/0', 'g0/0 - 2', ''])('rejects %j', (input) => {
-    expect(normalizeInterface(input)).toBeUndefined();
-  });
+  it.each(['x0/0', 'g', 'g0/', '0/0', 'g0/0 - 2', '', 'e0', 'vlan0', 'lo01x'])(
+    'rejects %j',
+    (input) => {
+      expect(normalizeInterface(input)).toBeUndefined();
+    },
+  );
 });
 
 describe('expandInterfaceRange', () => {
