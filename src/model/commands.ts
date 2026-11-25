@@ -7,6 +7,7 @@ import {
   findDeviceProblem,
   findLinkProblem,
   VirtualInterfaceId,
+  type Cable,
   type Device,
   type DeviceKind,
   type Link,
@@ -59,6 +60,15 @@ export function renameDevice(
   });
 }
 
+export function setPowered(
+  topology: Topology,
+  { device, powered }: { device: DeviceId; powered: boolean },
+): CommandResult {
+  return editDevice(topology, device, (draft) => {
+    draft.powered = powered;
+  });
+}
+
 export type ConfigUpdate = {
   [K in DeviceKind]: { device: DeviceId; kind: K; config: Extract<Device, { kind: K }>['config'] };
 }[DeviceKind];
@@ -92,21 +102,68 @@ export function addLink(topology: Topology, link: Link): CommandResult {
   );
 }
 
+/** A serial cable names its DCE end. Left out, the link keeps its DCE end, or `a` if it had none. */
+export type CableChange =
+  | { link: LinkId; cable: Exclude<Cable, 'serial'> }
+  | { link: LinkId; cable: 'serial'; dce?: 'a' | 'b' };
+
+/** Swaps the cable in place: the link keeps its id and endpoints, and both ports must take it. */
+export function setLinkCable(topology: Topology, change: CableChange): CommandResult {
+  const current = topology.links[change.link];
+  if (!current) return err({ kind: 'link-not-found', link: change.link });
+  const { id, a, b } = current;
+  const next: Link =
+    change.cable === 'serial'
+      ? {
+          id,
+          a,
+          b,
+          cable: 'serial',
+          dce: change.dce ?? (current.cable === 'serial' ? current.dce : 'a'),
+        }
+      : { id, a, b, cable: change.cable };
+  const problem = findLinkProblem(topology, next);
+  if (problem) return err(problem);
+  return ok(
+    produce(topology, (draft) => {
+      draft.links[id] = next;
+    }),
+  );
+}
+
 export function removeLinks(topology: Topology, ids: readonly LinkId[]): Topology {
   return produce(topology, (draft) => {
     for (const id of ids) delete draft.links[id];
   });
 }
 
+/** Sets the lab's name and stamps `updatedAt`. The same name changes nothing. */
+export function renameLab(
+  topology: Topology,
+  { name, now }: { name: string; now: Date },
+): Topology {
+  if (name === topology.meta.name) return topology;
+  return produce(topology, (draft) => {
+    draft.meta.name = name;
+    draft.meta.updatedAt = now.toISOString();
+  });
+}
+
 export type PortSpec = Pick<Port, 'kind' | 'id'>;
 
+type ConfigOf<K extends DeviceKind> = Extract<Device, { kind: K }>['config'];
+
 export type DeviceSpec = {
-  kind: DeviceKind;
-  model: string;
-  hostname: Hostname;
-  position: Point;
-  ports: readonly PortSpec[];
-};
+  [K in DeviceKind]: {
+    kind: K;
+    model: string;
+    hostname: Hostname;
+    position: Point;
+    ports: readonly PortSpec[];
+    /** A model's defaults. Each field it names replaces the factory value; `hostname` wins. */
+    config?: Partial<Omit<ConfigOf<K>, 'hostname'>>;
+  };
+}[DeviceKind];
 
 const DEFAULT_VLAN = VlanId.parse(1);
 const VLAN1 = VirtualInterfaceId.parse('Vlan1');
@@ -160,6 +217,8 @@ export function createDevice(
           ),
           lines: factoryRouterLines(),
           staticRoutes: [],
+          ...spec.config,
+          hostname,
         },
       };
     case 'switch':
@@ -177,13 +236,19 @@ export function createDevice(
           ...factoryIosFields(hostname),
           virtualInterfaces: { [VLAN1]: { shutdown: true } },
           lines: factorySwitchLines(),
+          ...spec.config,
+          hostname,
         },
       };
     case 'pc':
     case 'server':
-      return { ...fields, kind: spec.kind, config: { hostname, ipv4: { mode: 'static' } } };
+      return {
+        ...fields,
+        kind: spec.kind,
+        config: { ipv4: { mode: 'static' }, ...spec.config, hostname },
+      };
     default: {
-      const exhaustive: never = spec.kind;
+      const exhaustive: never = spec;
       return exhaustive;
     }
   }

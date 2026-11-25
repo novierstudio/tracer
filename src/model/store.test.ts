@@ -206,4 +206,48 @@ describe('editor store', () => {
     expect(editor().topology).toEqual(fresh);
     expect(editor().selection).toEqual({ devices: [], links: [] });
   });
+
+  it('undoes power, cable and lab name changes one step each', () => {
+    const lab = buildLab();
+    const store = createEditorStore({
+      topology: lab.topology,
+      ids: createIdSource(5),
+      now: () => new Date('2026-05-06T00:00:00.000Z'),
+    });
+    const editor = () => store.getState();
+    const snapshots = [editor().topology];
+    const record = () => snapshots.push(editor().topology);
+
+    expectOk(editor().setPowered({ device: lab.r1.id, powered: false }));
+    record();
+    const link = expectOk(
+      editor().addLink({
+        cable: 'straight',
+        a: end(lab.pc, 'FastEthernet0'),
+        b: end(lab.sw, 'FastEthernet0/1'),
+      }),
+    );
+    record();
+    expectOk(editor().setLinkCable({ link, cable: 'crossover' }));
+    record();
+    editor().renameLab('Branch');
+    record();
+
+    expect(editor().topology.devices[lab.r1.id]?.powered).toBe(false);
+    expect(editor().topology.links[link]?.cable).toBe('crossover');
+    expect(editor().topology.meta).toMatchObject({
+      name: 'Branch',
+      updatedAt: '2026-05-06T00:00:00.000Z',
+    });
+    for (let step = snapshots.length - 2; step >= 0; step--) {
+      editor().undo();
+      expect(editor().topology).toEqual(snapshots[step]);
+    }
+  });
+
+  it('adds no history for renaming the lab to its own name', () => {
+    const { store } = labStore();
+    store.getState().renameLab(store.getState().topology.meta.name);
+    expect(store.temporal.getState().pastStates).toHaveLength(0);
+  });
 });

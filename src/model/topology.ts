@@ -302,6 +302,7 @@ export type TopologyError =
   | { kind: 'duplicate-id'; id: DeviceId | LinkId }
   | { kind: 'device-not-found'; device: DeviceId }
   | { kind: 'device-kind-mismatch'; device: DeviceId; expected: DeviceKind; actual: DeviceKind }
+  | { kind: 'link-not-found'; link: LinkId }
   | { kind: 'duplicate-port'; device: DeviceId; port: PortId }
   | { kind: 'port-name-mismatch'; device: DeviceId; port: PortId; portKind: PortKind }
   | { kind: 'interfaces-mismatch'; device: DeviceId; missing: PortId[]; extra: string[] }
@@ -371,6 +372,8 @@ export function describeTopologyError(error: TopologyError): string {
       return `Device ${error.device} does not exist`;
     case 'device-kind-mismatch':
       return `Device ${error.device} is a ${error.actual}, not a ${error.expected}`;
+    case 'link-not-found':
+      return `Link ${error.link} does not exist`;
     case 'duplicate-port':
       return `Device ${error.device} lists port ${error.port} more than once`;
     case 'port-name-mismatch':
