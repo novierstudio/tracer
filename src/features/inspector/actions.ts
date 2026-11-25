@@ -1,12 +1,17 @@
-import type { Device, DeviceId, Ipv4Cidr, LinkId, PortId } from '@/model';
+import type { AnnotationId, Device, DeviceId, Ipv4Cidr, LinkId, PortId } from '@/model';
 import { editorStore } from '@/model/store';
 
-/** One undo step, even when both devices and links go. */
-export function deleteItems(devices: readonly DeviceId[], links: readonly LinkId[]) {
+/** One undo step, even when devices, links and annotations all go. */
+export function deleteItems(
+  devices: readonly DeviceId[],
+  links: readonly LinkId[],
+  annotations: readonly AnnotationId[] = [],
+) {
   const editor = editorStore.getState();
   editor.beginGesture();
   if (links.length > 0) editor.removeLinks(links);
   if (devices.length > 0) editor.removeDevices(devices);
+  if (annotations.length > 0) editor.removeAnnotations(annotations);
   editor.endGesture();
 }
 

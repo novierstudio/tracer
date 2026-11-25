@@ -1,6 +1,7 @@
 import { findDeviceModel, type DeviceIconName } from '@/devices/catalog';
 import {
   linkAt,
+  type Annotation,
   type Device,
   type DeviceKind,
   type Ipv4Cidr,
@@ -17,16 +18,22 @@ export type InspectorView =
   | { kind: 'empty' }
   | { kind: 'device'; device: Device }
   | { kind: 'link'; link: Link }
-  | { kind: 'multi'; devices: Device[]; links: Link[] };
+  | { kind: 'annotation'; annotation: Annotation }
+  | { kind: 'multi'; devices: Device[]; links: Link[]; annotations: Annotation[] };
 
 export function inspectorView(topology: Topology, selection: Selection): InspectorView {
   const devices = selection.devices.flatMap((id) => topology.devices[id] ?? []);
   const links = selection.links.flatMap((id) => topology.links[id] ?? []);
+  const annotations = selection.annotations.flatMap((id) => topology.annotations[id] ?? []);
   const [device] = devices;
   const [link] = links;
-  if (devices.length + links.length > 1) return { kind: 'multi', devices, links };
+  const [annotation] = annotations;
+  if (devices.length + links.length + annotations.length > 1) {
+    return { kind: 'multi', devices, links, annotations };
+  }
   if (device) return { kind: 'device', device };
   if (link) return { kind: 'link', link };
+  if (annotation) return { kind: 'annotation', annotation };
   return { kind: 'empty' };
 }
 
@@ -163,8 +170,12 @@ export const CABLE_LABELS: Record<Link['cable'], string> = {
   serial: 'Serial DCE/DTE',
 };
 
-/** "2 routers, 1 PC and 3 links", in kind order. */
-export function selectionSummary(devices: readonly Device[], links: readonly Link[]): string {
+/** "2 routers, 1 PC, 3 links and 1 annotation", in kind order. */
+export function selectionSummary(
+  devices: readonly Device[],
+  links: readonly Link[],
+  annotations: readonly Annotation[] = [],
+): string {
   const counts = new Map<DeviceKind, number>();
   for (const device of devices) counts.set(device.kind, (counts.get(device.kind) ?? 0) + 1);
   const parts = (Object.keys(KIND_LABELS) as DeviceKind[]).flatMap((kind) => {
@@ -174,6 +185,9 @@ export function selectionSummary(devices: readonly Device[], links: readonly Lin
     return [`${count} ${kind === 'pc' ? label : label.toLowerCase()}`];
   });
   if (links.length > 0) parts.push(`${links.length} ${links.length === 1 ? 'link' : 'links'}`);
+  if (annotations.length > 0) {
+    parts.push(`${annotations.length} ${annotations.length === 1 ? 'annotation' : 'annotations'}`);
+  }
   if (parts.length < 2) return parts.join('');
   return `${parts.slice(0, -1).join(', ')} and ${parts.at(-1)}`;
 }
