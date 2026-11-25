@@ -44,3 +44,14 @@ it('undoes with Cmd or Ctrl plus Z and redoes with Shift added', () => {
   ).toBe('redo');
   expect(press('z')).toBeUndefined();
 });
+
+it('maps canvas keys, with Shift+1 and Delete as alternatives', () => {
+  expect(press('1')).toBe('fitView');
+  expect(press('!')).toBe('fitView');
+  expect(press('c')).toBe('cableTool');
+  expect(press('Backspace')).toBe('deleteSelection');
+  expect(press('Delete')).toBe('deleteSelection');
+  expect(press('a', { meta: true })).toBe('selectAll');
+  expect(press('a')).toBeUndefined();
+  expect(press('c', { meta: true })).toBeUndefined();
+});

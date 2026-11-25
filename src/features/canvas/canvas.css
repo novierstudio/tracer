@@ -1,0 +1,217 @@
+/* React Flow themed with the design tokens. Cable colours live here because only the canvas draws them. */
+
+.tracer-canvas {
+  --cable-copper: color-mix(in oklab, var(--text-3) 85%, var(--text-1));
+  --cable-serial: #c2410c;
+  --light-unknown: var(--text-3);
+}
+
+.dark .tracer-canvas {
+  --cable-copper: color-mix(in oklab, var(--text-3) 80%, var(--surface-0));
+  --cable-serial: #fb923c;
+}
+
+.tracer-canvas .react-flow {
+  --xy-background-pattern-dots-color: var(--grid-dot);
+  --xy-selection-background-color: color-mix(in oklab, var(--accent) 8%, transparent);
+  --xy-selection-border: 1px solid color-mix(in oklab, var(--accent) 55%, transparent);
+  --xy-minimap-background-color: var(--surface-1);
+  --xy-minimap-mask-background-color: color-mix(in oklab, var(--surface-0) 65%, transparent);
+  --xy-minimap-mask-stroke-color: color-mix(in oklab, var(--accent) 70%, transparent);
+  --xy-minimap-node-background-color: var(--text-3);
+}
+
+.tracer-canvas .react-flow__panel {
+  margin: 12px;
+}
+
+.tracer-canvas .react-flow__minimap {
+  overflow: hidden;
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-pop);
+}
+
+.tracer-canvas .react-flow__pane.selection {
+  cursor: default;
+}
+
+/* Devices */
+
+.tracer-canvas .react-flow__node {
+  border-radius: 12px;
+}
+
+.tracer-canvas .react-flow__node:focus-visible {
+  outline-offset: 4px;
+}
+
+.device-tile {
+  border-radius: 12px;
+  transition:
+    box-shadow 150ms ease-out,
+    outline-color 150ms ease-out;
+}
+
+.react-flow__node:hover .device-tile {
+  box-shadow:
+    0 0 0 1px var(--line-strong),
+    0 6px 16px -6px hsl(var(--shadow-color) / 0.45);
+}
+
+.react-flow__node.selected .device-tile {
+  box-shadow:
+    0 0 0 2px var(--surface-0),
+    0 0 0 4px var(--accent),
+    0 6px 16px -6px hsl(var(--shadow-color) / 0.45);
+}
+
+.device-node:not([data-powered]) {
+  opacity: 0.5;
+}
+
+/* Hidden with display, not opacity: an invisible badge on every node still costs paint and
+   compositing work on each frame of a pan. */
+.device-ports {
+  display: none;
+}
+
+.react-flow__node:hover .device-ports {
+  display: block;
+  animation: var(--animate-fade-in);
+}
+
+.react-flow__node.dragging:hover .device-ports,
+.is-cabling .react-flow__node:hover .device-ports,
+.is-zoomed-out .device-address {
+  display: none;
+}
+
+.react-flow__node.selected .device-hostname {
+  color: var(--accent-text);
+}
+
+/* Cable tool: devices are targets, not things to drag. */
+
+.is-cabling .react-flow__node,
+.is-cabling .react-flow__pane {
+  cursor: crosshair;
+}
+
+.is-cabling .react-flow__node:hover .device-tile {
+  box-shadow:
+    0 0 0 2px var(--surface-0),
+    0 0 0 4px color-mix(in oklab, var(--accent) 50%, transparent);
+}
+
+.device-tile[data-cable-role] {
+  outline: 2px dashed var(--accent);
+  outline-offset: 4px;
+}
+
+/* Links */
+
+.tracer-canvas .react-flow__edge .cable-path {
+  stroke: var(--cable-copper);
+  stroke-width: 1.75;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: stroke 150ms ease-out;
+}
+
+.cable[data-cable='crossover'] .cable-path {
+  stroke-dasharray: 7 5;
+}
+
+.tracer-canvas .react-flow__edge .cable[data-cable='serial'] .cable-path {
+  stroke: var(--cable-serial);
+}
+
+.tracer-canvas .react-flow__edge:hover .cable-path {
+  stroke: var(--text-2);
+}
+
+.tracer-canvas .react-flow__edge.selected .cable-path,
+.tracer-canvas .react-flow__edge:focus-visible .cable-path {
+  stroke: var(--accent);
+  stroke-width: 2.5;
+}
+
+/* Only the edge's own path takes clicks; decorations stay out of hit testing. */
+.link-light,
+.port-label {
+  pointer-events: none;
+}
+
+.link-light {
+  fill: var(--light-unknown);
+  stroke: var(--surface-0);
+  stroke-width: 2;
+  paint-order: stroke;
+}
+
+.link-light[data-state='up'] {
+  fill: var(--ok);
+}
+
+.link-light[data-state='pending'] {
+  fill: var(--surface-0);
+  stroke: var(--warn);
+  stroke-width: 1.75;
+}
+
+.link-light[data-state='down'] circle {
+  fill: var(--surface-0);
+  stroke: var(--err);
+  stroke-width: 1.5;
+}
+
+.link-light[data-state='down'] path {
+  stroke: var(--err);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+}
+
+.port-label rect {
+  fill: var(--surface-1);
+  stroke: var(--line-strong);
+  stroke-width: 1;
+}
+
+.port-label text {
+  fill: var(--text-2);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 500;
+}
+
+.tracer-canvas .react-flow__edge.selected .port-label rect {
+  stroke: color-mix(in oklab, var(--accent) 60%, transparent);
+}
+
+.hide-port-labels .port-label,
+.is-zoomed-out .port-label {
+  display: none;
+}
+
+.hide-port-labels .react-flow__edge:hover .port-label,
+.hide-port-labels .react-flow__edge.selected .port-label {
+  display: inline;
+}
+
+/* Cable type samples in the toolbar. */
+
+.cable-swatch {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+[data-cable='crossover'] > .cable-swatch {
+  stroke-dasharray: 3 2.5;
+}
+
+[data-cable='serial'] > .cable-swatch {
+  stroke: var(--cable-serial);
+}

@@ -1,7 +1,8 @@
 import { MinimizeIcon } from 'lucide-react';
 import { useCallback, useEffect, useEffectEvent, useState } from 'react';
 import { Group, Panel, Separator, usePanelRef, type Layout } from 'react-resizable-panels';
-import { CanvasPlaceholder } from '@/features/canvas/CanvasPlaceholder';
+import { Canvas } from '@/features/canvas/Canvas';
+import { canvasEscape, canvasShortcuts, isCanvasTarget } from '@/features/canvas/controller';
 import { appCommands } from '@/features/command/appCommands';
 import { CommandPalette } from '@/features/command/CommandPalette';
 import { useRegisterCommands } from '@/features/command/registry';
@@ -136,6 +137,7 @@ export function Shell() {
       show();
     };
     const actions: Record<ShortcutId, () => void> = {
+      ...canvasShortcuts,
       commandPalette: () => setCommandsOpen((open) => !open),
       undo: () => editorStore.getState().undo(),
       redo: () => editorStore.getState().redo(),
@@ -162,8 +164,9 @@ export function Shell() {
     const id = matchShortcut(event);
     const typing = isEditable(event.target) && !(id && SHORTCUTS[id].inTextFields);
     if (event.defaultPrevented || typing) return;
+    if (event.key === 'Escape' && canvasEscape()) return event.preventDefault();
     if (focus && event.key === 'Escape') return setFocus(false);
-    if (!id) return;
+    if (!id || (SHORTCUTS[id].canvasOnly && !isCanvasTarget(event.target))) return;
     event.preventDefault();
     runShortcut(id);
   });
@@ -184,19 +187,15 @@ export function Shell() {
       onLayoutChanged={bottomLayout.onLayoutChanged}
     >
       <Panel id="canvas" minSize={160}>
-        <CanvasPlaceholder fullscreen={focus}>
+        <Canvas fullscreen={focus}>
           {focus && (
-            <Button
-              size="sm"
-              className="absolute bottom-6 left-1/2 -translate-x-1/2 shadow-pop"
-              onClick={() => setFocus(false)}
-            >
+            <Button size="sm" className="shadow-pop" onClick={() => setFocus(false)}>
               <MinimizeIcon />
               Exit focus mode
               <Kbd className="-mr-1">{formatShortcut('focusMode')}</Kbd>
             </Button>
           )}
-        </CanvasPlaceholder>
+        </Canvas>
       </Panel>
       <ResizeHandle orientation="vertical" />
       <Panel
