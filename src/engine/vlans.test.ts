@@ -8,7 +8,7 @@ import { createEngine, type Engine } from './engine';
 import type { EventId } from './events';
 import { createSimService } from './service';
 import { STACKS } from './stacks';
-import { ip, labBuilder } from './testing';
+import { ip, labBuilder, STP_CONVERGED } from './testing';
 
 /** Configures a router or switch the way a student would, by typing these lines in global config. */
 function configure(topology: Topology, id: DeviceId, lines: readonly string[]): Topology {
@@ -23,6 +23,7 @@ function simulate(topology: Topology) {
   const engine = createEngine({ seed: 1, stacks: STACKS, linkDelay: ms(1) });
   const sim = createSimService({ engine, frames: { now: () => 0, request: () => {} } });
   sim.load(topology);
+  engine.runUntil(STP_CONVERGED);
   /** Pings and runs the simulation until the summary arrives. Returns the replies' sources. */
   const ping = (from: DeviceId, target: string, count = 2) => {
     const events: PingEvent[] = [];
@@ -40,11 +41,12 @@ function simulate(topology: Topology) {
   return { engine, sim, ping, value };
 }
 
-/** The VLAN tag of every Ethernet frame delivered across the cable between two devices. */
+/** The VLAN tag of every Ethernet frame but BPDUs delivered across the cable between two devices. */
 function tagsBetween(engine: Engine, a: DeviceId, b: DeviceId) {
   const tags = new Set<number | 'untagged'>();
   for (const event of engine.log.since(0 as EventId)) {
     if (event.kind !== 'frame' || event.frame.kind !== 'ethernet') continue;
+    if (event.frame.payload.kind === 'bpdu') continue;
     const ends = [event.from.device, event.to.device];
     if (ends.includes(a) && ends.includes(b)) tags.add(event.frame.tag?.vlan ?? 'untagged');
   }

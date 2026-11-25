@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { terminalIn } from './lab';
+import { fastForward, terminalIn } from './lab';
 
 test.use({ viewport: { width: 1440, height: 900 } });
 
@@ -153,6 +153,7 @@ test('sets an address in IP Configuration, then pings from the Command Prompt', 
       ]),
     );
 
+  await fastForward(page);
   await wide.input.focus();
   await page.keyboard.type('cls');
   await page.keyboard.press('Enter');

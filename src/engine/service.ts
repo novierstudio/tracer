@@ -4,7 +4,7 @@ import { after, ms } from './core/time';
 import type { Engine } from './engine';
 import type { EventId } from './events';
 import { createHistory, stepInstant, type History, type Input } from './history';
-import { macTable, switchingModule } from './l2/switching';
+import { macTable, spanningTreeOf, switchingModule } from './l2/switching';
 import { arpTable } from './l3/arp';
 import { routesOf } from './l3/context';
 import { ipModule } from './l3/ip';
@@ -226,6 +226,8 @@ export function createSimService({
     routes: (device) => engine.withModule(device, ipModule, (ctx) => routesOf(ctx).routes),
     macTable: (device) =>
       engine.withModule(device, switchingModule, (ctx) => macTable(ctx.state, ctx.now)),
+    spanningTree: (device) =>
+      engine.withModule(device, switchingModule, (ctx) => spanningTreeOf(ctx.device, ctx.state)),
     portStates: (device) =>
       engine.withModule(device, ipModule, (ctx) =>
         Object.fromEntries(ctx.device.ports.map((port) => [port.id, ctx.portUp(port.id)])),

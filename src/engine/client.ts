@@ -1,6 +1,6 @@
 import * as Comlink from 'comlink';
 import type { LinkId, Topology } from '@/model';
-import type { SimAPI, SimEventBatch } from './api';
+import type { LinkStatus, SimAPI, SimEventBatch } from './api';
 import { diffTopology } from './patch';
 
 /** The editor store's shape, as far as syncing needs it. */
@@ -15,8 +15,8 @@ export type SimClient = {
   /** Calls into the worker. Batches arrive through `onBatch`, which owns the worker's listener. */
   sim: Omit<Comlink.Remote<SimAPI>, 'subscribe' | 'ping'>;
   onBatch(listener: BatchListener): () => void;
-  /** Whether each link is up, as of the latest batch, for listeners that join late. */
-  linkStates(): Readonly<Record<LinkId, boolean>>;
+  /** What each end of each link is doing, as of the latest batch, for listeners that join late. */
+  linkStates(): Readonly<Record<LinkId, LinkStatus>>;
   /** SimAPI.ping, with the listener proxied to the worker. */
   ping(...args: Parameters<SimAPI['ping']>): Promise<ReturnType<SimAPI['ping']>>;
 };

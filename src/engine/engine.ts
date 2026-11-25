@@ -37,8 +37,8 @@ export type Engine = {
     module: SimModule<S>,
     run: (ctx: ModuleContext<S>) => R,
   ): Result<R, DeviceUnavailable>;
-  /** Whether each link in the simulation is up now. */
-  linkStates(): Record<LinkId, boolean>;
+  /** What each end of each link in the simulation is doing now. */
+  linkStates(): Record<LinkId, LinkStatus>;
   /** Everything the run depends on now, so `restore` can return to this moment. */
   snapshot(): EngineSnapshot;
   /**
@@ -65,6 +65,14 @@ export type EngineSnapshot = {
   readonly running: ReadonlyMap<DeviceId, readonly { module: SimModule; state: unknown }[]>;
   readonly queue: { entries: readonly SavedEntry<SavedScheduled>[]; seq: number };
 };
+
+/** One end of a link: down, up, or up but held back from forwarding, as by spanning tree. */
+export type LinkEnd = 'down' | 'up' | 'held';
+
+/** Both ends of a link. A link that is down is down at both. */
+export type LinkStatus = { readonly a: LinkEnd; readonly b: LinkEnd };
+
+const LINK_DOWN: LinkStatus = { a: 'down', b: 'down' };
 
 type Slot = {
   module: SimModule;
@@ -406,6 +414,19 @@ export function createEngine({
     log.truncate(saved.head);
   }
 
+  function endOf(end: Endpoint): LinkEnd {
+    const slots = running.get(end.device) ?? [];
+    return slots.some((slot) => slot.module.holdsPort?.(slot.ctx, end.port)) ? 'held' : 'up';
+  }
+
+  function linkStates(): Record<LinkId, LinkStatus> {
+    const states = [...links].map(([id, { link, up }]): [LinkId, LinkStatus] => [
+      id,
+      up ? { a: endOf(link.a), b: endOf(link.b) } : LINK_DOWN,
+    ]);
+    return Object.fromEntries(states) as Record<LinkId, LinkStatus>;
+  }
+
   return {
     get now() {
       return now;
@@ -419,10 +440,6 @@ export function createEngine({
     withModule,
     snapshot,
     restore,
-    linkStates: () =>
-      Object.fromEntries([...links].map(([id, state]) => [id, state.up])) as Record<
-        LinkId,
-        boolean
-      >,
+    linkStates,
   };
 }

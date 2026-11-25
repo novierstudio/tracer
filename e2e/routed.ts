@@ -1,4 +1,5 @@
 import { expect, type Page } from '@playwright/test';
+import { fastForward } from './lab';
 
 export type PingEvent = {
   kind: string;
@@ -133,7 +134,10 @@ export const ROUTED_LAB = {
   annotations: {},
 };
 
-/** Opens the app in dev-handle mode and loads ROUTED_LAB once the engine is ready. */
+/**
+ * Opens the app in dev-handle mode, loads ROUTED_LAB once the engine is ready, and runs the clock
+ * on until spanning tree forwards on every switch port.
+ */
 export async function openRoutedLab(page: Page) {
   await page.addInitScript(() => {
     (window as unknown as DevWindow).__TRACER_DEV__ = true;
@@ -143,4 +147,5 @@ export async function openRoutedLab(page: Page) {
   await page.evaluate((topology) => {
     (window as unknown as DevWindow).tracer.loadLab(topology);
   }, ROUTED_LAB);
+  await fastForward(page);
 }
