@@ -63,6 +63,7 @@ import {
   showMacAddressTable,
   showVlanBrief,
 } from './showSwitching';
+import { execCommands } from './exec';
 
 const EXEC = ['user-exec', 'priv-exec'] as const;
 const PRIV = ['priv-exec'] as const;
@@ -295,6 +296,7 @@ function startBanner(ctx: DeviceContext, rest: string) {
 const VTY_LAST = 15;
 
 export const commonCommands = [
+  ...execCommands,
   // EXEC
   command({
     modes: EXEC,

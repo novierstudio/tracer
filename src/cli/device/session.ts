@@ -121,6 +121,7 @@ function stepWith<D extends IosDevice>(
   device: D,
   state: SessionState,
   line: string,
+  history: readonly string[],
 ): Step<D> {
   const { pending } = state;
   if (pending?.kind === 'banner') return continueBanner(device, state, pending, line);
@@ -139,6 +140,7 @@ function stepWith<D extends IosDevice>(
   const next = produce(device, (draft: Draft<D>) => {
     const context = {
       device: draft,
+      history,
       reject: (message: string) => {
         effects.rejected ??= message;
         return [];
@@ -178,12 +180,20 @@ function stepWith<D extends IosDevice>(
   };
 }
 
-/** Runs one line, as typed at the console or read from a config file. */
-export function step<D extends IosDevice>(device: D, state: SessionState, line: string): Step<D> {
+/**
+ * Runs one line, as typed at the console or read from a config file. `history` is what
+ * `show history` lists.
+ */
+export function step<D extends IosDevice>(
+  device: D,
+  state: SessionState,
+  line: string,
+  history: readonly string[] = [],
+): Step<D> {
   const result =
     device.kind === 'router'
-      ? stepWith<RouterDevice>(ROUTER_TREE, device, state, line)
-      : stepWith<SwitchDevice>(SWITCH_TREE, device, state, line);
+      ? stepWith<RouterDevice>(ROUTER_TREE, device, state, line, history)
+      : stepWith<SwitchDevice>(SWITCH_TREE, device, state, line, history);
   return result as Step<D>;
 }
 
@@ -339,8 +349,20 @@ export interface DeviceSession {
 const treeOf = (device: IosDevice): CommandTree<never> =>
   (device.kind === 'router' ? ROUTER_TREE : SWITCH_TREE) as CommandTree<never>;
 
+/** IOS keeps the last 10 lines of each history by default (`terminal history size 10`). */
+const HISTORY_SIZE = 10;
+
 export function createDeviceSession(start: SessionState = { mode: USER_EXEC }): DeviceSession {
   let state = start;
+  // IOS keeps EXEC and config lines apart, so `show history` in EXEC lists only EXEC lines.
+  const histories = { exec: [] as readonly string[], config: [] as readonly string[] };
+  /** Records a typed line in its mode's history and returns that history. */
+  const remember = (line: string): readonly string[] => {
+    const kind = isConfigMode(state.mode) ? 'config' : 'exec';
+    if (state.pending || line.trim() === '') return histories[kind];
+    histories[kind] = [...histories[kind], line.trim()].slice(-HISTORY_SIZE);
+    return histories[kind];
+  };
   const readingPassword = () =>
     state.pending?.kind === 'enable-password' || state.pending?.kind === 'login';
   const promptOf = (device: IosDevice) => {
@@ -358,11 +380,12 @@ export function createDeviceSession(start: SessionState = { mode: USER_EXEC }): 
     prompt: promptOf,
     run(device, line) {
       const width = promptOf(device).length;
+      const history = remember(line);
       const piped = state.pending
         ? { kind: 'none' as const }
         : readPipe(line, state.mode, treeOf(device), width);
       if (piped.kind === 'error') return { output: piped.output, update: undefined };
-      const result = step(device, state, piped.kind === 'piped' ? piped.command : line);
+      const result = step(device, state, piped.kind === 'piped' ? piped.command : line, history);
       state = result.state;
       const update = result.device === device ? undefined : toConfigUpdate(result.device);
       switch (result.outcome.kind) {

@@ -1,7 +1,8 @@
 import { openConsole } from '@/cli';
 import type { DeviceId } from '@/model';
 import { editorStore, type EditorStore } from '@/model/store';
-import { deviceTerminal, type EngineLink } from './session';
+import type { SimClient } from '@/engine/client';
+import { deviceTerminal, type EngineLink, type SimLink } from './session';
 import { createTty, type Tty } from './tty';
 
 /** One console per router or switch, kept while the device exists. */
@@ -30,13 +31,29 @@ export function createConsoleRegistry(store: EditorStore, engine?: EngineLink): 
   };
 }
 
+/** The client's calls a console makes, and the simulated clock as its batches report it. */
+function linkTo({ sim, onBatch }: SimClient): SimLink {
+  let now = 0;
+  // A playing simulation sends a batch every frame, and a paused one's clock stands still.
+  onBatch((batch) => void (now = batch.now));
+  return {
+    routes: (device) => sim.routes(device),
+    arpTable: (device) => sim.arpTable(device),
+    macTable: (device) => sim.macTable(device),
+    portStates: (device) => sim.portStates(device),
+    now: () => now,
+  };
+}
+
+let appLink: Promise<SimLink> | undefined;
+
 /**
  * The app's simulation. startEngine returns the client the app already started, so this connects
  * to the running worker rather than starting another.
  */
 const appEngine: EngineLink = () =>
-  import('@/engine/client')
+  (appLink ??= import('@/engine/client')
     .then(({ startEngine }) => startEngine(editorStore))
-    .then(({ sim }) => sim);
+    .then(linkTo));
 
 export const consoles = createConsoleRegistry(editorStore, appEngine);

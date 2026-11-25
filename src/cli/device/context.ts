@@ -20,6 +20,8 @@ export type IosDraft = Draft<RouterDevice> | Draft<SwitchDevice>;
 /** What a command handler gets. The session commits its edits to `device.config` as one step. */
 export interface DeviceContext {
   readonly device: IosDraft;
+  /** The lines typed in this kind of mode, EXEC or config, oldest first, ending with this one. */
+  readonly history: readonly string[];
   /** Refuses the command. Its edits are dropped and the mode does not change. */
   reject(message: string): readonly string[];
   /** Holds the mode and reads the next lines as `pending` input. Returns the lines to print. */
