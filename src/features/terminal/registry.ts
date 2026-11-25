@@ -32,7 +32,7 @@ export function createConsoleRegistry(store: EditorStore, engine?: EngineLink): 
 }
 
 /** The client's calls a console makes, and the simulated clock as its batches report it. */
-function linkTo({ sim, onBatch, ping }: SimClient): SimLink {
+function linkTo({ sim, onBatch, ping, traceroute }: SimClient): SimLink {
   let now = 0;
   // A playing simulation sends a batch every frame, and a paused one's clock stands still.
   onBatch((batch) => void (now = batch.now));
@@ -44,6 +44,8 @@ function linkTo({ sim, onBatch, ping }: SimClient): SimLink {
     spanningTree: (device) => sim.spanningTree(device),
     now: () => now,
     ping,
+    traceroute,
+    cancel: (handle) => sim.cancel(handle),
   };
 }
 
