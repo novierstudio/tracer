@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { useEditor } from '@/model/react';
 import { EmptyState } from '@/ui/empty-state';
 import { DeviceInspector, type DeviceTab } from './DeviceInspector';
+import './devHandle';
 import { LinkInspector } from './LinkInspector';
 import { SelectionInspector } from './SelectionInspector';
 import { inspectorView } from './view';
