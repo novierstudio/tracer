@@ -3,6 +3,10 @@ import { after, ms, type SimTime } from './core/time';
 import type { Engine } from './engine';
 import type { EventId, SimEvent } from './events';
 import { macTable, switchingModule } from './l2/switching';
+import { arpTable } from './l3/arp';
+import { routesOf } from './l3/context';
+import { ipModule } from './l3/ip';
+import { startPing } from './l3/ping';
 
 /** The wall clock and frame timer that drive playback. The worker passes the real ones. */
 export type FrameClock = {
@@ -118,6 +122,24 @@ export function createSimService({
       requestFrame();
     },
     runCommand: () => ({ kind: 'not-implemented' }),
+    ping(device, target, options, listener) {
+      const { count, timeoutMs } = options;
+      if (!Number.isInteger(count) || count < 1) {
+        throw new RangeError(`Count must be a whole number >= 1, got ${count}`);
+      }
+      if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+        throw new RangeError(
+          `Timeout must be a finite number of milliseconds > 0, got ${timeoutMs}`,
+        );
+      }
+      const started = engine.withModule(device, ipModule, (ctx) =>
+        startPing(ctx, target, options, listener),
+      );
+      requestFrame();
+      return started;
+    },
+    arpTable: (device) => engine.withModule(device, ipModule, arpTable),
+    routes: (device) => engine.withModule(device, ipModule, (ctx) => routesOf(ctx).routes),
     macTable: (device) =>
       engine.withModule(device, switchingModule, (ctx) => macTable(ctx.state, ctx.now)),
     subscribe(next) {
