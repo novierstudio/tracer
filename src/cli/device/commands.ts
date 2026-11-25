@@ -42,10 +42,17 @@ import {
 
 const EXEC = ['user-exec', 'priv-exec'] as const;
 const PRIV = ['priv-exec'] as const;
-const CONFIG = ['global-config', 'interface-config', 'line-config', 'router-config'] as const;
+const CONFIG = [
+  'global-config',
+  'interface-config',
+  'line-config',
+  'vlan-config',
+  'router-config',
+] as const;
 const GLOBAL = ['global-config'] as const;
 const IF = ['interface-config'] as const;
 const LINE = ['line-config'] as const;
+const VLAN = ['vlan-config'] as const;
 
 const NOTHING: readonly string[] = [];
 
@@ -140,7 +147,7 @@ function addressProblem(
 const isEthernet = (port: Port | undefined) => port !== undefined && port.kind !== 'serial';
 
 /** The rates a Packet Tracer serial port accepts, in bit/s. */
-const CLOCK_RATES = new Set([
+export const CLOCK_RATES = new Set([
   1200, 2400, 4800, 9600, 19200, 38400, 56000, 64000, 72000, 125000, 128000, 148000, 250000, 500000,
   800000, 1000000, 1300000, 2000000, 4000000,
 ]);
@@ -730,12 +737,20 @@ function routeCommands() {
   ];
 }
 
+const DEFAULT_VLAN = VlanId.parse(1);
+
+/** The name IOS gives a VLAN until `name` sets one: `default` for VLAN 1, `VLAN0010` for 10. */
+const defaultVlanName = (vlan: VlanId) =>
+  vlan === DEFAULT_VLAN ? 'default' : `VLAN${String(vlan).padStart(4, '0')}`;
+
 /** `switchport access vlan` on a VLAN the switch lacks creates it, as IOS does. */
 function ensureVlan(ctx: SwitchContext, vlan: VlanId): readonly string[] {
   if (vlan in ctx.device.config.vlans) return NOTHING;
-  ctx.device.config.vlans[vlan] = { name: `VLAN${String(vlan).padStart(4, '0')}` };
+  ctx.device.config.vlans[vlan] = { name: defaultVlanName(vlan) };
   return [`% Access VLAN does not exist. Creating vlan ${vlan}`];
 }
+
+const VLAN_NAME_MAX = 32;
 
 function eachSwitchport(
   ctx: SwitchContext,
@@ -747,7 +762,6 @@ function eachSwitchport(
   );
 }
 
-const DEFAULT_VLAN = VlanId.parse(1);
 const orUnset = (vlan: VlanId | undefined) => (vlan === DEFAULT_VLAN ? undefined : vlan);
 
 function setAccessVlan(port: Draft<SwitchInterface>, vlan: VlanId) {
@@ -784,6 +798,35 @@ function setSwitchportMode(port: Draft<SwitchInterface>, mode: 'access' | 'trunk
 
 export const switchCommands = [
   ...commonCommands,
+  switchCommand({
+    modes: GLOBAL,
+    path: [keyword('vlan', 'Vlan commands'), num('vlan', 1, 4094, 'ISL VLAN IDs 1-1005')],
+    to: ({ vlan }) => ({ kind: 'vlan-config', vlan: VlanId.parse(vlan) }),
+    run: ({ vlan }, ctx) => {
+      const id = VlanId.parse(vlan);
+      ctx.device.config.vlans[id] ??= { name: defaultVlanName(id) };
+      return NOTHING;
+    },
+    no: ({ vlan }, ctx) => {
+      if (vlan === undefined) return ctx.reject('% Incomplete command.');
+      if (vlan === DEFAULT_VLAN) return ctx.reject('Default VLAN 1 may not be deleted.');
+      delete ctx.device.config.vlans[VlanId.parse(vlan)];
+      return NOTHING;
+    },
+  }),
+  switchCommand({
+    modes: VLAN,
+    path: [keyword('name', 'Ascii name of the VLAN'), word('name', 'The ascii name for the VLAN')],
+    run: ({ name }, ctx, mode) => {
+      if (name.length > VLAN_NAME_MAX) return ctx.reject('% Name too long');
+      ctx.device.config.vlans[mode.vlan] = { name };
+      return NOTHING;
+    },
+    no: (_a, ctx, mode) => {
+      ctx.device.config.vlans[mode.vlan] = { name: defaultVlanName(mode.vlan) };
+      return NOTHING;
+    },
+  }),
   switchCommand({
     modes: GLOBAL,
     path: [

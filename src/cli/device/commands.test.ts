@@ -283,6 +283,21 @@ describe('interface config commands', () => {
       { mode: 'access', vlan: 10 },
     ],
     ['speed 1000 on a gigabit port', ['int g0/1', 'speed 1000'], (c) => g01(c)?.speed, 1000],
+    ['vlan creates a VLAN', ['vlan 10'], (c) => c.vlans[10 as never], { name: 'VLAN0010' }],
+    ['vlan then name', ['vlan 10', 'name Sales'], (c) => c.vlans[10 as never], { name: 'Sales' }],
+    [
+      'name renames an existing VLAN',
+      ['vlan 10', 'name Sales', 'exit', 'vlan 10', 'name Staff'],
+      (c) => c.vlans[10 as never],
+      { name: 'Staff' },
+    ],
+    [
+      'no name restores the default name',
+      ['vlan 10', 'name Sales', 'no name'],
+      (c) => c.vlans[10 as never],
+      { name: 'VLAN0010' },
+    ],
+    ['no vlan deletes it', ['vlan 10', 'exit', 'no vlan 10'], (c) => 10 in c.vlans, false],
   ])('switch: %s', (_name, lines, read, expected) => {
     expect(s(lines, read)).toEqual(expected);
   });
@@ -443,6 +458,13 @@ describe('refused commands', () => {
       'switch',
       ['int vlan 1', 'switchport mode trunk'],
       [INVALID_INPUT],
+    ],
+    ['deleting VLAN 1', 'switch', ['no vlan 1'], ['Default VLAN 1 may not be deleted.']],
+    [
+      'a VLAN name over 32 characters',
+      'switch',
+      ['vlan 10', `name ${'x'.repeat(33)}`],
+      ['% Name too long'],
     ],
   ])('refuses %s', (_name, kind, lines, expected) => {
     const c = consoleOn(kind === 'router' ? router() : switchDevice());
