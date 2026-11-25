@@ -16,7 +16,7 @@ The two `.pkt` files are used under the MIT licence of their repositories:
 
 ## More real files
 
-`samples.test.ts` decrypts every `.pkt` and `.pka` in a local folder and checks that each one is well-formed Packet Tracer XML. It is skipped unless `PKT_SAMPLES_DIR` is set:
+`samples.test.ts` decrypts every `.pkt` and `.pka` in a local folder and checks that each one is well-formed Packet Tracer XML. It then imports each file and checks the topology against the `Topology` schema, printing one Markdown table row per file: name, Packet Tracer version, devices imported / skipped, links imported / dropped, and whether the schema passed. It is skipped unless `PKT_SAMPLES_DIR` is set:
 
 ```sh
 PKT_SAMPLES_DIR=~/pkt-samples PKT_XML_OUT=/tmp/pkt-xml pnpm vitest run src/importers/pkt/samples.test.ts --silent=false
