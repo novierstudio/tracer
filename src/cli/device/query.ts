@@ -19,9 +19,9 @@ export type EngineQueryKind = keyof EngineAnswers;
  * Prints a show command from live state. With no simulation to ask, `answer` is undefined and the
  * output comes from the config alone.
  */
-export type Render<K extends EngineQueryKind> = (
+export type Render<K extends EngineQueryKind, D extends IosDevice = IosDevice> = (
   answer: EngineAnswers[K] | undefined,
-  device: IosDevice,
+  device: D,
 ) => readonly string[];
 
 /**
