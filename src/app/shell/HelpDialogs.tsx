@@ -16,18 +16,19 @@ export function HelpDialogs({ open, onOpenChange }: HelpDialogsProps) {
   return (
     <>
       <Dialog open={open === 'shortcuts'} onOpenChange={close}>
-        <DialogContent title="Keyboard shortcuts">
-          <ul className="flex flex-col">
+        <DialogContent title="Keyboard shortcuts" className="sm:max-w-3xl">
+          {/* Two columns that read top to bottom, so neighbouring shortcuts stay together. */}
+          <ul className="gap-x-8 sm:columns-2">
             {(Object.keys(SHORTCUTS) as ShortcutId[]).map((id) => (
               <li
                 key={id}
-                className="flex h-9 items-center justify-between border-b border-line last:border-0"
+                className="flex h-9 break-inside-avoid items-center justify-between gap-4 border-b border-line"
               >
                 <span className="text-fg-2">{SHORTCUTS[id].label}</span>
                 <Kbd>{formatShortcut(id)}</Kbd>
               </li>
             ))}
-            <li className="flex h-9 items-center justify-between">
+            <li className="flex h-9 break-inside-avoid items-center justify-between gap-4 border-b border-line">
               <span className="text-fg-2">Leave focus mode</span>
               <Kbd>Esc</Kbd>
             </li>

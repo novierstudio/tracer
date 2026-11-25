@@ -3,6 +3,7 @@ import './canvas.css';
 import {
   Background,
   BackgroundVariant,
+  ConnectionLineType,
   MiniMap,
   Panel,
   ReactFlow,
@@ -12,6 +13,7 @@ import {
   useReactFlow,
   useStore,
   type ColorMode,
+  type Connection,
   type EdgeChange,
   type MiniMapNodeProps,
   type NodeChange,
@@ -25,49 +27,74 @@ import {
   useState,
   useSyncExternalStore,
   type DragEvent,
+  type MouseEvent,
   type ReactNode,
   type RefObject,
 } from 'react';
 import { formatShortcut } from '@/app/shell/shortcuts';
 import { findDeviceModel, type DeviceModelId } from '@/devices/catalog';
 import { useRegisterCommands } from '@/features/command/registry';
-import { DEVICE_DRAG_TYPE } from '@/features/palette/PalettePanel';
-import type { DeviceId, LinkId } from '@/model';
+import { openDeviceConsole } from '@/features/inspector/requests';
+import { DEVICE_DRAG_TYPE, NOTE_DRAG_TYPE } from '@/features/palette/PalettePanel';
+import type { AnnotationId, DeviceId, LinkId } from '@/model';
 import { useEditor } from '@/model/react';
 import { editorStore } from '@/model/store';
 import { cn } from '@/ui/cn';
 import { EmptyState } from '@/ui/empty-state';
 import { CableEdge } from './CableEdge';
+import { CanvasContextMenu, type MenuTarget } from './CanvasContextMenu';
 import { ToolHint, Toolbar, ZoomControls } from './CanvasControls';
 import { cableTool, useCableTool } from './cableTool';
-import { attachCanvas, canvasCommands, FIT_VIEW, placeDevice, usePortLabels } from './controller';
+import { useCanvasUi } from './canvasUi';
+import {
+  attachCanvas,
+  canvasCommands,
+  FIT_VIEW,
+  placeDevice,
+  trackPointer,
+  usePortLabels,
+} from './controller';
 import { DeviceNode } from './DeviceNode';
+import { currentSelection, editNote, setSelection, startNote } from './edit';
 import {
   applySelectChanges,
   createEdgeMapper,
   createNodeMapper,
+  createNoteMapper,
+  isDeviceId,
+  isNoteId,
   movesFrom,
   usedPortCounts,
   type CableFlowEdge,
-  type DeviceFlowNode,
+  type CanvasNode,
 } from './flow';
 import { GRID } from './geometry';
+import { NoteNode } from './NoteNode';
 import { PortPicker } from './PortPicker';
 
-const NODE_TYPES = { device: DeviceNode };
+const NODE_TYPES = { device: DeviceNode, note: NoteNode };
 const EDGE_TYPES = { cable: CableEdge };
 const MULTI_SELECT_KEYS = ['Shift', 'Meta', 'Control'];
 const MIDDLE_BUTTON = [1];
 const MINIMAP_SIZE = { width: 176, height: 112 };
 
-// React Flow reports what the user did; the store decides. Moves go through moveDevices (one undo
-// step per drag, bracketed by a gesture) and selection lives in the store for the inspector.
-function onNodesChange(changes: NodeChange<DeviceFlowNode>[]) {
-  const moves = movesFrom(changes);
-  if (moves.length > 0) editorStore.getState().moveDevices(moves);
-  const { selection, select } = editorStore.getState();
-  const devices = applySelectChanges<DeviceId>(selection.devices, changes);
-  if (devices) select({ ...selection, devices });
+// React Flow reports what the user did; the store decides. Moves only come from drags, which a
+// gesture brackets into one undo step (arrow keys go through `nudge`). Device and link selection
+// lives in the store for the inspector, note selection in the canvas's own state.
+function onNodesChange(changes: NodeChange<CanvasNode>[]) {
+  const { devices, notes } = movesFrom(changes);
+  if (devices.length > 0) editorStore.getState().moveDevices(devices);
+  if (notes.length > 0) editorStore.getState().moveAnnotations(notes);
+  const selection = currentSelection();
+  const selectedDevices = applySelectChanges<DeviceId>(selection.devices, changes, isDeviceId);
+  const selectedNotes = applySelectChanges<AnnotationId>(selection.notes, changes, isNoteId);
+  if (selectedDevices || selectedNotes) {
+    setSelection({
+      ...selection,
+      devices: selectedDevices ?? selection.devices,
+      notes: selectedNotes ?? selection.notes,
+    });
+  }
 }
 
 function onEdgesChange(changes: EdgeChange<CableFlowEdge>[]) {
@@ -79,18 +106,33 @@ function onEdgesChange(changes: EdgeChange<CableFlowEdge>[]) {
 const beginGesture = () => editorStore.getState().beginGesture();
 const endGesture = () => editorStore.getState().endGesture();
 
-const onNodeClick: NodeMouseHandler<DeviceFlowNode> = (_, node) =>
-  cableTool.getState().clickDevice(node.id as DeviceId);
+const onNodeClick: NodeMouseHandler<CanvasNode> = (_, node) => {
+  if (isDeviceId(node.id)) cableTool.getState().clickDevice(node.id);
+};
+
+// Double-click opens a device's CLI or Desktop, as the UI/UX doc has it, and edits a note.
+const onNodeDoubleClick: NodeMouseHandler<CanvasNode> = (_, node) => {
+  if (cableTool.getState().step) return;
+  if (isDeviceId(node.id)) openDeviceConsole(node.id);
+  else if (isNoteId(node.id)) editNote(node.id);
+};
+
+// Quick cable ends on another device's tile, which is a target handle while a drag is on.
+function onConnect({ source, target }: Connection) {
+  if (isDeviceId(source) && isDeviceId(target)) cableTool.getState().quickConnect(source, target);
+}
+
+const DROP_TYPES = [DEVICE_DRAG_TYPE, NOTE_DRAG_TYPE];
 
 function onDragOver(event: DragEvent) {
-  if (!event.dataTransfer.types.includes(DEVICE_DRAG_TYPE)) return;
+  if (!DROP_TYPES.some((type) => event.dataTransfer.types.includes(type))) return;
   event.preventDefault();
   event.dataTransfer.dropEffect = 'copy';
 }
 
 // Fit once when the canvas opens on an existing lab. React Flow's own fitView prop would instead
 // wait for the first nodes and re-centre the view under the first device dropped.
-function fitOnOpen(flow: ReactFlowInstance<DeviceFlowNode, CableFlowEdge>) {
+function fitOnOpen(flow: ReactFlowInstance<CanvasNode, CableFlowEdge>) {
   if (flow.getNodes().length > 0) void flow.fitView(FIT_VIEW);
 }
 
@@ -105,7 +147,8 @@ function subscribeTheme(onChange: () => void) {
   return () => observer.disconnect();
 }
 
-const minimapColor = (node: DeviceFlowNode) => (node.selected ? 'var(--accent)' : 'var(--text-3)');
+const minimapColor = (node: CanvasNode) =>
+  node.selected ? 'var(--accent)' : node.type === 'note' ? 'var(--note-edge)' : 'var(--text-3)';
 
 function MinimapNode({ x, y, width, height, color, selected }: MiniMapNodeProps) {
   return (
@@ -121,27 +164,51 @@ function MinimapNode({ x, y, width, height, color, selected }: MiniMapNodeProps)
   );
 }
 
+function useNodes(): CanvasNode[] {
+  const devices = useEditor((state) => state.topology.devices);
+  const links = useEditor((state) => state.topology.links);
+  const annotations = useEditor((state) => state.topology.annotations);
+  const selection = useEditor((state) => state.selection);
+  const notes = useCanvasUi((state) => state.notes);
+  const edit = useCanvasUi((state) => state.edit);
+
+  const [toNodes] = useState(createNodeMapper);
+  const [toNotes] = useState(createNoteMapper);
+  const used = useMemo(() => usedPortCounts(links), [links]);
+  const selectedDevices = useMemo(() => new Set(selection.devices), [selection.devices]);
+  const selectedNotes = useMemo(() => new Set(notes), [notes]);
+  const deviceNodes = useMemo(
+    () => toNodes(devices, used, selectedDevices),
+    [toNodes, devices, used, selectedDevices],
+  );
+  const editing = edit?.kind === 'note' ? edit.note : undefined;
+  const draft = edit?.kind === 'new-note' ? edit.position : undefined;
+  const noteNodes = useMemo(
+    () => toNotes(annotations, selectedNotes, editing, draft),
+    [toNotes, annotations, selectedNotes, editing, draft],
+  );
+  // Notes first, so devices draw over them.
+  return useMemo(() => [...noteNodes, ...deviceNodes], [noteNodes, deviceNodes]);
+}
+
 function Flow({ element }: { element: RefObject<HTMLElement | null> }) {
   const devices = useEditor((state) => state.topology.devices);
   const links = useEditor((state) => state.topology.links);
   const selection = useEditor((state) => state.selection);
   const cabling = useCableTool((state) => state.step !== null);
+  const editingText = useCanvasUi((state) => state.edit !== null);
   const portLabels = usePortLabels();
   const zoomedOut = useStore((state) => state.transform[2] < 0.5);
   const sparseGrid = useStore((state) => state.transform[2] < 0.6);
+  const connecting = useStore((state) => state.connection.inProgress);
   const altHeld = useKeyPress('Alt');
   const colorMode = useSyncExternalStore(subscribeTheme, themeClass);
-  const flow = useReactFlow<DeviceFlowNode, CableFlowEdge>();
+  const flow = useReactFlow<CanvasNode, CableFlowEdge>();
+  const [menu, setMenu] = useState<MenuTarget | null>(null);
 
-  const [toNodes] = useState(createNodeMapper);
+  const nodes = useNodes();
   const [toEdges] = useState(createEdgeMapper);
-  const used = useMemo(() => usedPortCounts(links), [links]);
-  const selectedDevices = useMemo(() => new Set(selection.devices), [selection.devices]);
   const selectedLinks = useMemo(() => new Set(selection.links), [selection.links]);
-  const nodes = useMemo(
-    () => toNodes(devices, used, selectedDevices),
-    [toNodes, devices, used, selectedDevices],
-  );
   const edges = useMemo(
     () => toEdges(links, devices, selectedLinks),
     [toEdges, links, devices, selectedLinks],
@@ -159,73 +226,128 @@ function Flow({ element }: { element: RefObject<HTMLElement | null> }) {
     if (flow.viewportInitialized) fitOnOpen(flow);
   }, [flow, lab]);
 
+  const flowPoint = (event: { clientX: number; clientY: number }) =>
+    flow.screenToFlowPosition({ x: event.clientX, y: event.clientY });
+
   const onDrop = (event: DragEvent) => {
+    const note = event.dataTransfer.types.includes(NOTE_DRAG_TYPE);
     const model = findDeviceModel(event.dataTransfer.getData(DEVICE_DRAG_TYPE));
-    if (!model) return;
+    if (!note && !model) return;
     event.preventDefault();
     element.current?.focus({ preventScroll: true });
-    const at = flow.screenToFlowPosition({ x: event.clientX, y: event.clientY });
-    placeDevice(model.id as DeviceModelId, at);
+    if (model) placeDevice(model.id as DeviceModelId, flowPoint(event));
+    else startNote(flowPoint(event));
+  };
+
+  // Right-click acts on the selection when the element under the pointer is part of it, and on
+  // that element alone otherwise, as file managers and design tools do.
+  const openMenu = (target: MenuTarget) => {
+    cableTool.getState().exit();
+    setMenu(target);
+  };
+  const onNodeContextMenu = (event: MouseEvent, node: CanvasNode) => {
+    const selected = currentSelection();
+    const inSelection = isDeviceId(node.id)
+      ? selected.devices.includes(node.id)
+      : isNoteId(node.id) && selected.notes.includes(node.id);
+    const count = selected.devices.length + selected.links.length + selected.notes.length;
+    const at = flowPoint(event);
+    if (inSelection && count > 1) return openMenu({ kind: 'selection', at });
+    if (isDeviceId(node.id)) {
+      setSelection({ devices: [node.id], links: [], notes: [] });
+      openMenu({ kind: 'device', device: node.id, at });
+    } else if (isNoteId(node.id)) {
+      setSelection({ devices: [], links: [], notes: [node.id] });
+      openMenu({ kind: 'note', note: node.id, at });
+    } else {
+      event.preventDefault();
+    }
+  };
+  const onEdgeContextMenu = (event: MouseEvent, edge: CableFlowEdge) => {
+    setSelection({ devices: [], links: [edge.id as LinkId], notes: [] });
+    openMenu({ kind: 'link', link: edge.id as LinkId, at: flowPoint(event) });
   };
 
   return (
-    <ReactFlow<DeviceFlowNode, CableFlowEdge>
-      nodes={nodes}
-      edges={edges}
-      nodeTypes={NODE_TYPES}
-      edgeTypes={EDGE_TYPES}
-      onNodesChange={onNodesChange}
-      onEdgesChange={onEdgesChange}
-      onNodeDragStart={beginGesture}
-      onNodeDragStop={endGesture}
-      onSelectionDragStart={beginGesture}
-      onSelectionDragStop={endGesture}
-      onNodeClick={onNodeClick}
-      onDragOver={onDragOver}
-      onDrop={onDrop}
-      nodeOrigin={[0.5, 0.5]}
-      snapToGrid={!altHeld}
-      snapGrid={[GRID, GRID]}
-      nodesDraggable={!cabling}
-      nodesConnectable={false}
-      elementsSelectable={!cabling}
-      selectionOnDrag={!cabling}
-      selectionMode={SelectionMode.Partial}
-      multiSelectionKeyCode={MULTI_SELECT_KEYS}
-      panOnDrag={cabling || MIDDLE_BUTTON}
-      panOnScroll
-      deleteKeyCode={null}
-      zoomOnDoubleClick={false}
-      minZoom={0.2}
-      maxZoom={2.5}
-      onInit={fitOnOpen}
-      colorMode={colorMode}
-      proOptions={{ hideAttribution: true }}
-      className={cn(
-        cabling && 'is-cabling',
-        zoomedOut && 'is-zoomed-out',
-        !portLabels && 'hide-port-labels',
-      )}
-    >
-      <Background variant={BackgroundVariant.Dots} gap={sparseGrid ? GRID * 4 : GRID} size={1.25} />
-      <Panel position="top-center">
-        <Toolbar />
-      </Panel>
-      <Panel position="bottom-right" style={{ marginRight: MINIMAP_SIZE.width + 20 }}>
-        <ZoomControls />
-      </Panel>
-      <MiniMap
-        position="bottom-right"
-        ariaLabel="Minimap"
-        pannable
-        zoomable
-        nodeColor={minimapColor}
-        nodeComponent={MinimapNode}
-        maskStrokeWidth={1.5}
-        offsetScale={12}
-        style={MINIMAP_SIZE}
-      />
-    </ReactFlow>
+    <CanvasContextMenu target={menu}>
+      <div
+        className="size-full"
+        onPointerMove={(event) => trackPointer(event)}
+        onPointerLeave={() => trackPointer(null)}
+      >
+        <ReactFlow<CanvasNode, CableFlowEdge>
+          nodes={nodes}
+          edges={edges}
+          nodeTypes={NODE_TYPES}
+          edgeTypes={EDGE_TYPES}
+          onNodesChange={onNodesChange}
+          onEdgesChange={onEdgesChange}
+          onNodeDragStart={beginGesture}
+          onNodeDragStop={endGesture}
+          onSelectionDragStart={beginGesture}
+          onSelectionDragStop={endGesture}
+          onNodeClick={onNodeClick}
+          onNodeDoubleClick={onNodeDoubleClick}
+          onConnect={onConnect}
+          onNodeContextMenu={onNodeContextMenu}
+          onEdgeContextMenu={onEdgeContextMenu}
+          onSelectionContextMenu={(event) => openMenu({ kind: 'selection', at: flowPoint(event) })}
+          onPaneContextMenu={(event) => openMenu({ kind: 'pane', at: flowPoint(event) })}
+          onDragOver={onDragOver}
+          onDrop={onDrop}
+          nodeOrigin={[0.5, 0.5]}
+          snapToGrid={!altHeld}
+          snapGrid={[GRID, GRID]}
+          nodesDraggable={!cabling}
+          nodesConnectable={!cabling && !editingText}
+          connectOnClick={false}
+          connectionLineType={ConnectionLineType.Straight}
+          connectionRadius={0}
+          elementsSelectable={!cabling}
+          selectionOnDrag={!cabling}
+          selectionMode={SelectionMode.Partial}
+          multiSelectionKeyCode={MULTI_SELECT_KEYS}
+          panOnDrag={cabling || MIDDLE_BUTTON}
+          panOnScroll
+          deleteKeyCode={null}
+          zoomOnDoubleClick={false}
+          minZoom={0.2}
+          maxZoom={2.5}
+          onInit={fitOnOpen}
+          colorMode={colorMode}
+          proOptions={{ hideAttribution: true }}
+          className={cn(
+            cabling && 'is-cabling',
+            connecting && 'is-connecting',
+            zoomedOut && 'is-zoomed-out',
+            !portLabels && 'hide-port-labels',
+          )}
+        >
+          <Background
+            variant={BackgroundVariant.Dots}
+            gap={sparseGrid ? GRID * 4 : GRID}
+            size={1.25}
+          />
+          <Panel position="top-center">
+            <Toolbar />
+          </Panel>
+          <Panel position="bottom-right" style={{ marginRight: MINIMAP_SIZE.width + 20 }}>
+            <ZoomControls />
+          </Panel>
+          <MiniMap
+            position="bottom-right"
+            ariaLabel="Minimap"
+            pannable
+            zoomable
+            nodeColor={minimapColor}
+            nodeComponent={MinimapNode}
+            maskStrokeWidth={1.5}
+            offsetScale={12}
+            style={MINIMAP_SIZE}
+          />
+        </ReactFlow>
+      </div>
+    </CanvasContextMenu>
   );
 }
 

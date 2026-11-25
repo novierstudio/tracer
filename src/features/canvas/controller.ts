@@ -1,13 +1,32 @@
 import type { ReactFlowInstance } from '@xyflow/react';
 import {
+  AlignCenterHorizontalIcon,
+  AlignCenterVerticalIcon,
+  AlignEndHorizontalIcon,
+  AlignEndVerticalIcon,
+  AlignHorizontalDistributeCenterIcon,
+  AlignStartHorizontalIcon,
+  AlignStartVerticalIcon,
+  AlignVerticalDistributeCenterIcon,
   CableIcon,
+  ClipboardPasteIcon,
+  CopyIcon,
+  CopyPlusIcon,
+  EthernetPortIcon,
   FullscreenIcon,
+  MonitorIcon,
+  PencilIcon,
+  RouterIcon,
   ScanIcon,
+  ScissorsIcon,
   SquareDashedMousePointerIcon,
+  StickyNoteIcon,
   TagIcon,
   Trash2Icon,
+  WorkflowIcon,
   ZoomInIcon,
   ZoomOutIcon,
+  type LucideIcon,
 } from 'lucide-react';
 import { useStore } from 'zustand';
 import { createStore } from 'zustand/vanilla';
@@ -15,15 +34,36 @@ import type { ShortcutId } from '@/app/shell/shortcuts';
 import { readJson, safeStorage } from '@/app/storage';
 import type { DeviceModelId } from '@/devices/catalog';
 import { deviceSpec } from '@/devices/create';
-import type { Point } from '@/model';
+import type { DeviceId, Point } from '@/model';
 import { editorStore } from '@/model/store';
 import type { Command } from '@/features/command/registry';
+import { ALIGN_EDGES, type AlignEdge, type Axis } from './arrange';
 import { cableTool } from './cableTool';
-import type { CableFlowEdge, DeviceFlowNode } from './flow';
-import { GRID, snap } from './geometry';
+import {
+  align,
+  autoLayout,
+  canAlign,
+  canDistribute,
+  canPaste,
+  copySelection,
+  currentSelection,
+  cutSelection,
+  deleteSelection,
+  distribute,
+  duplicateSelection,
+  hasSelection,
+  nudge,
+  paste,
+  selectAll,
+  setSelection,
+  startNote,
+  startRename,
+} from './edit';
+import type { CableFlowEdge, CanvasNode } from './flow';
+import { GRID, snapCentre } from './geometry';
 
 type CanvasHandle = {
-  flow: ReactFlowInstance<DeviceFlowNode, CableFlowEdge>;
+  flow: ReactFlowInstance<CanvasNode, CableFlowEdge>;
   element: HTMLElement;
 };
 
@@ -64,9 +104,29 @@ export function zoomToActualSize() {
   void mounted?.flow.zoomTo(1, { duration: motion() });
 }
 
+// The pointer's last place over the canvas, in screen pixels so it stays right as the view pans.
+let pointer: { x: number; y: number } | null = null;
+
+export function trackPointer(at: { clientX: number; clientY: number } | null) {
+  pointer = at && { x: at.clientX, y: at.clientY };
+}
+
+function toFlowPoint(at: { x: number; y: number }): Point | undefined {
+  return mounted?.flow.screenToFlowPosition(at);
+}
+
+export function viewCentre(): Point | undefined {
+  if (!mounted) return undefined;
+  const rect = mounted.element.getBoundingClientRect();
+  return toFlowPoint({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 });
+}
+
+/** Where keyboard adds land: under the pointer when it is over the canvas, else mid-view. */
+const pointerOrCentre = (): Point | undefined => (pointer && toFlowPoint(pointer)) ?? viewCentre();
+
 /** The nearest grid point at or after `point`, stepping diagonally past devices already there. */
 function freeSpot(point: Point, taken: readonly Point[]): Point {
-  let spot = { x: snap(point.x), y: snap(point.y) };
+  let spot = { x: snapCentre(point.x), y: snapCentre(point.y) };
   const occupied = (p: Point) =>
     taken.some((t) => Math.abs(t.x - p.x) < GRID * 2 && Math.abs(t.y - p.y) < GRID * 2);
   for (let i = 0; i < 50 && occupied(spot); i++)
@@ -76,18 +136,8 @@ function freeSpot(point: Point, taken: readonly Point[]): Point {
 
 /** Adds a device at a flow point, or the middle of the view, named like Packet Tracer does. */
 export function placeDevice(model: DeviceModelId, at?: Point) {
-  const element = mounted?.element;
-  const flow = mounted?.flow;
-  if (!element || !flow) return;
-  const point =
-    at ??
-    (() => {
-      const rect = element.getBoundingClientRect();
-      return flow.screenToFlowPosition({
-        x: rect.left + rect.width / 2,
-        y: rect.top + rect.height / 2,
-      });
-    })();
+  const point = at ?? viewCentre();
+  if (!point) return;
   const editor = editorStore.getState();
   const devices = Object.values(editor.topology.devices);
   const spec = deviceSpec(model, {
@@ -98,26 +148,23 @@ export function placeDevice(model: DeviceModelId, at?: Point) {
     existingNames: devices.map((device) => device.config.hostname),
   });
   const result = editor.addDevice(spec);
-  if (result.ok) editor.select({ devices: [result.value], links: [] });
+  if (result.ok) setSelection({ devices: [result.value], links: [], notes: [] });
 }
 
-export function selectAll() {
-  const { topology, select } = editorStore.getState();
-  select({
-    devices: Object.values(topology.devices).map((device) => device.id),
-    links: Object.values(topology.links).map((link) => link.id),
-  });
+/** What R, S and P add: the first model of each kind in the catalog. */
+export const QUICK_ADD = {
+  addRouter: { model: 'router-2g2s', label: 'router', icon: RouterIcon },
+  addSwitch: { model: 'switch-24', label: 'switch', icon: EthernetPortIcon },
+  addPc: { model: 'pc', label: 'PC', icon: MonitorIcon },
+} as const satisfies Record<string, { model: DeviceModelId; label: string; icon: LucideIcon }>;
+
+export function addNote(at?: Point) {
+  const point = at ?? pointerOrCentre();
+  if (point) startNote(point);
 }
 
-/** One undo step, whatever mix of devices and links is selected. */
-export function deleteSelection() {
-  const editor = editorStore.getState();
-  const { devices, links } = editor.selection;
-  if (devices.length === 0 && links.length === 0) return;
-  editor.beginGesture();
-  editor.removeLinks(links);
-  editor.removeDevices(devices);
-  editor.endGesture();
+export function autoLayoutAndFit() {
+  void autoLayout({ duration: motion() * 1.5 }).then(fitView);
 }
 
 /** Esc on the canvas. True when it was used, so the shell leaves focus mode only otherwise. */
@@ -125,12 +172,40 @@ export function canvasEscape(): boolean {
   return cableTool.getState().escape();
 }
 
+const selectedDevice = (): DeviceId | undefined => {
+  const { devices } = currentSelection();
+  return devices.length === 1 ? devices[0] : undefined;
+};
+
+function renameSelected() {
+  const device = selectedDevice();
+  if (device) startRename(device);
+}
+
 type CanvasShortcutId = Extract<
   ShortcutId,
-  'fitView' | 'zoomIn' | 'zoomOut' | 'selectTool' | 'cableTool' | 'deleteSelection' | 'selectAll'
+  | 'fitView'
+  | 'zoomIn'
+  | 'zoomOut'
+  | 'selectTool'
+  | 'cableTool'
+  | 'deleteSelection'
+  | 'selectAll'
+  | 'copy'
+  | 'cut'
+  | 'paste'
+  | 'duplicate'
+  | 'nudge'
+  | 'rename'
+  | 'addRouter'
+  | 'addSwitch'
+  | 'addPc'
+  | 'addNote'
 >;
 
-export const canvasShortcuts: Record<CanvasShortcutId, () => void> = {
+type KeyPress = Pick<KeyboardEvent, 'key' | 'shiftKey'>;
+
+export const canvasShortcuts: Record<CanvasShortcutId, (event?: KeyPress) => void> = {
   fitView,
   zoomIn: () => zoomBy('in'),
   zoomOut: () => zoomBy('out'),
@@ -138,6 +213,16 @@ export const canvasShortcuts: Record<CanvasShortcutId, () => void> = {
   cableTool: () => cableTool.getState().toggle(),
   deleteSelection,
   selectAll,
+  copy: copySelection,
+  cut: cutSelection,
+  paste: () => paste(),
+  duplicate: duplicateSelection,
+  nudge,
+  rename: renameSelected,
+  addRouter: () => placeDevice(QUICK_ADD.addRouter.model, pointerOrCentre()),
+  addSwitch: () => placeDevice(QUICK_ADD.addSwitch.model, pointerOrCentre()),
+  addPc: () => placeDevice(QUICK_ADD.addPc.model, pointerOrCentre()),
+  addNote: () => addNote(),
 };
 
 const PORT_LABELS_KEY = 'tracer.canvas.portLabels';
@@ -154,32 +239,98 @@ export function togglePortLabels() {
   safeStorage.setItem(PORT_LABELS_KEY, JSON.stringify(portLabels));
 }
 
-const hasDevices = () => Object.keys(editorStore.getState().topology.devices).length > 0;
-const hasSelection = () => {
-  const { devices, links } = editorStore.getState().selection;
-  return devices.length + links.length > 0;
+const deviceCount = () => Object.keys(editorStore.getState().topology.devices).length;
+const hasDevices = () => deviceCount() > 0;
+const hasCopyable = () => {
+  const { devices, notes } = currentSelection();
+  return devices.length + notes.length > 0;
+};
+
+export const ALIGN_LABELS: Record<AlignEdge, { title: string; icon: LucideIcon }> = {
+  left: { title: 'Align left', icon: AlignStartVerticalIcon },
+  centre: { title: 'Align centres', icon: AlignCenterVerticalIcon },
+  right: { title: 'Align right', icon: AlignEndVerticalIcon },
+  top: { title: 'Align top', icon: AlignStartHorizontalIcon },
+  middle: { title: 'Align middles', icon: AlignCenterHorizontalIcon },
+  bottom: { title: 'Align bottom', icon: AlignEndHorizontalIcon },
+};
+
+export const DISTRIBUTE_LABELS: Record<Axis, { title: string; icon: LucideIcon }> = {
+  horizontal: { title: 'Distribute horizontally', icon: AlignHorizontalDistributeCenterIcon },
+  vertical: { title: 'Distribute vertically', icon: AlignVerticalDistributeCenterIcon },
 };
 
 export const canvasCommands: readonly Command[] = [
   {
+    id: 'edit.copy',
+    title: 'Copy',
+    group: 'Edit',
+    keywords: ['clipboard', 'devices', 'notes'],
+    icon: CopyIcon,
+    shortcut: 'copy',
+    enabled: hasCopyable,
+    run: copySelection,
+  },
+  {
+    id: 'edit.cut',
+    title: 'Cut',
+    group: 'Edit',
+    keywords: ['clipboard', 'move'],
+    icon: ScissorsIcon,
+    shortcut: 'cut',
+    enabled: hasCopyable,
+    run: cutSelection,
+  },
+  {
+    id: 'edit.paste',
+    title: 'Paste',
+    group: 'Edit',
+    keywords: ['clipboard'],
+    icon: ClipboardPasteIcon,
+    shortcut: 'paste',
+    enabled: canPaste,
+    run: () => paste(),
+  },
+  {
+    id: 'edit.duplicate',
+    title: 'Duplicate',
+    group: 'Edit',
+    keywords: ['copy', 'clone'],
+    icon: CopyPlusIcon,
+    shortcut: 'duplicate',
+    enabled: hasCopyable,
+    run: duplicateSelection,
+  },
+  {
     id: 'edit.selectAll',
     title: 'Select all',
     group: 'Edit',
-    keywords: ['devices', 'links', 'everything'],
+    keywords: ['devices', 'links', 'notes', 'everything'],
     icon: SquareDashedMousePointerIcon,
     shortcut: 'selectAll',
-    enabled: hasDevices,
+    enabled: () =>
+      hasDevices() || Object.keys(editorStore.getState().topology.annotations).length > 0,
     run: selectAll,
   },
   {
     id: 'edit.deleteSelection',
     title: 'Delete selection',
     group: 'Edit',
-    keywords: ['remove', 'devices', 'links', 'cables'],
+    keywords: ['remove', 'devices', 'links', 'cables', 'notes'],
     icon: Trash2Icon,
     shortcut: 'deleteSelection',
     enabled: hasSelection,
     run: deleteSelection,
+  },
+  {
+    id: 'edit.rename',
+    title: 'Rename device',
+    group: 'Edit',
+    keywords: ['hostname', 'name'],
+    icon: PencilIcon,
+    shortcut: 'rename',
+    enabled: () => selectedDevice() !== undefined,
+    run: renameSelected,
   },
   {
     id: 'edit.cableTool',
@@ -189,6 +340,51 @@ export const canvasCommands: readonly Command[] = [
     icon: CableIcon,
     shortcut: 'cableTool',
     run: () => cableTool.getState().toggle(),
+  },
+  ...(Object.keys(QUICK_ADD) as (keyof typeof QUICK_ADD)[]).map((id): Command => ({
+    id: `edit.${id}`,
+    title: `Add ${QUICK_ADD[id].label}`,
+    group: 'Edit',
+    keywords: ['device', 'new', 'place'],
+    icon: QUICK_ADD[id].icon,
+    shortcut: id,
+    run: canvasShortcuts[id],
+  })),
+  {
+    id: 'edit.addNote',
+    title: 'Add note',
+    group: 'Edit',
+    keywords: ['annotation', 'sticky', 'text', 'label', 'comment'],
+    icon: StickyNoteIcon,
+    shortcut: 'addNote',
+    run: () => addNote(),
+  },
+  ...ALIGN_EDGES.map((edge): Command => ({
+    id: `arrange.align.${edge}`,
+    title: ALIGN_LABELS[edge].title,
+    group: 'Arrange',
+    keywords: ['align', 'line up', 'devices'],
+    icon: ALIGN_LABELS[edge].icon,
+    enabled: canAlign,
+    run: () => align(edge),
+  })),
+  ...(['horizontal', 'vertical'] as const).map((axis): Command => ({
+    id: `arrange.distribute.${axis}`,
+    title: DISTRIBUTE_LABELS[axis].title,
+    group: 'Arrange',
+    keywords: ['space', 'spacing', 'even', 'devices'],
+    icon: DISTRIBUTE_LABELS[axis].icon,
+    enabled: canDistribute,
+    run: () => distribute(axis),
+  })),
+  {
+    id: 'arrange.autoLayout',
+    title: 'Auto-layout',
+    group: 'Arrange',
+    keywords: ['tidy', 'arrange', 'layout', 'organise', 'organize', 'clean up', 'elk'],
+    icon: WorkflowIcon,
+    enabled: () => deviceCount() >= 2,
+    run: autoLayoutAndFit,
   },
   {
     id: 'view.fitView',

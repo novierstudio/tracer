@@ -17,14 +17,26 @@ export type ShortcutId =
   | 'selectTool'
   | 'cableTool'
   | 'deleteSelection'
-  | 'selectAll';
+  | 'selectAll'
+  | 'copy'
+  | 'cut'
+  | 'paste'
+  | 'duplicate'
+  | 'nudge'
+  | 'rename'
+  | 'addRouter'
+  | 'addSwitch'
+  | 'addPc'
+  | 'addNote';
 
 // `inTextFields` shortcuts also fire while typing in a text field. `shift` is only checked when set,
 // so `?` matches whether or not the layout needs Shift for it. `also` lists other keys that do the
-// same and are left out of labels. `canvasOnly` shortcuts fire only while the canvas has focus.
+// same and are left out of labels, unless `keyLabel` names them all. `canvasOnly` shortcuts fire only
+// while the canvas has focus.
 type Shortcut = {
   key: string;
   also?: readonly string[];
+  keyLabel?: string;
   mod?: true;
   shift?: boolean;
   inTextFields?: true;
@@ -32,9 +44,10 @@ type Shortcut = {
   label: string;
 };
 
-// One table drives key handling, tooltips and the cheat sheet. ⌘K, F, ⌘Enter, ?, V, C and Delete
-// come from the UI/UX doc; the doc names no per-panel keys, so [ ] and ` follow common editor
-// conventions. Fit is 1 or Shift+1 (`!` on US keyboards), and 0 as the doc has it.
+// One table drives key handling, tooltips and the cheat sheet. ⌘K, F, ⌘Enter, ?, V, C, N, R/S/P,
+// ⌘C/⌘V/⌘D and Delete come from the UI/UX doc; the doc names no per-panel keys, so [ ] and ` follow
+// common editor conventions, as do ⌘X, F2 and the arrow keys. Fit is 1 or Shift+1 (`!` on US
+// keyboards), and 0 as the doc has it. Clipboard keys are canvas-only, so text elsewhere still copies.
 export const SHORTCUTS: Record<ShortcutId, Shortcut> = {
   commandPalette: { key: 'k', mod: true, inTextFields: true, label: 'Command palette' },
   undo: { key: 'z', mod: true, shift: false, label: 'Undo' },
@@ -55,6 +68,22 @@ export const SHORTCUTS: Record<ShortcutId, Shortcut> = {
   cableTool: { key: 'c', label: 'Cable tool' },
   deleteSelection: { key: 'Backspace', also: ['Delete'], label: 'Delete selection' },
   selectAll: { key: 'a', mod: true, canvasOnly: true, label: 'Select all' },
+  copy: { key: 'c', mod: true, canvasOnly: true, label: 'Copy' },
+  cut: { key: 'x', mod: true, canvasOnly: true, label: 'Cut' },
+  paste: { key: 'v', mod: true, canvasOnly: true, label: 'Paste' },
+  duplicate: { key: 'd', mod: true, canvasOnly: true, label: 'Duplicate' },
+  nudge: {
+    key: 'ArrowUp',
+    also: ['ArrowDown', 'ArrowLeft', 'ArrowRight'],
+    keyLabel: '↑↓←→',
+    canvasOnly: true,
+    label: 'Nudge selection (hold Shift to move further)',
+  },
+  rename: { key: 'F2', canvasOnly: true, label: 'Rename device' },
+  addRouter: { key: 'r', label: 'Add router at pointer' },
+  addSwitch: { key: 's', label: 'Add switch at pointer' },
+  addPc: { key: 'p', label: 'Add PC at pointer' },
+  addNote: { key: 'n', label: 'Add note at pointer' },
 };
 
 type KeyInput = Pick<KeyboardEvent, 'key' | 'metaKey' | 'ctrlKey' | 'altKey'> &
@@ -84,6 +113,6 @@ export function formatKeys(key: string, mod = false, shift = false): string {
 }
 
 export function formatShortcut(id: ShortcutId): string {
-  const { key, mod, shift } = SHORTCUTS[id];
-  return formatKeys(key, mod, shift);
+  const { key, mod, shift, keyLabel } = SHORTCUTS[id];
+  return keyLabel ?? formatKeys(key, mod, shift);
 }

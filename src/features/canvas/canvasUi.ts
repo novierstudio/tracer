@@ -4,7 +4,7 @@ import type { AnnotationId, DeviceId, Point } from '@/model';
 import { editorStore } from '@/model/store';
 
 /** The one thing being typed into on the canvas, if any. A new note is not in the lab yet. */
-export type InlineEdit =
+type InlineEdit =
   | { kind: 'new-note'; position: Point }
   | { kind: 'note'; note: AnnotationId }
   | { kind: 'rename'; device: DeviceId };

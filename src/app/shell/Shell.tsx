@@ -9,6 +9,7 @@ import { useRegisterCommands } from '@/features/command/registry';
 import { FileDialogs } from '@/features/files/FileDialogs';
 import { fileSession } from '@/features/files/session';
 import { InspectorPanel } from '@/features/inspector/InspectorPanel';
+import { consoleRequests } from '@/features/inspector/requests';
 import { PalettePanel, type PaletteSection } from '@/features/palette/PalettePanel';
 import { BottomPanel } from '@/features/simulation/BottomPanel';
 import { Button } from '@/ui/button';
@@ -130,13 +131,13 @@ export function Shell() {
     openSide('palette');
   };
 
-  const runShortcut = (id: ShortcutId) => {
+  const runShortcut = (id: ShortcutId, event?: KeyboardEvent) => {
     const panelAction = (show: () => void, toggle: () => void) => () => {
       if (!focus) return toggle();
       setFocus(false);
       show();
     };
-    const actions: Record<ShortcutId, () => void> = {
+    const actions: Record<ShortcutId, (event?: KeyboardEvent) => void> = {
       ...canvasShortcuts,
       commandPalette: () => setCommandsOpen((open) => !open),
       undo: () => editorStore.getState().undo(),
@@ -157,7 +158,7 @@ export function Shell() {
       toggleMode: () => changeMode(mode === 'realtime' ? 'simulation' : 'realtime'),
       showShortcuts: () => setHelp('shortcuts'),
     };
-    actions[id]();
+    actions[id](event);
   };
 
   const onKeyDown = useEffectEvent((event: KeyboardEvent) => {
@@ -168,8 +169,21 @@ export function Shell() {
     if (focus && event.key === 'Escape') return setFocus(false);
     if (!id || (SHORTCUTS[id].canvasOnly && !isCanvasTarget(event.target))) return;
     event.preventDefault();
-    runShortcut(id);
+    runShortcut(id, event);
   });
+
+  // Opening a device's CLI or Desktop from the canvas shows the inspector, leaving focus mode.
+  const onConsoleRequest = useEffectEvent(() => {
+    setFocus(false);
+    openSide('inspector');
+  });
+  useEffect(
+    () =>
+      consoleRequests.subscribe(({ request }) => {
+        if (request) onConsoleRequest();
+      }),
+    [],
+  );
 
   useEffect(() => {
     window.addEventListener('keydown', onKeyDown);

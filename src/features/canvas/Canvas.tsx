@@ -2,8 +2,24 @@ import { lazy, Suspense, useRef, type KeyboardEvent, type ReactNode } from 'reac
 import type { DeviceId } from '@/model';
 import { cn } from '@/ui/cn';
 import { cableTool } from './cableTool';
+import { ARROWS, nudge } from './edit';
 
 const CanvasFlow = lazy(() => import('./CanvasFlow'));
+
+/**
+ * Arrow keys on a focused device, note or selection box nudge the selection here rather than in React Flow, whose
+ * own nudge re-snaps each node and moves devices and notes in separate undo steps.
+ */
+function onCanvasKeyDownCapture(event: KeyboardEvent<HTMLElement>) {
+  if (!(event.key in ARROWS) || event.altKey || event.metaKey || event.ctrlKey) return;
+  const target = event.target;
+  const onNodes =
+    target instanceof Element && target.closest('.react-flow__node, .react-flow__nodesselection');
+  if (!onNodes || target.closest('input, textarea, [contenteditable="true"]')) return;
+  event.preventDefault();
+  event.stopPropagation();
+  nudge(event);
+}
 
 /** Space or Enter on a focused device picks it for the cable tool, as a click would. */
 function onCanvasKeyDown(event: KeyboardEvent<HTMLElement>) {
@@ -36,6 +52,7 @@ export function Canvas({ fullscreen, children }: CanvasProps) {
       ref={ref}
       aria-label="Canvas"
       tabIndex={-1}
+      onKeyDownCapture={onCanvasKeyDownCapture}
       onKeyDown={onCanvasKeyDown}
       onPointerDownCapture={(event) => {
         // Canvas-only shortcuts such as Select all need the canvas to hold focus after a click.
