@@ -1,0 +1,74 @@
+/*
+ * Design tokens. Components use the Tailwind names from the @theme block in app.css.
+ * Text tokens must keep WCAG AA (4.5:1) on surface-0..2; tokens.test.ts enforces it.
+ * `.light` and `.dark` also work on any element, so a subtree can render in the other theme.
+ */
+
+:root,
+.light {
+  color-scheme: light;
+
+  --surface-0: #f6f6f7;
+  --surface-1: #ffffff;
+  --surface-2: #f0f0f2;
+  --surface-3: #e6e6e9;
+  --line: #e4e4e8;
+  --line-strong: #d1d1d6;
+
+  --text-1: #18181b;
+  --text-2: #52525b;
+  --text-3: #6b6b75;
+
+  --accent: #5b5bd6;
+  --accent-fg: #ffffff;
+  --accent-text: #5b5bd6;
+
+  --ok: #137333;
+  --warn: #a34a07;
+  --err: #c81e1e;
+
+  --proto-icmp: #2563eb;
+  --proto-arp: #d97706;
+  --proto-dhcp: #9333ea;
+  --proto-dns: #db2777;
+  --proto-tcp: #16a34a;
+  --proto-stp: #71717a;
+  --proto-routing: #0d9488;
+
+  --grid-dot: #d4d4da;
+  --shadow-color: 240deg 10% 20%;
+}
+
+.dark {
+  color-scheme: dark;
+
+  --surface-0: #0c0c0e;
+  --surface-1: #141417;
+  --surface-2: #1c1c20;
+  --surface-3: #26262b;
+  --line: #24242a;
+  --line-strong: #34343b;
+
+  --text-1: #ededf0;
+  --text-2: #a6a6b0;
+  --text-3: #8a8a95;
+
+  --accent: #5e5ce6;
+  --accent-fg: #ffffff;
+  --accent-text: #9d9bff;
+
+  --ok: #4ade80;
+  --warn: #fbbf24;
+  --err: #f87171;
+
+  --proto-icmp: #60a5fa;
+  --proto-arp: #fbbf24;
+  --proto-dhcp: #c084fc;
+  --proto-dns: #f472b6;
+  --proto-tcp: #4ade80;
+  --proto-stp: #a1a1aa;
+  --proto-routing: #2dd4bf;
+
+  --grid-dot: #2a2a31;
+  --shadow-color: 240deg 20% 2%;
+}
