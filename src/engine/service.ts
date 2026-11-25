@@ -142,6 +142,10 @@ export function createSimService({
     routes: (device) => engine.withModule(device, ipModule, (ctx) => routesOf(ctx).routes),
     macTable: (device) =>
       engine.withModule(device, switchingModule, (ctx) => macTable(ctx.state, ctx.now)),
+    portStates: (device) =>
+      engine.withModule(device, ipModule, (ctx) =>
+        Object.fromEntries(ctx.device.ports.map((port) => [port.id, ctx.portUp(port.id)])),
+      ),
     subscribe(next) {
       listener = next;
       sent = undefined;

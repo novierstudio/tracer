@@ -1,4 +1,4 @@
-import type { Ipv4Address, MacAddress, PortId } from '@/model';
+import type { InterfaceId, Ipv4Address, MacAddress, PortId } from '@/model';
 import type { SimTime } from '../core/time';
 import type { ModuleContext } from '../module';
 import type { Ipv4Packet } from '../pdu';
@@ -8,12 +8,19 @@ import { routingTable, type Route } from './routes';
 
 export type ArpEntry = {
   readonly mac: MacAddress;
+  /** The interface whose subnet the neighbour is on. */
+  readonly interface: InterfaceId;
+  /** The port the neighbour was heard on. A switch's VLAN interface sends to it there. */
   readonly port: PortId;
   readonly learnedAt: SimTime;
 };
 
 /** An address being resolved: the packets waiting for it and how many requests went out. */
-export type Resolution = { readonly port: PortId; tries: number; readonly waiting: Ipv4Packet[] };
+export type Resolution = {
+  readonly interface: InterfaceId;
+  tries: number;
+  readonly waiting: Ipv4Packet[];
+};
 
 /** One device's IP stack. Its interfaces and routes are not kept: they derive from config and links. */
 export type IpState = {

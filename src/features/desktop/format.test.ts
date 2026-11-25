@@ -69,13 +69,13 @@ describe('formatArp', () => {
         kind: 'interface' as const,
         address: ip('192.168.1.10'),
         mac: MacAddress.parse('02:00:00:00:00:0a'),
-        port: PortId.parse('FastEthernet0'),
+        interface: PortId.parse('FastEthernet0'),
       },
       {
         kind: 'dynamic' as const,
         address: ip('192.168.1.1'),
         mac: MacAddress.parse('00:d0:ba:01:02:03'),
-        port: PortId.parse('FastEthernet0'),
+        interface: PortId.parse('FastEthernet0'),
         ageMs: 1200,
       },
     ];

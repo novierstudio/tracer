@@ -1,4 +1,4 @@
-import type { DeviceId, Ipv4Address, LinkId, Result, Topology } from '@/model';
+import type { DeviceId, Ipv4Address, LinkId, PortId, Result, Topology } from '@/model';
 import type { SimTime } from './core/time';
 import type { SimEvent } from './events';
 import type { MacTableEntry } from './l2/switching';
@@ -68,6 +68,8 @@ export interface SimAPI {
   routes(device: DeviceId): Result<Route[], DeviceUnavailable>;
   /** The addresses a switch has learned and not yet aged out, by VLAN then MAC. */
   macTable(device: DeviceId): Result<MacTableEntry[], DeviceUnavailable>;
+  /** Whether each of a device's ports has its link up now, for interface status in `show`. */
+  portStates(device: DeviceId): Result<Record<PortId, boolean>, DeviceUnavailable>;
   /** Sets the one batch listener. Calling it again replaces the previous listener. */
   subscribe(listener: (batch: SimEventBatch) => void): void;
 }
