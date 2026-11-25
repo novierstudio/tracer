@@ -1,18 +1,26 @@
 import {
   answerQuery,
   isConfigMode,
+  openStream,
   type CompleteResult,
   type DeviceSession,
   type EngineQuery,
   type EngineSource,
   type IosDevice,
+  type OutputStream,
+  type StreamSource,
 } from '@/cli';
 import type { SimAPI } from '@/engine/api';
 import { describeTopologyError, type DeviceId, type Result } from '@/model';
 import type { EditorStore } from '@/model/store';
 
-/** A line's output, or a promise of it when a show command waits on the simulation. */
-export type Reply = readonly string[] | Promise<readonly string[]>;
+/**
+ * A line's output: lines, a promise of them when a show command waits on the simulation, or a
+ * stream when the output arrives a piece at a time, as ping's does.
+ */
+export type Reply = readonly string[] | Promise<readonly string[]> | OutputStream;
+
+export const isStream = (reply: Reply): reply is OutputStream => 'start' in reply;
 
 /** One CLI connection: lines in, output lines and a prompt out. It owns the mode. */
 export interface TerminalSession {
@@ -38,6 +46,7 @@ export type SimQueries = {
 export type SimLink = SimQueries & {
   /** The simulated clock as of the latest batch, in milliseconds since the run started. */
   readonly now: () => number;
+  readonly ping: (...args: Parameters<SimAPI['ping']>) => Promise<ReturnType<SimAPI['ping']>>;
 };
 
 /** Where to reach the simulation. It rejects when there is none, as in a test without a worker. */
@@ -55,6 +64,11 @@ export function engineSource(sim: SimLink, device: DeviceId): EngineSource {
     ports: () => sim.portStates(device).then(valueOf),
     clock: async () => sim.now(),
   };
+}
+
+/** Streams opened on the simulation for one device. */
+function streamSource(sim: SimLink, device: DeviceId): StreamSource {
+  return { ping: (target, options, listener) => sim.ping(device, target, options, listener) };
 }
 
 /** The query's output from live state, or `fallback` when the simulation cannot answer. */
@@ -76,8 +90,8 @@ const NO_COMPLETION: CompleteResult = { line: undefined, candidates: [] };
 /**
  * The console of a router or switch in an editor store. Each line reads the device as the store
  * has it now, so GUI edits between lines show, and commits the line's config edit as one undo step.
- * A show command that reads live state asks the simulation through `engine`; without one, or when
- * the simulation cannot answer, it prints what the config alone says.
+ * A show command that reads live state asks the simulation through `engine`, and a ping streams
+ * from it; without one, or when the simulation cannot answer, it prints what the config alone says.
  */
 export function deviceTerminal(
   store: EditorStore,
@@ -93,13 +107,17 @@ export function deviceTerminal(
   const run = (line: string): Reply => {
     const current = device();
     if (!current) return [];
-    const { output, update, query } = session.run(current, line);
+    const { output, update, query, stream } = session.run(current, line);
     const committed = update && store.getState().updateConfig(update);
     const printed =
       committed && !committed.ok
         ? [...output, `% ${describeTopologyError(committed.error)}`]
         : output;
-    return query && engine ? answerLive(engine, id, query, printed) : printed;
+    if (!engine) return printed;
+    if (query) return answerLive(engine, id, query, printed);
+    if (stream)
+      return openStream(stream, () => engine().then((sim) => streamSource(sim, id)), printed);
+    return printed;
   };
   return {
     get prompt() {

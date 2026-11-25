@@ -42,7 +42,16 @@ function connect(tty: Tty, parent: HTMLElement) {
     (event.key === 'Tab' && event.shiftKey) ||
     (event.ctrlKey && event.key.toLowerCase() === 'v') ||
     (event.ctrlKey && event.key === 'c' && term.hasSelection());
-  term.attachCustomKeyEventHandler((event) => !forBrowser(event));
+  // xterm sends nothing for Ctrl+Shift+6, the IOS escape sequence; Ctrl+^ is 0x1e.
+  const isEscape = (event: KeyboardEvent) =>
+    event.type === 'keydown' && event.ctrlKey && event.shiftKey && event.code === 'Digit6';
+  term.attachCustomKeyEventHandler((event) => {
+    if (isEscape(event)) {
+      tty.input('\x1e', { cols: term.cols, rows: term.rows });
+      return false;
+    }
+    return !forBrowser(event);
+  });
   term.open(parent);
   return { term, fit };
 }

@@ -1,5 +1,6 @@
+import type { OutputStream } from '@/cli';
 import { decode, feed, initialState, reduce, type Input, type LineState } from './discipline';
-import type { TerminalSession } from './session';
+import { isStream, type TerminalSession } from './session';
 
 /** Characters of output kept for replay, about the 5000 rows xterm keeps as scrollback. */
 export const TRANSCRIPT_LIMIT = 512 * 1024;
@@ -21,6 +22,12 @@ export interface Tty {
   subscribe(write: (out: string) => void): () => void;
 }
 
+/** Ctrl+C, and Ctrl+Shift+6, the IOS escape sequence. Either aborts a streaming command. */
+const ABORT_KEYS = ['\x03', '\x1e'];
+const hasAbortKey = (data: string) => ABORT_KEYS.some((key) => data.includes(key));
+const withoutAbortKeys = (data: string) =>
+  [...data].filter((key) => !ABORT_KEYS.includes(key)).join('');
+
 export function trimTranscript(transcript: string): string {
   if (transcript.length <= TRANSCRIPT_LIMIT) return transcript;
   const cut = transcript.indexOf('\r\n', transcript.length - TRANSCRIPT_LIMIT);
@@ -33,6 +40,8 @@ export function createTty(session: TerminalSession, greeting: readonly string[] 
   const views = new Set<(out: string) => void>();
   /** Input that arrived while a line waits on its output. It runs once the output is shown. */
   let held: Input[] | undefined;
+  /** The stream writing a line's output now, such as a ping. */
+  let streaming: OutputStream | undefined;
 
   const write = (out: string) => {
     if (!out) return;
@@ -46,12 +55,24 @@ export function createTty(session: TerminalSession, greeting: readonly string[] 
     write(step.out);
     if (!step.pending) return;
     held = [...step.rest];
-    void step.pending
-      .catch(() => [])
-      .then((lines) => {
-        const queued = held ?? [];
-        held = undefined;
-        run([{ kind: 'output', lines }, ...queued]);
+    const { pending } = step;
+    const output = isStream(pending) ? stream(pending) : pending.catch(() => []);
+    void output.then((lines) => {
+      const queued = held ?? [];
+      held = undefined;
+      run([{ kind: 'output', lines }, ...queued]);
+    });
+  };
+
+  /** Writes the stream's pieces as they come, and gives no lines to print after them. */
+  const stream = (output: OutputStream): Promise<readonly string[]> => {
+    streaming = output;
+    return output
+      .start((text) => write(text.replaceAll('\n', '\r\n')))
+      .catch(() => {})
+      .then(() => {
+        streaming = undefined;
+        return [];
       });
   };
 
@@ -67,8 +88,14 @@ export function createTty(session: TerminalSession, greeting: readonly string[] 
       if (cols !== line.cols || rows !== line.rows) {
         line = reduce(line, { kind: 'resize', cols, rows }, session).state;
       }
-      if (held) held.push(...decode(data));
-      else run(data);
+      if (!held) return run(data);
+      // IOS reads the escape sequence during a ping; other keys wait for the prompt.
+      if (streaming && hasAbortKey(data)) {
+        streaming.abort();
+        held.push(...decode(withoutAbortKeys(data)));
+      } else {
+        held.push(...decode(data));
+      }
     },
     subscribe(write) {
       views.add(write);

@@ -1,4 +1,5 @@
-import type { Reply, TerminalSession } from './session';
+import type { OutputStream } from '@/cli';
+import { isStream, type Reply, type TerminalSession } from './session';
 
 /**
  * The line discipline between xterm and a CLI session: it turns raw terminal input into line
@@ -47,10 +48,10 @@ export interface Step {
   readonly state: LineState;
   readonly out: string;
   /**
-   * Output the session is still producing, such as a show command waiting on the simulation.
-   * Hold later keys, and send the lines back as an `output` input when they arrive.
+   * Output the session is still producing, such as a show command waiting on the simulation or a
+   * ping streaming its replies. Hold later keys, and send an `output` input when it is done.
    */
-  readonly pending?: Promise<readonly string[]>;
+  readonly pending?: Promise<readonly string[]> | OutputStream;
 }
 
 const HISTORY_SIZE = 50;
@@ -258,7 +259,9 @@ function remember(history: readonly string[], line: string): readonly string[] {
 /** Writes `head`, then the reply and a fresh prompt, or leaves the reply pending. */
 function respond(session: TerminalSession, state: LineState, head: string, reply: Reply): Step {
   const cleared = { ...state, line: '', cursor: 0, recall: undefined };
-  if (reply instanceof Promise) return { state: cleared, out: head, pending: reply };
+  if (reply instanceof Promise || isStream(reply)) {
+    return { state: cleared, out: head, pending: reply };
+  }
   const next = show(session, cleared, reply);
   return { state: next.state, out: head + next.out };
 }
