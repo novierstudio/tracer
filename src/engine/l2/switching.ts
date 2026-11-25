@@ -1,4 +1,4 @@
-import type { Device, MacAddress, PortId, Switchport, VlanId } from '@/model';
+import type { Device, LabSettings, MacAddress, PortId, Switchport, VlanId } from '@/model';
 import { carriesVlan, vlanAllowed } from '@/model/vlans';
 import { ms, type SimDuration, type SimTime } from '../core/time';
 import type { DeviceContext, SimModule } from '../module';
@@ -9,6 +9,7 @@ import {
   portState,
   receiveBpdu,
   spanningTree,
+  STP_TIMES,
   syncStp,
   type Instance,
   type SpanningTreeVlan,
@@ -107,6 +108,9 @@ function stpContext(ctx: DeviceContext, device: Switch): StpContext {
       return ctx.now;
     },
     device,
+    get settings() {
+      return ctx.settings;
+    },
     portUp: (port) => ctx.portUp(port),
     setTimer: (key, delay) => ctx.setTimer(key, delay),
     clearTimer: (key) => ctx.clearTimer(key),
@@ -209,9 +213,14 @@ export function macTable(state: SwitchState, now: SimTime): MacTableEntry[] {
 }
 
 /** The switch's spanning tree instances, by VLAN, as `show spanning-tree` reports them. */
-export function spanningTreeOf(device: Device, state: SwitchState): SpanningTreeVlan[] {
+export function spanningTreeOf(
+  device: Device,
+  state: SwitchState,
+  settings: LabSettings,
+): SpanningTreeVlan[] {
   if (device.kind !== 'switch') return [];
-  return spanningTree(device, state.stp, (instance) => agingOf(instance) / 1000);
+  const own = STP_TIMES[settings.stpTimers];
+  return spanningTree(device, state.stp, own, (instance) => agingOf(instance) / 1000);
 }
 
 export type { SpanningTreeVlan };

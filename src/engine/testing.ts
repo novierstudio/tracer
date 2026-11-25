@@ -23,13 +23,17 @@ import {
 } from '@/model';
 import { expectOk } from '@/model/testing';
 import { ms, simTime, type SimDuration } from './core/time';
+import { STP_TIMES, type StpTimes } from './l2/stp';
 import type { SimModule, Stacks } from './module';
 
-/**
- * When a lab loaded at time 0 has every switch port forwarding: spanning tree holds a new port
- * through listening and learning, a forward delay of 15 s each.
- */
-export const STP_CONVERGED = simTime(30_000);
+/** How long a new switch port takes to forward on a profile: a forward delay each to listen and learn. */
+const convergence = (profile: StpTimes) => simTime(2 * profile.forwardDelay * 1000);
+
+/** When a lab loaded at time 0 has every switch port forwarding on the default fast timers: 4 s. */
+export const STP_CONVERGED = convergence(STP_TIMES.fast);
+
+/** The same on the real IOS timers: 30 s. */
+export const STP_CONVERGED_IOS = convergence(STP_TIMES.ios);
 
 export function stacksOf(modules: Partial<Record<DeviceKind, readonly SimModule[]>>): Stacks {
   return { router: [], switch: [], pc: [], server: [], ...modules };

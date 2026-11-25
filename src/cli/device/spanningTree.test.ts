@@ -38,7 +38,8 @@ const VLAN1_ROOT: SpanningTreeVlan = {
   rootCost: 0,
   rootPort: undefined,
   bridge: { priority: 32769, mac: mac('02:00:00:00:00:11') },
-  times: { hello: 2, maxAge: 20, forwardDelay: 15 },
+  times: { hello: 1, maxAge: 7, forwardDelay: 2 },
+  bridgeTimes: { hello: 1, maxAge: 7, forwardDelay: 2 },
   agingTime: 300,
   ports: [
     {
@@ -66,7 +67,9 @@ const VLAN10_BLOCKING: SpanningTreeVlan = {
   rootCost: 4,
   rootPort: { port: port('GigabitEthernet0/1'), id: { priority: 128, number: 25 } },
   bridge: { priority: 32778, mac: mac('02:00:00:00:00:11') },
+  // A root on the IOS timers that this bridge, set to fast, has not become.
   times: { hello: 2, maxAge: 20, forwardDelay: 15 },
+  bridgeTimes: { hello: 1, maxAge: 7, forwardDelay: 2 },
   agingTime: 15,
   ports: [
     {
@@ -98,11 +101,11 @@ describe('show spanning-tree', () => {
       '  Root ID    Priority    32769',
       '             Address     0200.0000.0011',
       '             This bridge is the root',
-      '             Hello Time  2 sec  Max Age 20 sec  Forward Delay 15 sec',
+      '             Hello Time  1 sec  Max Age 7 sec  Forward Delay 2 sec',
       '',
       '  Bridge ID  Priority    32769  (priority 32768 sys-id-ext 1)',
       '             Address     0200.0000.0011',
-      '             Hello Time  2 sec  Max Age 20 sec  Forward Delay 15 sec',
+      '             Hello Time  1 sec  Max Age 7 sec  Forward Delay 2 sec',
       '             Aging Time  300 sec',
       '',
       'Interface        Role Sts Cost      Prio.Nbr Type',
@@ -120,7 +123,7 @@ describe('show spanning-tree', () => {
       '',
       '  Bridge ID  Priority    32778  (priority 32768 sys-id-ext 10)',
       '             Address     0200.0000.0011',
-      '             Hello Time  2 sec  Max Age 20 sec  Forward Delay 15 sec',
+      '             Hello Time  1 sec  Max Age 7 sec  Forward Delay 2 sec',
       '             Aging Time  15 sec',
       '',
       'Interface        Role Sts Cost      Prio.Nbr Type',
@@ -172,6 +175,33 @@ describe('show spanning-tree', () => {
       expect.stringMatching(/^Gi0\/\d +Altn BLK 4 +128\.\d+ +P2p$/),
     ]);
     expect(rows.filter((line) => line.includes(' FWD '))).toHaveLength(5);
+  });
+});
+
+describe('show spanning-tree timers', () => {
+  it('prints the fast timers a running switch uses, and the IOS ones once the lab asks for them', () => {
+    const lab = labBuilder();
+    const sw1 = lab.switch('SW1');
+    const engine = createEngine({ seed: 1, stacks: STACKS, linkDelay: ms(1) });
+    const sim = createSimService({ engine, frames: { now: () => 0, request: () => {} } });
+    const pc = lab.host('pc', 'PC1');
+    lab.connect(pc, 'FastEthernet0', sw1, 'FastEthernet0/1');
+    sim.load(lab.topology);
+    const timers = () => {
+      const trees = sim.spanningTree(sw1);
+      if (!trees.ok) throw new Error(trees.error);
+      return showSpanningTree(trees.value).filter((line) => line.includes('Hello Time'));
+    };
+
+    expect(timers()).toEqual([
+      '             Hello Time  1 sec  Max Age 7 sec  Forward Delay 2 sec',
+      '             Hello Time  1 sec  Max Age 7 sec  Forward Delay 2 sec',
+    ]);
+    sim.applyPatch({ devices: {}, links: {}, settings: { stpTimers: 'ios' } });
+    expect(timers()).toEqual([
+      '             Hello Time  2 sec  Max Age 20 sec  Forward Delay 15 sec',
+      '             Hello Time  2 sec  Max Age 20 sec  Forward Delay 15 sec',
+    ]);
   });
 });
 

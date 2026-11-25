@@ -304,7 +304,9 @@ export function createSimService({
     macTable: (device) =>
       engine.withModule(device, switchingModule, (ctx) => macTable(ctx.state, ctx.now)),
     spanningTree: (device) =>
-      engine.withModule(device, switchingModule, (ctx) => spanningTreeOf(ctx.device, ctx.state)),
+      engine.withModule(device, switchingModule, (ctx) =>
+        spanningTreeOf(ctx.device, ctx.state, ctx.settings),
+      ),
     portStates: (device) =>
       engine.withModule(device, ipModule, (ctx) =>
         Object.fromEntries(ctx.device.ports.map((port) => [port.id, ctx.portUp(port.id)])),

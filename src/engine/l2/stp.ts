@@ -1,4 +1,4 @@
-import type { Device, PortId, VlanId } from '@/model';
+import type { Device, PortId, StpTimers, VlanId } from '@/model';
 import { carriesVlan, DEFAULT_BRIDGE_PRIORITY } from '@/model/vlans';
 import { ms, type SimDuration, type SimTime } from '../core/time';
 import type { DeviceContext } from '../module';
@@ -12,14 +12,34 @@ import { UNKNOWN_MAC, type Bpdu, type BridgeId, type ConfigBpdu, type StpPortId 
 
 type Switch = Extract<Device, { kind: 'switch' }>;
 
-/** The timers a bridge runs by, in seconds: the IOS defaults, which BPDUs carry from the root. */
+/** The timers a bridge runs by, in seconds. The root's go out in its BPDUs, and every bridge adopts them. */
 export type StpTimes = {
   readonly hello: number;
   readonly maxAge: number;
   readonly forwardDelay: number;
 };
 
-export const DEFAULT_TIMES: StpTimes = { hello: 2, maxAge: 20, forwardDelay: 15 };
+/**
+ * Tracer's default: a new port listens for 2 s and learns for 2 s, so a lab pings within seconds.
+ *
+ * 802.1D asks for max age >= 2 x (hello + 1), so the root's information outlives a lost hello:
+ * 7 >= 4 holds. It also asks for 2 x (forward delay - 1) >= max age, so the information about a
+ * failed path has aged out across the network before a port that replaces it forwards, allowing
+ * a second per hop for BPDUs to cross it: 2 >= 7 does not hold. Tracer moves a BPDU across a hop
+ * in 1 ms and never loses one, so news of a change reaches every bridge within one forward delay.
+ *
+ * Each bridge adds 1 to a BPDU's message age, and a bridge drops the root's information once it
+ * is a hello short of max age, so bridges up to 6 hops from the root keep hearing it. That is a
+ * line of 7 switches with the root at one end, the diameter IOS plans its own defaults for; at 6,
+ * the seventh switch would lose the root every second.
+ */
+const FAST_TIMES: StpTimes = { hello: 1, maxAge: 7, forwardDelay: 2 };
+
+/** The timers each bridge is configured with, by the lab's setting: 4 s or 30 s to forwarding. */
+export const STP_TIMES: Record<StpTimers, StpTimes> = {
+  ios: { hello: 2, maxAge: 20, forwardDelay: 15 },
+  fast: FAST_TIMES,
+};
 
 const PORT_PRIORITY = 128;
 
@@ -73,7 +93,7 @@ export type StpState = Map<VlanId, Instance>;
 /** What spanning tree needs from the switch it runs on. */
 export interface StpContext extends Pick<
   DeviceContext,
-  'now' | 'portUp' | 'setTimer' | 'clearTimer' | 'note'
+  'now' | 'settings' | 'portUp' | 'setTimer' | 'clearTimer' | 'note'
 > {
   readonly device: Switch;
   /** Sends a BPDU out of a port as a frame of `vlan`, tagged as the port needs. */
@@ -109,6 +129,9 @@ function parseTimer(key: string): Timer | undefined {
 }
 
 const seconds = (value: number): SimDuration => ms(value * 1000);
+
+/** The timers the lab configures this bridge with. It runs by them while it is the root. */
+const ownTimes = (ctx: StpContext) => STP_TIMES[ctx.settings.stpTimers];
 
 function compareBridges(a: BridgeId, b: BridgeId): number {
   return a.priority - b.priority || (a.mac < b.mac ? -1 : a.mac > b.mac ? 1 : 0);
@@ -234,7 +257,7 @@ function generateConfig(ctx: StpContext, instance: Instance) {
 /** The root sends config BPDUs now and every hello time after. */
 function sendHello(ctx: StpContext, instance: Instance) {
   generateConfig(ctx, instance);
-  ctx.setTimer(timerKey({ kind: 'hello', vlan: instance.vlan }), seconds(DEFAULT_TIMES.hello));
+  ctx.setTimer(timerKey({ kind: 'hello', vlan: instance.vlan }), seconds(ownTimes(ctx).hello));
 }
 
 function sendTcn(ctx: StpContext, instance: Instance) {
@@ -250,12 +273,13 @@ function detectTopologyChange(ctx: StpContext, instance: Instance) {
   const { vlan } = instance;
   if (isRoot(instance)) {
     instance.topologyChange = true;
-    const period = seconds(DEFAULT_TIMES.maxAge + DEFAULT_TIMES.forwardDelay);
+    const { maxAge, forwardDelay } = ownTimes(ctx);
+    const period = seconds(maxAge + forwardDelay);
     ctx.setTimer(timerKey({ kind: 'tc', vlan }), period);
   } else if (!instance.notifying) {
     instance.notifying = true;
     sendTcn(ctx, instance);
-    ctx.setTimer(timerKey({ kind: 'tcn', vlan }), seconds(DEFAULT_TIMES.hello));
+    ctx.setTimer(timerKey({ kind: 'tcn', vlan }), seconds(ownTimes(ctx).hello));
   }
 }
 
@@ -353,7 +377,7 @@ function reselect(ctx: StpContext, instance: Instance, changed = false) {
     }
   } else if (!wasRoot && nowRoot) {
     ctx.note(`VLAN ${vlan}: this bridge is now the root`);
-    instance.times = DEFAULT_TIMES;
+    instance.times = ownTimes(ctx);
     instance.notifying = false;
     ctx.clearTimer(timerKey({ kind: 'tcn', vlan }));
     topologyChanged = true;
@@ -388,7 +412,7 @@ function createInstance(ctx: StpContext, vlan: VlanId): Instance {
     root: bridge,
     rootCost: 0,
     rootPort: undefined,
-    times: DEFAULT_TIMES,
+    times: ownTimes(ctx),
     topologyChange: false,
     notifying: false,
     ports: new Map(),
@@ -421,6 +445,8 @@ export function syncStp(ctx: StpContext, stp: StpState) {
       instance.ports.set(id, { offer, heard: undefined, state: 'blocking', ackTcn: false });
     }
     adoptBridgeId(ctx, instance);
+    // A root runs by its own timers, so it picks up a change to the lab's setting here.
+    if (isRoot(instance)) instance.times = ownTimes(ctx);
     reselect(ctx, instance, changed);
     if (!existing) sendHello(ctx, instance);
   }
@@ -487,7 +513,7 @@ export function onStpTimer(ctx: StpContext, stp: StpState, key: string) {
       return;
     case 'tcn':
       sendTcn(ctx, instance);
-      ctx.setTimer(key, seconds(DEFAULT_TIMES.hello));
+      ctx.setTimer(key, seconds(ownTimes(ctx).hello));
       return;
     case 'tc':
       instance.topologyChange = false;
@@ -551,7 +577,10 @@ export type SpanningTreeVlan = {
   readonly rootCost: number;
   readonly rootPort: { readonly port: PortId; readonly id: StpPortId } | undefined;
   readonly bridge: BridgeId;
+  /** The root's timers, which the bridge runs by. */
   readonly times: StpTimes;
+  /** The bridge's own timers, from the lab's setting: what it would send as the root. */
+  readonly bridgeTimes: StpTimes;
   /** How long a learned address stays, in seconds: forward delay during a topology change. */
   readonly agingTime: number;
   readonly ports: readonly SpanningTreePort[];
@@ -561,6 +590,7 @@ export type SpanningTreeVlan = {
 export function spanningTree(
   device: Switch,
   stp: StpState,
+  bridgeTimes: StpTimes,
   agingTime: (instance: Instance) => number,
 ): SpanningTreeVlan[] {
   const instances = [...stp.values()].sort((a, b) => a.vlan - b.vlan);
@@ -574,6 +604,7 @@ export function spanningTree(
     },
     bridge: instance.bridge,
     times: instance.times,
+    bridgeTimes,
     agingTime: agingTime(instance),
     ports: [...instance.ports]
       .map(([id, port]) => ({
