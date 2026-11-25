@@ -22,6 +22,34 @@ export const PortId = z
   .brand<'PortId'>();
 export type PortId = z.infer<typeof PortId>;
 
+const VIRTUAL_INTERFACE_LIMIT = { Loopback: 2147483647, Vlan: 4094 } as const;
+
+/** A config-only interface: it exists because the config creates it, not because of hardware. */
+export const VirtualInterfaceId = z
+  .string()
+  .regex(/^(?:Loopback(?:0|[1-9]\d*)|Vlan[1-9]\d*)$/, 'Invalid interface name')
+  .refine((name) => {
+    const [, type = '', number = ''] = /^([A-Za-z]+)(\d+)$/.exec(name) ?? [];
+    return Number(number) <= VIRTUAL_INTERFACE_LIMIT[type as keyof typeof VIRTUAL_INTERFACE_LIMIT];
+  }, 'Interface number out of range')
+  .brand<'VirtualInterfaceId'>();
+export type VirtualInterfaceId = z.infer<typeof VirtualInterfaceId>;
+
+export const InterfaceId = z.union([PortId, VirtualInterfaceId]);
+export type InterfaceId = z.infer<typeof InterfaceId>;
+
+/** Every interface type name, in the order IOS lists interfaces in a running-config. */
+export const INTERFACE_TYPES = [
+  'Loopback',
+  'FastEthernet',
+  'GigabitEthernet',
+  'Serial',
+  'Vlan',
+] as const satisfies readonly (
+  (typeof PORT_NAME_PREFIX)[keyof typeof PORT_NAME_PREFIX] | keyof typeof VIRTUAL_INTERFACE_LIMIT
+)[];
+export type InterfaceType = (typeof INTERFACE_TYPES)[number];
+
 export const Port = z.discriminatedUnion('kind', [
   z.object({ kind: z.enum(['fastEthernet', 'gigabitEthernet']), id: PortId, mac: MacAddress }),
   z.object({ kind: z.literal('serial'), id: PortId }),
@@ -29,32 +57,124 @@ export const Port = z.discriminatedUnion('kind', [
 export type Port = z.infer<typeof Port>;
 export type PortKind = Port['kind'];
 
-const interfaceFields = { shutdown: z.boolean(), description: z.string().optional() };
+const interfaceFields = {
+  shutdown: z.boolean(),
+  description: z.string().optional(),
+  /** Mbit/s on an Ethernet port. Absent means auto. */
+  speed: z.union([z.literal(10), z.literal(100), z.literal(1000)]).optional(),
+  /** On an Ethernet port. Absent means auto. */
+  duplex: z.enum(['full', 'half']).optional(),
+};
 
-export const RoutedInterface = z.object({ ...interfaceFields, ipv4: Ipv4Cidr.optional() });
+export const RoutedInterface = z.object({
+  ...interfaceFields,
+  ipv4: Ipv4Cidr.optional(),
+  /** Bit/s a serial port clocks when its end of the cable is DCE. */
+  clockRate: z.int().positive().optional(),
+});
 export type RoutedInterface = z.infer<typeof RoutedInterface>;
 
+/** Each mode also keeps the other mode's VLAN setting, as IOS does, so switching back restores it. */
 export const Switchport = z.discriminatedUnion('mode', [
-  z.object({ mode: z.literal('access'), vlan: VlanId }),
-  z.object({ mode: z.literal('trunk'), nativeVlan: VlanId }),
+  z.object({ mode: z.literal('access'), vlan: VlanId, nativeVlan: VlanId.optional() }),
+  z.object({ mode: z.literal('trunk'), nativeVlan: VlanId, accessVlan: VlanId.optional() }),
 ]);
 export type Switchport = z.infer<typeof Switchport>;
 
 export const SwitchInterface = z.object({ ...interfaceFields, switchport: Switchport });
 export type SwitchInterface = z.infer<typeof SwitchInterface>;
 
-export const RouterConfig = z.object({
+/** An MD5-crypt hash, which IOS shows as `enable secret 5 $1$salt$hash`. */
+export const Md5CryptHash = z
+  .string()
+  .regex(/^\$1\$[./0-9A-Za-z]{0,8}\$[./0-9A-Za-z]{22}$/, 'Invalid MD5-crypt hash')
+  .brand<'Md5CryptHash'>();
+export type Md5CryptHash = z.infer<typeof Md5CryptHash>;
+
+export const LineConfig = z.object({
+  /** Kept in clear text. `service password-encryption` only changes how it is shown. */
+  password: z.string().min(1).optional(),
+  /** `login` checks the line password, `login local` checks usernames. */
+  login: z.enum(['none', 'password', 'local']),
+  /** `transport input`: the protocols that may open a session on the line. */
+  transportInput: z.object({ ssh: z.boolean(), telnet: z.boolean() }),
+});
+export type LineConfig = z.infer<typeof LineConfig>;
+
+export const VTY_LINE_COUNT = 16;
+
+const vtyLines = z.array(LineConfig).length(VTY_LINE_COUNT);
+
+export const RouterLines = z.object({ console: LineConfig, aux: LineConfig, vty: vtyLines });
+export type RouterLines = z.infer<typeof RouterLines>;
+
+export const SwitchLines = z.object({ console: LineConfig, vty: vtyLines });
+export type SwitchLines = z.infer<typeof SwitchLines>;
+
+export const StaticRoute = z.object({
+  prefix: Ipv4Cidr,
+  nextHop: z.discriminatedUnion('kind', [
+    z.object({ kind: z.literal('address'), address: Ipv4Address }),
+    z.object({ kind: z.literal('interface'), interface: InterfaceId }),
+  ]),
+  /** Administrative distance. Absent means 1. */
+  distance: z.int().min(1).max(255).optional(),
+});
+export type StaticRoute = z.infer<typeof StaticRoute>;
+
+export const DEFAULT_ROUTER_HOSTNAME = Hostname.parse('Router');
+export const DEFAULT_SWITCH_HOSTNAME = Hostname.parse('Switch');
+
+/** A line as a device ships: no password, and vty lines ask for one. */
+function factoryLine(login: LineConfig['login']): LineConfig {
+  return { login, transportInput: { ssh: true, telnet: true } };
+}
+
+export function factoryRouterLines(): RouterLines {
+  return {
+    console: factoryLine('none'),
+    aux: factoryLine('none'),
+    vty: Array.from({ length: VTY_LINE_COUNT }, () => factoryLine('password')),
+  };
+}
+
+export function factorySwitchLines(): SwitchLines {
+  return {
+    console: factoryLine('none'),
+    vty: Array.from({ length: VTY_LINE_COUNT }, () => factoryLine('password')),
+  };
+}
+
+/** Fields that routers and switches share. Each has a default, so older files still load. */
+const iosFields = {
   hostname: Hostname,
-  interfaces: z.record(PortId, RoutedInterface),
+  virtualInterfaces: z.record(VirtualInterfaceId, RoutedInterface).default(() => ({})),
+  enableSecret: Md5CryptHash.optional(),
+  /** Kept in clear text, like line passwords. */
+  enablePassword: z.string().min(1).optional(),
+  servicePasswordEncryption: z.boolean().default(false),
+  /** `ip domain-lookup`, on unless the config says `no ip domain-lookup`. */
+  domainLookup: z.boolean().default(true),
+  bannerMotd: z.string().optional(),
+  /** The saved config in NVRAM, as running-config lines. Absent until the first save. */
+  startupConfig: z.array(z.string()).optional(),
   unknownLines: z.array(z.string()),
+};
+
+export const RouterConfig = z.object({
+  ...iosFields,
+  interfaces: z.record(PortId, RoutedInterface),
+  lines: RouterLines.default(factoryRouterLines),
+  staticRoutes: z.array(StaticRoute).default(() => []),
 });
 export type RouterConfig = z.infer<typeof RouterConfig>;
 
 export const SwitchConfig = z.object({
-  hostname: Hostname,
+  ...iosFields,
   interfaces: z.record(PortId, SwitchInterface),
   vlans: z.record(VlanId, z.object({ name: z.string().min(1).max(32) })),
-  unknownLines: z.array(z.string()),
+  lines: SwitchLines.default(factorySwitchLines),
+  defaultGateway: Ipv4Address.optional(),
 });
 export type SwitchConfig = z.infer<typeof SwitchConfig>;
 

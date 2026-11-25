@@ -2,8 +2,11 @@ import { produce, type Draft } from 'immer';
 import type { DeviceId, IdSource, LinkId } from './ids';
 import { err, ok, type Result } from './result';
 import {
+  factoryRouterLines,
+  factorySwitchLines,
   findDeviceProblem,
   findLinkProblem,
+  VirtualInterfaceId,
   type Device,
   type DeviceKind,
   type Link,
@@ -106,6 +109,17 @@ export type DeviceSpec = {
 };
 
 const DEFAULT_VLAN = VlanId.parse(1);
+const VLAN1 = VirtualInterfaceId.parse('Vlan1');
+
+function factoryIosFields(hostname: Hostname) {
+  return {
+    hostname,
+    virtualInterfaces: {},
+    servicePasswordEncryption: false,
+    domainLookup: true,
+    unknownLines: [],
+  };
+}
 
 export function createDevice(
   spec: DeviceSpec,
@@ -140,11 +154,12 @@ export function createDevice(
         ...fields,
         kind: 'router',
         config: {
-          hostname,
+          ...factoryIosFields(hostname),
           interfaces: Object.fromEntries(
             ports.map((port): [PortId, RoutedInterface] => [port.id, { shutdown: true }]),
           ),
-          unknownLines: [],
+          lines: factoryRouterLines(),
+          staticRoutes: [],
         },
       };
     case 'switch':
@@ -152,7 +167,6 @@ export function createDevice(
         ...fields,
         kind: 'switch',
         config: {
-          hostname,
           interfaces: Object.fromEntries(
             ports.map((port): [PortId, SwitchInterface] => [
               port.id,
@@ -160,7 +174,9 @@ export function createDevice(
             ]),
           ),
           vlans: { [DEFAULT_VLAN]: { name: 'default' } },
-          unknownLines: [],
+          ...factoryIosFields(hostname),
+          virtualInterfaces: { [VLAN1]: { shutdown: true } },
+          lines: factorySwitchLines(),
         },
       };
     case 'pc':
