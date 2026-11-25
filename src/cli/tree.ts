@@ -1,9 +1,6 @@
 import type { Mode, ModeKind, ModeOf } from './modes';
 import { keyword, type Param, type Segment } from './params';
 
-/** Lines to print. A handler that only changes state returns nothing. */
-export type Output = readonly string[] | void;
-
 type ValueOf<S> = S extends Param<string, infer T> ? T : never;
 
 export type ArgsOf<P extends readonly Segment[]> = {
@@ -17,12 +14,12 @@ export interface CommandSpec<Ctx, M extends readonly ModeKind[], P extends reado
   readonly path: P;
   /** The mode after the command. Omitted means the mode does not change. */
   readonly to?: Mode | ((args: ArgsOf<P>, from: ModeOf<M[number]>) => Mode);
-  readonly run?: (args: ArgsOf<P>, ctx: Ctx, mode: ModeOf<M[number]>) => Output;
+  readonly run?: (args: ArgsOf<P>, ctx: Ctx, mode: ModeOf<M[number]>) => readonly string[];
   /**
    * The `no` form. It is accepted after the last keyword of `path` or after any later param, so
    * `no ip address` and `no ip address 10.0.0.1 255.0.0.0` both reach it.
    */
-  readonly no?: (args: Partial<ArgsOf<P>>, ctx: Ctx, mode: ModeOf<M[number]>) => Output;
+  readonly no?: (args: Partial<ArgsOf<P>>, ctx: Ctx, mode: ModeOf<M[number]>) => readonly string[];
 }
 
 type Args = Readonly<Record<string, unknown>>;
@@ -31,7 +28,7 @@ export interface Terminal<Ctx> {
   /** The command's keywords joined by spaces, such as `ip address`. */
   readonly command: string;
   readonly to?: (args: Args, from: Mode) => Mode;
-  readonly run?: (args: Args, ctx: Ctx, mode: Mode) => Output;
+  readonly run?: (args: Args, ctx: Ctx, mode: Mode) => readonly string[];
 }
 
 export interface Command<Ctx> {

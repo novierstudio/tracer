@@ -41,11 +41,4 @@ export {
   type ParsedCommand,
   type ParseResult,
 } from './parser';
-export {
-  buildTree,
-  defineCommand,
-  type ArgsOf,
-  type Command,
-  type CommandTree,
-  type Output,
-} from './tree';
+export { buildTree, defineCommand, type ArgsOf, type Command, type CommandTree } from './tree';
