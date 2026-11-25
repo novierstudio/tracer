@@ -1,8 +1,12 @@
 import type { SimEventBatch } from '@/engine/api';
-import type { SimTime } from '@/engine/core/time';
+import { ms, type SimTime } from '@/engine/core/time';
+import { createEngine } from '@/engine/engine';
 import type { EventId, FrameEvent } from '@/engine/events';
 import type { ArpPacket, EthernetFrame, Ipv4Packet } from '@/engine/pdu';
-import type { DeviceId, Ipv4Address, LinkId, MacAddress, PortId } from '@/model';
+import { createSimService } from '@/engine/service';
+import { STACKS } from '@/engine/stacks';
+import { ip as parseIp, STP_CONVERGED } from '@/engine/testing';
+import type { DeviceId, Ipv4Address, LinkId, MacAddress, PortId, Topology } from '@/model';
 
 const mac = (n: number) => `02:00:00:00:00:${n.toString(16).padStart(2, '0')}` as MacAddress;
 const ip = (text: string) => text as Ipv4Address;
@@ -63,4 +67,20 @@ export function batch(fields: Partial<SimEventBatch> = {}): SimEventBatch {
     links: {},
     ...fields,
   };
+}
+
+/** Every frame of one ping from `from` to `target`, as the engine logs it. */
+export function pingFrames(topology: Topology, from: DeviceId, target: string): FrameEvent[] {
+  const engine = createEngine({ seed: 1, stacks: STACKS, linkDelay: ms(1) });
+  const sim = createSimService({ engine, frames: { now: () => 0, request: () => {} } });
+  sim.load(topology);
+  engine.runUntil(STP_CONVERGED);
+  const mark = engine.log.lastId;
+  let done = false;
+  const started = sim.ping(from, parseIp(target), { count: 1, timeoutMs: 1000 }, (event) => {
+    if (event.kind === 'summary') done = true;
+  });
+  if (!started.ok) throw new Error(started.error);
+  while (!done && engine.nextTime() !== undefined) engine.step();
+  return engine.log.since(mark).filter((event) => event.kind === 'frame');
 }

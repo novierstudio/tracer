@@ -1,29 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { ms } from '@/engine/core/time';
-import { createEngine } from '@/engine/engine';
 import type { EventId, FrameEvent } from '@/engine/events';
 import type { EthernetFrame, Ipv4Packet } from '@/engine/pdu';
-import { createSimService } from '@/engine/service';
-import { STACKS } from '@/engine/stacks';
-import { access, ip, labBuilder, routedLab, STP_CONVERGED, trunk } from '@/engine/testing';
+import { access, ip, labBuilder, routedLab, trunk } from '@/engine/testing';
 import { PortId, type Device, type DeviceId, type MacAddress, type Topology } from '@/model';
+import { pingFrames } from '../testing';
 import { decide, describeDecision, dropLabel } from './decision';
-
-/** Every frame of one ping from `from` to `target`, as the engine logs it. */
-function pingFrames(topology: Topology, from: DeviceId, target: string): FrameEvent[] {
-  const engine = createEngine({ seed: 1, stacks: STACKS, linkDelay: ms(1) });
-  const sim = createSimService({ engine, frames: { now: () => 0, request: () => {} } });
-  sim.load(topology);
-  engine.runUntil(STP_CONVERGED);
-  const mark = engine.log.lastId;
-  let done = false;
-  const started = sim.ping(from, ip(target), { count: 1, timeoutMs: 1000 }, (event) => {
-    if (event.kind === 'summary') done = true;
-  });
-  if (!started.ok) throw new Error(started.error);
-  while (!done && engine.nextTime() !== undefined) engine.step();
-  return engine.log.since(mark).filter((event) => event.kind === 'frame');
-}
 
 const isBpdu = ({ frame }: FrameEvent) =>
   frame.kind === 'ethernet' && frame.payload.kind === 'bpdu';
