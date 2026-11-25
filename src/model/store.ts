@@ -1,7 +1,14 @@
 import { temporal, type TemporalState } from 'zundo';
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import * as commands from './commands';
-import type { CommandResult, ConfigUpdate, DeviceSpec, LinkSpec, Move } from './commands';
+import type {
+  CableChange,
+  CommandResult,
+  ConfigUpdate,
+  DeviceSpec,
+  LinkSpec,
+  Move,
+} from './commands';
 import { createIdSource, type DeviceId, type IdSource, type LinkId } from './ids';
 import { ok, type Result } from './result';
 import { emptyTopology, type Topology, type TopologyError } from './topology';
@@ -19,8 +26,11 @@ export type EditorState = {
   moveDevices(moves: readonly Move[]): void;
   renameDevice(rename: { device: DeviceId; hostname: Hostname }): Result<void, TopologyError>;
   updateConfig(update: ConfigUpdate): Result<void, TopologyError>;
+  setPowered(change: { device: DeviceId; powered: boolean }): Result<void, TopologyError>;
   addLink(spec: LinkSpec): Result<LinkId, TopologyError>;
   removeLinks(ids: readonly LinkId[]): void;
+  setLinkCable(change: CableChange): Result<void, TopologyError>;
+  renameLab(name: string): void;
   select(selection: Selection): void;
   beginGesture(): void;
   endGesture(): void;
@@ -48,7 +58,8 @@ function pruneSelection(selection: Selection, topology: Topology): Selection {
 export function createEditorStore({
   topology = emptyTopology({ name: 'Untitled', now: new Date() }),
   ids = createIdSource(),
-}: { topology?: Topology; ids?: IdSource } = {}): EditorStore {
+  now = () => new Date(),
+}: { topology?: Topology; ids?: IdSource; now?: () => Date } = {}): EditorStore {
   let gestureStart: Topology | undefined;
 
   const store: EditorStore = createStore<EditorState>()(
@@ -95,6 +106,7 @@ export function createEditorStore({
           moveDevices: (moves) => commit(commands.moveDevices(get().topology, moves)),
           renameDevice: (rename) => apply(commands.renameDevice(get().topology, rename)),
           updateConfig: (update) => apply(commands.updateConfig(get().topology, update)),
+          setPowered: (change) => apply(commands.setPowered(get().topology, change)),
           addLink: (spec) => {
             const link = commands.createLink(spec, { ids, topology: get().topology });
             const result = commands.addLink(get().topology, link);
@@ -103,6 +115,8 @@ export function createEditorStore({
             return ok(link.id);
           },
           removeLinks: (linkIds) => commit(commands.removeLinks(get().topology, linkIds)),
+          setLinkCable: (change) => apply(commands.setLinkCable(get().topology, change)),
+          renameLab: (name) => commit(commands.renameLab(get().topology, { name, now: now() })),
           select: (selection) => set({ selection: pruneSelection(selection, get().topology) }),
           beginGesture: () => {
             if (gestureStart) return;

@@ -9,13 +9,16 @@ import {
   removeDevices,
   removeLinks,
   renameDevice,
+  renameLab,
+  setLinkCable,
+  setPowered,
   updateConfig,
   type LinkSpec,
 } from './commands';
 import { DeviceId, LinkId, createIdSource } from './ids';
 import { buildLab, end, expectOk, port } from './testing';
 import { linkAt, type Topology } from './topology';
-import { Hostname, Ipv4Address, PrefixLength } from './values';
+import { Hostname, Ipv4Address, PrefixLength, VlanId } from './values';
 
 const linkIds = createIdSource(99);
 
@@ -139,6 +142,30 @@ describe('createDevice', () => {
       expect(device.config.lines.console.login).toBe('none');
       expect(device.config.lines.vty.every((line) => line.login === 'password')).toBe(true);
     }
+  });
+});
+
+describe('createDevice with model defaults', () => {
+  it('takes each config field the spec names, and the spec hostname', () => {
+    const { topology, ids } = buildLab();
+    const device = createDevice(
+      {
+        kind: 'switch',
+        model: 'switch-test',
+        hostname: Hostname.parse('Core'),
+        position: { x: 0, y: 0 },
+        ports: [{ kind: 'fastEthernet', id: port('FastEthernet0/1') }],
+        config: {
+          domainLookup: false,
+          vlans: { [VlanId.parse(1)]: { name: 'default' }, [VlanId.parse(10)]: { name: 'staff' } },
+        },
+      },
+      { ids, topology },
+    );
+    if (device.kind !== 'switch') throw new Error('expected a switch');
+    expect(device.config).toMatchObject({ hostname: 'Core', domainLookup: false });
+    expect(Object.keys(device.config.vlans)).toEqual(['1', '10']);
+    expect(Object.keys(device.config.interfaces)).toEqual(['FastEthernet0/1']);
   });
 });
 
@@ -330,6 +357,100 @@ describe('addLink', () => {
   });
 });
 
+describe('setLinkCable', () => {
+  it('swaps straight for crossover in place, keeping the id and endpoints', () => {
+    const lab = buildLab();
+    const { link, topology } = connect(lab.topology, {
+      cable: 'straight',
+      a: end(lab.pc, 'FastEthernet0'),
+      b: end(lab.sw, 'FastEthernet0/1'),
+    });
+
+    const next = expectOk(setLinkCable(topology, { link: link.id, cable: 'crossover' }));
+
+    expect(next.links[link.id]).toEqual({ ...link, cable: 'crossover' });
+    expect(Object.keys(next.links)).toEqual(Object.keys(topology.links));
+  });
+
+  it('moves the DCE end of a serial link, and keeps it when none is given', () => {
+    const lab = buildLab();
+    const { link, topology } = connect(lab.topology, {
+      cable: 'serial',
+      a: end(lab.r1, 'Serial0/0/0'),
+      b: end(lab.r2, 'Serial0/0/0'),
+      dce: 'a',
+    });
+
+    const flipped = expectOk(setLinkCable(topology, { link: link.id, cable: 'serial', dce: 'b' }));
+    expect(flipped.links[link.id]).toEqual({ ...link, dce: 'b' });
+    expect(
+      expectOk(setLinkCable(flipped, { link: link.id, cable: 'serial' })).links[link.id],
+    ).toEqual({ ...link, dce: 'b' });
+  });
+
+  it('rejects a cable a port cannot take', () => {
+    const lab = buildLab();
+    const { link, topology } = connect(lab.topology, {
+      cable: 'straight',
+      a: end(lab.r1, 'GigabitEthernet0/0'),
+      b: end(lab.sw, 'GigabitEthernet0/1'),
+    });
+
+    expect(setLinkCable(topology, { link: link.id, cable: 'serial' })).toEqual({
+      ok: false,
+      error: {
+        kind: 'cable-mismatch',
+        endpoint: link.a,
+        cable: 'serial',
+        portKind: 'gigabitEthernet',
+      },
+    });
+  });
+
+  it('fails for a link that does not exist', () => {
+    const { topology } = buildLab();
+    const missing = LinkId.parse('lnk_missing');
+    expect(setLinkCable(topology, { link: missing, cable: 'crossover' })).toEqual({
+      ok: false,
+      error: { kind: 'link-not-found', link: missing },
+    });
+  });
+});
+
+describe('setPowered', () => {
+  it('turns a device off and on', () => {
+    const { topology, r1 } = buildLab();
+    const off = expectOk(setPowered(topology, { device: r1.id, powered: false }));
+    expect(off.devices[r1.id]).toEqual({ ...r1, powered: false });
+    const on = expectOk(setPowered(off, { device: r1.id, powered: true }));
+    expect(on.devices[r1.id]).toEqual(r1);
+  });
+
+  it('fails for a device that does not exist', () => {
+    const { topology } = buildLab();
+    const missing = DeviceId.parse('dev_missing');
+    expect(setPowered(topology, { device: missing, powered: false })).toEqual({
+      ok: false,
+      error: { kind: 'device-not-found', device: missing },
+    });
+  });
+});
+
+describe('renameLab', () => {
+  const now = new Date('2026-03-04T05:06:07.000Z');
+
+  it('sets the name and the update time', () => {
+    const { topology } = buildLab();
+    const next = renameLab(topology, { name: 'Campus', now });
+    expect(next.meta).toEqual({ ...topology.meta, name: 'Campus', updatedAt: now.toISOString() });
+  });
+
+  it('returns the same topology for the same name', () => {
+    const { topology } = buildLab();
+    expect(renameLab(topology, { name: topology.meta.name, now })).toBe(topology);
+  });
+});
+
 describe('removeLinks', () => {
   it('removes the link and frees both ports', () => {
     const { topology, pc, sw, server } = buildLab();
@@ -410,6 +531,8 @@ describe('commands', () => {
     removeDevices(lab.topology, [lab.pc.id]);
     moveDevices(lab.topology, [{ device: lab.sw.id, position: { x: 9, y: 9 } }]);
     renameDevice(lab.topology, { device: lab.r1.id, hostname: Hostname.parse('Other') });
+    setPowered(lab.topology, { device: lab.r1.id, powered: false });
+    renameLab(lab.topology, { name: 'Other', now: new Date() });
     connect(lab.topology, {
       cable: 'straight',
       a: end(lab.pc, 'FastEthernet0'),
