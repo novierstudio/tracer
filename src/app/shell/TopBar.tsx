@@ -18,6 +18,7 @@ import { FileMenuItems } from '@/features/files/FileMenuItems';
 import { fileSession } from '@/features/files/session';
 import { ShareButton } from '@/features/files/ShareDialogs';
 import { onboarding } from '@/features/onboarding/store';
+import { LabSettingsMenuItem } from '@/features/settings/LabSettings';
 import { ShowTrafficToggle } from '@/features/simulation/ShowTrafficToggle';
 import { Button } from '@/ui/button';
 import {
@@ -83,6 +84,8 @@ function AppMenu({ onOpenHelp }: Pick<TopBarProps, 'onOpenHelp'>) {
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="min-w-56">
         <FileMenuItems />
+        <DropdownMenuSeparator />
+        <LabSettingsMenuItem />
         <DropdownMenuSeparator />
         <DropdownMenuItem onSelect={onboarding.openGallery}>
           <LayoutGridIcon />
