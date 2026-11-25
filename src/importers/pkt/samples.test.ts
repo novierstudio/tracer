@@ -1,9 +1,12 @@
-// Decrypts real Packet Tracer files. Point PKT_SAMPLES_DIR at a folder of .pkt / .pka files to
-// run it, and set PKT_XML_OUT to also write each decrypted XML there. Skipped when unset.
+// Decrypts and imports real Packet Tracer files. Point PKT_SAMPLES_DIR at a folder of .pkt / .pka
+// files to run it, and set PKT_XML_OUT to also write each decrypted XML there. Skipped when unset.
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { z } from 'zod';
+import { createIdSource, Topology } from '@/model';
 import { decryptPkt } from './codec';
+import { importPkt } from './mapper';
 
 const samplesDir = process.env.PKT_SAMPLES_DIR;
 const xmlOut = process.env.PKT_XML_OUT;
@@ -31,5 +34,19 @@ describe.runIf(samplesDir)('local samples in PKT_SAMPLES_DIR', () => {
       [name, bytes.length, result.format, version, result.xml.length, ms.toFixed(1)].join('\t'),
     );
     if (xmlOut) writeFileSync(join(xmlOut, `${name}.xml`), result.xml);
+  });
+
+  it.each(files)('%s imports to a valid Tracer topology', (name) => {
+    const result = importPkt(readFileSync(join(samplesDir!, name)), { ids: createIdSource(1) });
+    if (!result.ok) throw new Error(`${name}: ${JSON.stringify(result.error)}`);
+    const { topology, report } = result.value;
+
+    const parsed = Topology.safeParse(topology);
+    const { devices, links } = report;
+    console.log(
+      `| ${name} | ${report.ptVersion} | ${devices.imported} / ${devices.skipped} | ${links.imported} / ${links.dropped} | ${parsed.success ? 'yes' : 'no'} |`,
+    );
+    expect(parsed.error && z.prettifyError(parsed.error)).toBeUndefined();
+    expect(Object.keys(topology.devices)).toHaveLength(devices.imported);
   });
 });
