@@ -41,6 +41,7 @@ function linkTo({ sim, onBatch, ping }: SimClient): SimLink {
     arpTable: (device) => sim.arpTable(device),
     macTable: (device) => sim.macTable(device),
     portStates: (device) => sim.portStates(device),
+    spanningTree: (device) => sim.spanningTree(device),
     now: () => now,
     ping,
   };

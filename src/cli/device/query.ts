@@ -5,6 +5,7 @@ import type {
   PingListener,
   PingOptions,
   Route,
+  SpanningTreeVlan,
 } from '../../engine/api';
 import type { Ipv4Address, PortId, Result } from '../../model';
 import type { IosDevice } from './context';
@@ -21,6 +22,7 @@ export interface EngineAnswers {
   readonly ports: PortStates;
   /** The simulated clock, in milliseconds since the run started. */
   readonly clock: number;
+  readonly spanningTree: readonly SpanningTreeVlan[];
 }
 
 export type EngineQueryKind = keyof EngineAnswers;

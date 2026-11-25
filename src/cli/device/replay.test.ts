@@ -65,8 +65,6 @@ describe('replaying a Packet Tracer running-config', () => {
     expect(device.config.unknownLines).toEqual([
       'no service timestamps log datetime msec',
       'no service timestamps debug datetime msec',
-      'spanning-tree mode pvst',
-      'spanning-tree extend system-id',
     ]);
   });
 

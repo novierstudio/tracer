@@ -55,6 +55,7 @@ function lab() {
     arpTable: async (device) => sim.arpTable(device),
     macTable: async (device) => sim.macTable(device),
     portStates: async (device) => sim.portStates(device),
+    spanningTree: async (device) => sim.spanningTree(device),
     now: () => engine.now,
     ping: async (...args) => sim.ping(...args),
   };
