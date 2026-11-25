@@ -1,4 +1,12 @@
-import { Ipv4Address, SubnetMask, type InterfaceId, type PrefixLength } from '../model';
+import {
+  Ipv4Address,
+  normalizeVlans,
+  SubnetMask,
+  type InterfaceId,
+  type PrefixLength,
+  type VlanId,
+  type VlanRange,
+} from '../model';
 import {
   expandInterfaceRange,
   INTERFACE_TYPES,
@@ -229,4 +237,24 @@ export function line<N extends string>(name: N, help: string): Param<N, string> 
       complete: noCompletions,
     }),
   );
+}
+
+const VLAN_RANGE = /^(\d+)(?:-(\d+))?$/;
+const MAX_VLAN = 4094;
+
+function readVlanList(text: string): readonly VlanRange[] | undefined {
+  const ranges: VlanRange[] = [];
+  for (const part of text.split(',')) {
+    const [, from = '', to] = VLAN_RANGE.exec(part) ?? [];
+    const first = Number(from);
+    const last = to === undefined ? first : Number(to);
+    if (!from || first < 1 || last > MAX_VLAN || last < first) return undefined;
+    ranges.push({ first: first as VlanId, last: last as VlanId });
+  }
+  return normalizeVlans(ranges);
+}
+
+/** A VLAN list such as `1,10,20-30`, read as sorted ranges. */
+export function vlanList<N extends string>(name: N, help: string): Param<N, readonly VlanRange[]> {
+  return param(name, help, singleToken('vlan-list', 'WORD', readVlanList));
 }

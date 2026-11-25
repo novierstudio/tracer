@@ -19,7 +19,7 @@ export const INTERFACE_TYPES: readonly InterfaceTypeHelp[] = TYPE_NAMES.map((nam
 }));
 
 const MAX_RANGE = 256;
-const SINGLE = /^([a-z]+)\s*(\d+(?:\/\d+)*)$/i;
+const SINGLE = /^([a-z]+)\s*(\d+(?:\/\d+)*(?:\.\d+)?)$/i;
 const RANGE = /^([a-z]+)\s*(\d+(?:\/\d+)*)(?:\s*-\s*(\d+))?$/i;
 
 export function resolveInterfaceType(prefix: string): InterfaceTypeHelp | undefined {
@@ -31,8 +31,11 @@ export function resolveInterfaceType(prefix: string): InterfaceTypeHelp | undefi
   return matches.length === 1 ? matches[0] : undefined;
 }
 
+/** `00/01.010` becomes `0/1.10`. */
 function canonicalPort(port: string): string {
-  return port.split('/').map(Number).join('/');
+  const [main = '', sub] = port.split('.');
+  const canonical = main.split('/').map(Number).join('/');
+  return sub === undefined ? canonical : `${canonical}.${Number(sub)}`;
 }
 
 function toInterfaceId(type: InterfaceTypeHelp, port: string): InterfaceId | undefined {
@@ -40,7 +43,7 @@ function toInterfaceId(type: InterfaceTypeHelp, port: string): InterfaceId | und
   return parsed.success ? parsed.data : undefined;
 }
 
-/** `g0/0`, `gi 0/0` and `GigabitEthernet0/0` all become `GigabitEthernet0/0`. */
+/** `g0/0`, `gi 0/0` and `GigabitEthernet0/0` all become `GigabitEthernet0/0`, and `g0/0.10` a subinterface. */
 export function normalizeInterface(text: string): InterfaceId | undefined {
   const [, prefix = '', port = ''] = SINGLE.exec(text.trim()) ?? [];
   const type = resolveInterfaceType(prefix);
@@ -69,4 +72,18 @@ export function expandInterfaceRange(text: string): readonly InterfaceId[] | und
     names.push(name);
   }
   return names;
+}
+
+const SHORT: Record<InterfaceType, string> = {
+  Loopback: 'Lo',
+  FastEthernet: 'Fa',
+  GigabitEthernet: 'Gi',
+  Serial: 'Se',
+  Vlan: 'Vl',
+};
+
+/** `FastEthernet0/1` as IOS abbreviates it in tables, `Fa0/1`. */
+export function shortInterfaceName(id: InterfaceId): string {
+  const type = TYPE_NAMES.find((name) => id.startsWith(name));
+  return type ? SHORT[type] + id.slice(type.length) : id;
 }

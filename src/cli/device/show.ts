@@ -1,6 +1,9 @@
 import {
+  carriesVlan,
   formatSubnetMask,
+  formatVlans,
   INTERFACE_TYPES,
+  parentPort,
   VTY_LINE_COUNT,
   type InterfaceId,
   type InterfaceType,
@@ -8,10 +11,14 @@ import {
   type Port,
   type RoutedInterface,
   type StaticRoute,
+  type Subinterface,
+  type SubinterfaceId,
   type SwitchInterface,
+  type VlanId,
 } from '../../model';
 import { encodeType7 } from '../passwords';
 import type { IosDevice } from './context';
+import type { PortStates } from './query';
 
 export const IOS_VERSION = '15.1';
 export const UNSUPPORTED_MARKER = '! unsupported in Tracer';
@@ -28,6 +35,13 @@ export type InterfaceEntry =
       readonly id: InterfaceId;
       readonly port: Port;
       readonly config: SwitchInterface;
+    }
+  | {
+      readonly kind: 'subinterface';
+      readonly id: SubinterfaceId;
+      /** The Ethernet port it rides on. */
+      readonly port: Port;
+      readonly config: Subinterface;
     };
 
 function typeOf(id: InterfaceId): InterfaceType {
@@ -36,7 +50,18 @@ function typeOf(id: InterfaceId): InterfaceType {
 
 const numberOf = (id: string) => Number(/\d+$/.exec(id)?.[0]);
 
-/** Every interface in running-config order: loopbacks, then ports as the hardware lists them, then VLANs. */
+function subinterfacesOf(device: IosDevice, port: Port): InterfaceEntry[] {
+  if (device.kind !== 'router') return [];
+  return (Object.entries(device.config.subinterfaces) as [SubinterfaceId, Subinterface][])
+    .filter(([id]) => parentPort(id) === port.id)
+    .sort(([a], [b]) => numberOf(a) - numberOf(b))
+    .map(([id, config]) => ({ kind: 'subinterface', id, port, config }));
+}
+
+/**
+ * Every interface in running-config order: loopbacks, then ports as the hardware lists them, each
+ * followed by its subinterfaces, then VLANs.
+ */
 export function interfaceEntries(device: IosDevice): InterfaceEntry[] {
   const virtual = Object.entries(device.config.virtualInterfaces)
     .map(([id, config]): InterfaceEntry => ({
@@ -49,7 +74,9 @@ export function interfaceEntries(device: IosDevice): InterfaceEntry[] {
   const physical = device.ports.flatMap((port): InterfaceEntry[] => {
     if (device.kind === 'router') {
       const config = device.config.interfaces[port.id];
-      return config ? [{ kind: 'routed', id: port.id, port, config }] : [];
+      return config
+        ? [{ kind: 'routed', id: port.id, port, config }, ...subinterfacesOf(device, port)]
+        : [];
     }
     const config = device.config.interfaces[port.id];
     return config ? [{ kind: 'switched', id: port.id, port, config }] : [];
@@ -80,8 +107,15 @@ function interfaceBlock(entry: InterfaceEntry): string[] {
     if (switchport.nativeVlan !== undefined && switchport.nativeVlan !== 1) {
       lines.push(` switchport trunk native vlan ${switchport.nativeVlan}`);
     }
+    if (switchport.allowedVlans) {
+      lines.push(` switchport trunk allowed vlan ${formatVlans(switchport.allowedVlans)}`);
+    }
     if (switchport.mode === 'trunk') lines.push(' switchport mode trunk');
   } else {
+    if (entry.kind === 'subinterface' && entry.config.encapsulation) {
+      const { vlan, native } = entry.config.encapsulation;
+      lines.push(` encapsulation dot1Q ${vlan}${native ? ' native' : ''}`);
+    }
     const { ipv4 } = entry.config;
     lines.push(
       ipv4
@@ -89,8 +123,10 @@ function interfaceBlock(entry: InterfaceEntry): string[] {
         : ' no ip address',
     );
   }
-  if (config.duplex) lines.push(` duplex ${config.duplex}`);
-  if (config.speed) lines.push(` speed ${config.speed}`);
+  if (entry.kind !== 'subinterface') {
+    if (entry.config.duplex) lines.push(` duplex ${entry.config.duplex}`);
+    if (entry.config.speed) lines.push(` speed ${entry.config.speed}`);
+  }
   if (entry.kind === 'routed' && entry.config.clockRate)
     lines.push(` clock rate ${entry.config.clockRate}`);
   if (config.shutdown) lines.push(' shutdown');
@@ -231,12 +267,42 @@ export function showVersion(device: IosDevice): string[] {
   ];
 }
 
-/** Status from config alone: the engine supplies link state later. */
-function status(entry: InterfaceEntry): [status: string, protocol: string] {
-  return entry.config.shutdown ? ['administratively down', 'down'] : ['up', 'up'];
+type Status = readonly [status: string, protocol: string];
+
+const ADMIN_DOWN: Status = ['administratively down', 'down'];
+const UP: Status = ['up', 'up'];
+const DOWN: Status = ['down', 'down'];
+
+/** An SVI is up while its VLAN exists, and its protocol while an up port carries the VLAN. */
+function sviStatus(device: IosDevice, vlan: VlanId, ports: PortStates): Status {
+  if (device.kind !== 'switch' || !(vlan in device.config.vlans)) return DOWN;
+  const carried = Object.entries(device.config.interfaces).some(
+    ([id, port]) => ports[id as Port['id']] === true && carriesVlan(port.switchport, vlan),
+  );
+  return ['up', carried ? 'up' : 'down'];
 }
 
-export function showIpInterfaceBrief(device: IosDevice): string[] {
+/**
+ * An interface's status and line protocol. With `ports` from the simulation, a port is up while
+ * its link is; without them, from config alone, every interface not shut down is up.
+ */
+export function interfaceStatus(
+  device: IosDevice,
+  entry: InterfaceEntry,
+  ports?: PortStates,
+): Status {
+  if (entry.config.shutdown) return ADMIN_DOWN;
+  if (entry.kind === 'subinterface') {
+    const parent = findInterface(device, entry.port.id);
+    if (parent) return interfaceStatus(device, parent, ports);
+  }
+  if (!ports) return UP;
+  if (entry.port) return ports[entry.port.id] ? UP : DOWN;
+  if (typeOf(entry.id) === 'Vlan') return sviStatus(device, numberOf(entry.id) as VlanId, ports);
+  return UP;
+}
+
+export function showIpInterfaceBrief(device: IosDevice, ports?: PortStates): string[] {
   const row = (cells: readonly string[]) =>
     [
       cells[0]!.padEnd(23),
@@ -251,13 +317,13 @@ export function showIpInterfaceBrief(device: IosDevice): string[] {
   return [
     row(['Interface', 'IP-Address', 'OK?', 'Method', 'Status', 'Protocol']),
     ...interfaceEntries(device).map((entry) => {
-      const ipv4 = entry.kind === 'routed' ? entry.config.ipv4 : undefined;
+      const ipv4 = entry.kind === 'switched' ? undefined : entry.config.ipv4;
       return row([
         entry.id,
         ipv4?.address ?? 'unassigned',
         'YES',
         ipv4 ? 'manual' : 'unset',
-        ...status(entry),
+        ...interfaceStatus(device, entry, ports),
       ]);
     }),
   ];
@@ -284,13 +350,13 @@ const HARDWARE: Record<InterfaceType, Hardware> = {
 };
 
 /** `aa:bb:cc:dd:ee:ff` as IOS writes it, `aabb.ccdd.eeff`. */
-function ciscoMac(mac: string): string {
+export function ciscoMac(mac: string): string {
   return mac.replace(/:/g, '').match(/.{4}/g)!.join('.');
 }
 
-function interfaceDetail(device: IosDevice, entry: InterfaceEntry): string[] {
+function interfaceDetail(device: IosDevice, entry: InterfaceEntry, ports?: PortStates): string[] {
   const hardware = HARDWARE[typeOf(entry.id)];
-  const [state, protocol] = status(entry);
+  const [state, protocol] = interfaceStatus(device, entry, ports);
   const macs = device.ports.flatMap((port) => (port.kind === 'serial' ? [] : [port.mac]));
   // A VLAN interface answers with the switch's first Ethernet MAC.
   const mac = entry.port ? (entry.port.kind === 'serial' ? undefined : entry.port.mac) : macs[0];
@@ -298,8 +364,13 @@ function interfaceDetail(device: IosDevice, entry: InterfaceEntry): string[] {
     mac && hardware.encapsulation === 'ARPA'
       ? `, address is ${ciscoMac(mac)} (bia ${ciscoMac(mac)})`
       : '';
-  const ipv4 = entry.kind === 'routed' ? entry.config.ipv4 : undefined;
-  const bandwidth = entry.config.speed ? entry.config.speed * 1000 : hardware.bandwidth;
+  const ipv4 = entry.kind === 'switched' ? undefined : entry.config.ipv4;
+  const speed = entry.kind === 'subinterface' ? undefined : entry.config.speed;
+  const bandwidth = speed ? speed * 1000 : hardware.bandwidth;
+  const encapsulation =
+    entry.kind === 'subinterface' && entry.config.encapsulation
+      ? `802.1Q Virtual LAN, Vlan ID  ${entry.config.encapsulation.vlan}`
+      : hardware.encapsulation;
   return [
     `${entry.id} is ${state}, line protocol is ${protocol}`,
     `  Hardware is ${hardware.name}${address}`,
@@ -308,14 +379,18 @@ function interfaceDetail(device: IosDevice, entry: InterfaceEntry): string[] {
       : [`  Description: ${entry.config.description}`]),
     ...(ipv4 ? [`  Internet address is ${ipv4.address}/${ipv4.prefixLength}`] : []),
     `  MTU 1500 bytes, BW ${bandwidth} Kbit, DLY ${hardware.delay} usec,`,
-    `  Encapsulation ${hardware.encapsulation}, loopback not set`,
+    `  Encapsulation ${encapsulation}, loopback not set`,
   ];
 }
 
-export function showInterfaces(device: IosDevice, only?: InterfaceId): string[] | undefined {
+export function showInterfaces(
+  device: IosDevice,
+  only?: InterfaceId,
+  ports?: PortStates,
+): string[] | undefined {
   const entries = interfaceEntries(device).filter(
     (entry) => only === undefined || entry.id === only,
   );
   if (only !== undefined && entries.length === 0) return undefined;
-  return entries.flatMap((entry) => interfaceDetail(device, entry));
+  return entries.flatMap((entry) => interfaceDetail(device, entry, ports));
 }

@@ -15,6 +15,7 @@ import { verifySecret } from '../passwords';
 import { buildTree, type CommandTree } from '../tree';
 import { routerCommands, switchCommands } from './commands';
 import type {
+  DeviceContext,
   IosDevice,
   Pending,
   RouterContext,
@@ -22,6 +23,7 @@ import type {
   SwitchContext,
   SwitchDevice,
 } from './context';
+import { bindQuery, type EngineQuery } from './query';
 import { blankLine } from './show';
 
 const ROUTER_TREE = buildTree<RouterContext>(routerCommands);
@@ -47,6 +49,8 @@ interface Step<D extends IosDevice> {
   readonly state: SessionState;
   readonly output: readonly string[];
   readonly outcome: Outcome;
+  /** Set by a show command that reads live state. `output` is what it prints without it. */
+  readonly query?: EngineQuery;
 }
 
 const DONE: Outcome = { kind: 'done' };
@@ -129,7 +133,7 @@ function stepWith<D extends IosDevice>(
     return { device, state, output: [], outcome: { kind: 'invalid', error: parsed.error } };
   }
 
-  const effects: { rejected?: string; asked?: Pending } = {};
+  const effects: { rejected?: string; asked?: Pending; query?: EngineQuery } = {};
   let output: readonly string[] = [];
   const next = produce(device, (draft: Draft<D>) => {
     const context = {
@@ -144,7 +148,12 @@ function stepWith<D extends IosDevice>(
           ? [`Enter TEXT message.  End with the character '${asked.delimiter}'.`]
           : [];
       },
-    };
+      query: (kind, render) => {
+        // Show commands change nothing, so the device as it was is the device to render.
+        effects.query = bindQuery(kind, render, device);
+        return render(undefined, device);
+      },
+    } satisfies DeviceContext;
     output = parsed.execute(context as ContextFor<D>);
   });
   if (effects.rejected !== undefined) {
@@ -158,7 +167,14 @@ function stepWith<D extends IosDevice>(
       outcome: DONE,
     };
   }
-  return { device: next, state: { mode: parsed.mode }, output, outcome: DONE };
+  const { query } = effects;
+  return {
+    device: next,
+    state: { mode: parsed.mode },
+    output,
+    outcome: DONE,
+    ...(query && { query }),
+  };
 }
 
 /** Runs one line, as typed at the console or read from a config file. */
@@ -293,9 +309,15 @@ export function toConfigUpdate(device: IosDevice): ConfigUpdate {
 }
 
 export interface SessionResult {
+  /** What to print. For a show command with a `query`, this is its output from config alone. */
   readonly output: readonly string[];
   /** The config edit to commit, for example with the editor store's `updateConfig`. */
   readonly update: ConfigUpdate | undefined;
+  /**
+   * Set by a show command that reads live simulation state. A terminal that can reach the
+   * simulation answers it and prints that output in place of `output`.
+   */
+  readonly query?: EngineQuery;
 }
 
 /**
@@ -340,7 +362,7 @@ export function createDeviceSession(start: SessionState = { mode: USER_EXEC }): 
       const update = result.device === device ? undefined : toConfigUpdate(result.device);
       switch (result.outcome.kind) {
         case 'done':
-          return { output: result.output, update };
+          return { output: result.output, update, ...(result.query && { query: result.query }) };
         case 'invalid':
           return { output: formatError(result.outcome.error, width), update };
         case 'rejected':

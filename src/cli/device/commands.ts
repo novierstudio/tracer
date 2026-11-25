@@ -4,8 +4,13 @@ import {
   DEFAULT_SWITCH_HOSTNAME,
   Hostname,
   ipv4ToUint32,
+  ALL_VLANS,
+  addVlans,
   Md5CryptHash,
+  parentPort,
   prefixMask,
+  removeVlans,
+  SubinterfaceId,
   uint32ToIpv4,
   VirtualInterfaceId,
   VlanId,
@@ -17,9 +22,21 @@ import {
   type RoutedInterface,
   type StaticRoute,
   type SwitchInterface,
+  type VlanRange,
 } from '../../model';
 import { exitMode, GLOBAL_CONFIG, PRIV_EXEC, USER_EXEC, type LineRef, type ModeOf } from '../modes';
-import { choice, iface, ifaceRange, ipv4, keyword, line, mask, num, word } from '../params';
+import {
+  choice,
+  iface,
+  ifaceRange,
+  ipv4,
+  keyword,
+  line,
+  mask,
+  num,
+  vlanList,
+  word,
+} from '../params';
 import { decodeType7, hashSecret } from '../passwords';
 import { defineCommand } from '../tree';
 import {
@@ -45,12 +62,15 @@ const PRIV = ['priv-exec'] as const;
 const CONFIG = [
   'global-config',
   'interface-config',
+  'subinterface-config',
   'line-config',
   'vlan-config',
   'router-config',
 ] as const;
 const GLOBAL = ['global-config'] as const;
 const IF = ['interface-config'] as const;
+const SUBIF = ['subinterface-config'] as const;
+const ANY_IF = ['interface-config', 'subinterface-config'] as const;
 const LINE = ['line-config'] as const;
 const VLAN = ['vlan-config'] as const;
 
@@ -75,13 +95,21 @@ const vlanNumber = num('vlan', 1, 4094, 'VLAN ID of the VLAN when this port is i
 const isVirtual = (id: InterfaceId): id is VirtualInterfaceId =>
   VirtualInterfaceId.safeParse(id).success;
 
+const isSubinterface = (id: InterfaceId): id is SubinterfaceId =>
+  SubinterfaceId.safeParse(id).success;
+
+type InterfaceMode = ModeOf<'interface-config' | 'subinterface-config'>;
+
+const interfacesOf = (mode: InterfaceMode) =>
+  mode.kind === 'interface-config' ? mode.interfaces : [mode.interface];
+
 /** Applies `edit` to each interface of the mode. A message from `edit` refuses the whole command. */
 function eachInterface(
   ctx: DeviceContext,
-  mode: ModeOf<'interface-config'>,
+  mode: InterfaceMode,
   edit: (target: InterfaceEntry) => string | undefined,
 ): readonly string[] {
-  for (const id of mode.interfaces) {
+  for (const id of interfacesOf(mode)) {
     const target = findInterface(ctx.device, id);
     const problem = target ? edit(target) : INVALID_INPUT;
     if (problem) return ctx.reject(problem);
@@ -89,9 +117,19 @@ function eachInterface(
   return NOTHING;
 }
 
+/** A router can add a subinterface to any of its Ethernet ports. */
+function enterSubinterface(ctx: DeviceContext, id: SubinterfaceId): readonly string[] {
+  const { device } = ctx;
+  const parent = device.ports.find((port) => port.id === parentPort(id));
+  if (device.kind !== 'router' || !isEthernet(parent)) return ctx.reject(INVALID_INPUT);
+  device.config.subinterfaces[id] ??= { shutdown: false };
+  return NOTHING;
+}
+
 function enterInterfaces(ctx: DeviceContext, ids: readonly InterfaceId[]): readonly string[] {
   for (const id of ids) {
     if (isVirtual(id)) ctx.device.config.virtualInterfaces[id] ??= { shutdown: false };
+    else if (isSubinterface(id)) return enterSubinterface(ctx, id);
     else if (!findInterface(ctx.device, id)) return ctx.reject(INVALID_INPUT);
   }
   return NOTHING;
@@ -132,8 +170,15 @@ function addressProblem(
   const hostMask = ~prefixMask(prefix) >>> 0;
   if (prefix <= 30 && (host === 0 || host === hostMask))
     return `Bad mask /${prefix} for address ${address}`;
-  const others: [string, RoutedInterface][] = Object.entries(device.config.virtualInterfaces);
-  if (device.kind === 'router') others.push(...Object.entries(device.config.interfaces));
+  const others: [string, { ipv4?: RoutedInterface['ipv4'] }][] = Object.entries(
+    device.config.virtualInterfaces,
+  );
+  if (device.kind === 'router') {
+    others.push(
+      ...Object.entries(device.config.interfaces),
+      ...Object.entries(device.config.subinterfaces),
+    );
+  }
   for (const [id, other] of others) {
     if (id === self || !other.ipv4) continue;
     const shorter = Math.min(prefix, other.ipv4.prefixLength) as PrefixLength;
@@ -145,6 +190,9 @@ function addressProblem(
 }
 
 const isEthernet = (port: Port | undefined) => port !== undefined && port.kind !== 'serial';
+
+const SUBINTERFACE_NEEDS_VLAN =
+  '% Configuring IP routing on a LAN subinterface is only allowed if that subinterface is already configured as part of an IEEE 802.10, IEEE 802.1Q, or ISL vLAN.';
 
 /** The rates a Packet Tracer serial port accepts, in bit/s. */
 export const CLOCK_RATES = new Set([
@@ -453,12 +501,20 @@ export const commonCommands = [
   command({
     modes: GLOBAL,
     path: [interfaceKw, iface('name', 'Interface name')],
-    to: ({ name }) => ({ kind: 'interface-config', interfaces: [name] }),
+    to: ({ name }) =>
+      isSubinterface(name)
+        ? { kind: 'subinterface-config', interface: name }
+        : { kind: 'interface-config', interfaces: [name] },
     run: ({ name }, ctx) => enterInterfaces(ctx, [name]),
     no: ({ name }, ctx) => {
       if (name === undefined) return ctx.reject('% Incomplete command.');
+      const { device } = ctx;
+      if (isSubinterface(name) && device.kind === 'router') {
+        delete device.config.subinterfaces[name];
+        return NOTHING;
+      }
       if (!isVirtual(name)) return ctx.reject('% Removal of physical interfaces is not permitted');
-      delete ctx.device.config.virtualInterfaces[name];
+      delete device.config.virtualInterfaces[name];
       return NOTHING;
     },
   }),
@@ -504,7 +560,7 @@ export const commonCommands = [
 
   // Interface config
   command({
-    modes: IF,
+    modes: ANY_IF,
     path: [
       interfaceIp,
       keyword('address', 'Set the IP address of an interface'),
@@ -513,7 +569,10 @@ export const commonCommands = [
     ],
     run: ({ ip, mask: prefix }, ctx, mode) =>
       eachInterface(ctx, mode, (target) => {
-        if (target.kind !== 'routed') return INVALID_INPUT;
+        if (target.kind === 'switched') return INVALID_INPUT;
+        if (target.kind === 'subinterface' && !target.config.encapsulation) {
+          return SUBINTERFACE_NEEDS_VLAN;
+        }
         const problem = addressProblem(ctx.device, target.id, ip, prefix);
         if (problem) return problem;
         target.config.ipv4 = { address: ip, prefixLength: prefix };
@@ -521,13 +580,13 @@ export const commonCommands = [
       }),
     no: (_a, ctx, mode) =>
       eachInterface(ctx, mode, (target) => {
-        if (target.kind !== 'routed') return INVALID_INPUT;
+        if (target.kind === 'switched') return INVALID_INPUT;
         delete target.config.ipv4;
         return undefined;
       }),
   }),
   command({
-    modes: IF,
+    modes: ANY_IF,
     path: [keyword('shutdown', 'Shutdown the selected interface')],
     run: (_a, ctx, mode) =>
       eachInterface(ctx, mode, (target) => void (target.config.shutdown = true)),
@@ -535,7 +594,7 @@ export const commonCommands = [
       eachInterface(ctx, mode, (target) => void (target.config.shutdown = false)),
   }),
   command({
-    modes: IF,
+    modes: ANY_IF,
     path: [
       keyword('description', 'Interface specific description'),
       line('text', 'Up to 240 characters describing this interface'),
@@ -558,7 +617,7 @@ export const commonCommands = [
     ],
     run: ({ speed }, ctx, mode) =>
       eachInterface(ctx, mode, (target) => {
-        if (!isEthernet(target.port)) return INVALID_INPUT;
+        if (target.kind === 'subinterface' || !isEthernet(target.port)) return INVALID_INPUT;
         if (speed === '1000' && target.port?.kind !== 'gigabitEthernet') return INVALID_INPUT;
         if (speed === 'auto') delete target.config.speed;
         else target.config.speed = Number(speed) as 10 | 100 | 1000;
@@ -566,7 +625,9 @@ export const commonCommands = [
       }),
     no: (_a, ctx, mode) =>
       eachInterface(ctx, mode, (target) =>
-        isEthernet(target.port) ? void delete target.config.speed : INVALID_INPUT,
+        target.kind !== 'subinterface' && isEthernet(target.port)
+          ? void delete target.config.speed
+          : INVALID_INPUT,
       ),
   }),
   command({
@@ -581,14 +642,16 @@ export const commonCommands = [
     ],
     run: ({ duplex }, ctx, mode) =>
       eachInterface(ctx, mode, (target) => {
-        if (!isEthernet(target.port)) return INVALID_INPUT;
+        if (target.kind === 'subinterface' || !isEthernet(target.port)) return INVALID_INPUT;
         if (duplex === 'auto') delete target.config.duplex;
         else target.config.duplex = duplex;
         return undefined;
       }),
     no: (_a, ctx, mode) =>
       eachInterface(ctx, mode, (target) =>
-        isEthernet(target.port) ? void delete target.config.duplex : INVALID_INPUT,
+        target.kind !== 'subinterface' && isEthernet(target.port)
+          ? void delete target.config.duplex
+          : INVALID_INPUT,
       ),
   }),
 
@@ -695,7 +758,68 @@ export const routerCommands = [
       }),
   }),
   ...routeCommands(),
+  ...encapsulationCommands(),
 ];
+
+/**
+ * `encapsulation dot1Q <vlan> [native]` on a subinterface. IOS refuses a VLAN that another
+ * subinterface of the same port already tags, and a second native VLAN on one port.
+ */
+function setEncapsulation(
+  ctx: RouterContext,
+  mode: ModeOf<'subinterface-config'>,
+  vlan: VlanId,
+  native: boolean,
+) {
+  const self = mode.interface;
+  const parent = parentPort(self);
+  const { subinterfaces } = ctx.device.config;
+  for (const [id, other] of Object.entries(subinterfaces)) {
+    if (id === self || !other.encapsulation || parentPort(id as SubinterfaceId) !== parent)
+      continue;
+    if (other.encapsulation.vlan === vlan) {
+      return ctx.reject(
+        `Configuration of multiple subinterfaces of the same main interface with the same VID (${vlan}) is not permitted. This VID is already configured on ${id}.`,
+      );
+    }
+    if (native && other.encapsulation.native) {
+      return ctx.reject(`% Native VLAN is already configured on ${id}`);
+    }
+  }
+  const target = subinterfaces[self];
+  if (!target) return ctx.reject(INVALID_INPUT);
+  target.encapsulation = { vlan, native };
+  return NOTHING;
+}
+
+function encapsulationCommands() {
+  const encapsulation = keyword('encapsulation', 'Set encapsulation type for an interface');
+  const dot1q = keyword('dot1Q', 'IEEE 802.1Q Virtual LAN');
+  const vlan = num('vlan', 1, 4094, 'IEEE 802.1Q VLAN ID');
+  const native = keyword('native', 'Make this as native vlan');
+  const no = (_a: unknown, ctx: RouterContext, mode: ModeOf<'subinterface-config'>) => {
+    // Without an encapsulation the subinterface cannot keep its address either.
+    const target = ctx.device.config.subinterfaces[mode.interface];
+    if (target) {
+      delete target.encapsulation;
+      delete target.ipv4;
+    }
+    return NOTHING;
+  };
+  return [
+    routerCommand({
+      modes: SUBIF,
+      path: [encapsulation, dot1q, vlan],
+      run: (a, ctx, mode) => setEncapsulation(ctx, mode, VlanId.parse(a.vlan), false),
+      no,
+    }),
+    routerCommand({
+      modes: SUBIF,
+      path: [encapsulation, dot1q, vlan, native],
+      run: (a, ctx, mode) => setEncapsulation(ctx, mode, VlanId.parse(a.vlan), true),
+    }),
+  ];
+}
 
 function routeCommands() {
   const network = ipv4('network', 'Destination prefix');
@@ -779,12 +903,15 @@ function setNativeVlan(port: Draft<SwitchInterface>, vlan: VlanId) {
 function setSwitchportMode(port: Draft<SwitchInterface>, mode: 'access' | 'trunk') {
   const current = port.switchport;
   if (current.mode === mode) return;
+  const { allowedVlans } = current;
+  const allowed = allowedVlans && { allowedVlans };
   if (current.mode === 'access') {
     const accessVlan = orUnset(current.vlan);
     port.switchport = {
       mode: 'trunk',
       nativeVlan: current.nativeVlan ?? DEFAULT_VLAN,
       ...(accessVlan && { accessVlan }),
+      ...allowed,
     };
   } else {
     const nativeVlan = orUnset(current.nativeVlan);
@@ -792,8 +919,73 @@ function setSwitchportMode(port: Draft<SwitchInterface>, mode: 'access' | 'trunk
       mode: 'access',
       vlan: current.accessVlan ?? DEFAULT_VLAN,
       ...(nativeVlan && { nativeVlan }),
+      ...allowed,
     };
   }
+}
+
+const coversAll = (list: readonly VlanRange[]) =>
+  list.length === 1 &&
+  list[0]!.first === ALL_VLANS[0]!.first &&
+  list[0]!.last === ALL_VLANS[0]!.last;
+
+/** Sets a trunk's allowed list from its current one. A list of every VLAN is the default, stored as none. */
+function setAllowedVlans(
+  port: Draft<SwitchInterface>,
+  next: (current: readonly VlanRange[]) => readonly VlanRange[],
+) {
+  const list = next(port.switchport.allowedVlans ?? ALL_VLANS);
+  if (coversAll(list)) delete port.switchport.allowedVlans;
+  else port.switchport.allowedVlans = [...list];
+}
+
+function allowedVlanCommands() {
+  const path = [
+    switchport,
+    keyword('trunk', 'Set trunking characteristics of the interface'),
+    keyword('allowed', 'Set allowed VLAN characteristics when interface is in trunking mode'),
+    keyword('vlan', 'Set allowed VLANs when interface is in trunking mode'),
+  ] as const;
+  const list = vlanList(
+    'vlans',
+    'VLAN IDs of the allowed VLANs when this port is in trunking mode',
+  );
+  const set = (
+    ctx: SwitchContext,
+    mode: ModeOf<'interface-config'>,
+    next: (current: readonly VlanRange[]) => readonly VlanRange[],
+  ) => eachSwitchport(ctx, mode, (port) => setAllowedVlans(port, next));
+  const reset = (_a: unknown, ctx: SwitchContext, mode: ModeOf<'interface-config'>) =>
+    set(ctx, mode, () => ALL_VLANS);
+  return [
+    switchCommand({
+      modes: IF,
+      path: [...path, list],
+      run: ({ vlans }, ctx, mode) => set(ctx, mode, () => vlans),
+      no: reset,
+    }),
+    switchCommand({
+      modes: IF,
+      path: [...path, keyword('add', 'add VLANs to the current list'), list],
+      run: ({ vlans }, ctx, mode) => set(ctx, mode, (current) => addVlans(current, vlans)),
+    }),
+    switchCommand({
+      modes: IF,
+      path: [...path, keyword('remove', 'remove VLANs from the current list'), list],
+      run: ({ vlans }, ctx, mode) => set(ctx, mode, (current) => removeVlans(current, vlans)),
+    }),
+    switchCommand({
+      modes: IF,
+      path: [...path, keyword('except', 'all VLANs except the following'), list],
+      run: ({ vlans }, ctx, mode) => set(ctx, mode, () => removeVlans(ALL_VLANS, vlans)),
+    }),
+    switchCommand({ modes: IF, path: [...path, keyword('all', 'all VLANs')], run: reset }),
+    switchCommand({
+      modes: IF,
+      path: [...path, keyword('none', 'no VLANs')],
+      run: (_a, ctx, mode) => set(ctx, mode, () => []),
+    }),
+  ];
 }
 
 export const switchCommands = [
@@ -885,4 +1077,5 @@ export const switchCommands = [
       eachSwitchport(ctx, mode, (port) => setNativeVlan(port, VlanId.parse(vlan))),
     no: (_a, ctx, mode) => eachSwitchport(ctx, mode, (port) => setNativeVlan(port, DEFAULT_VLAN)),
   }),
+  ...allowedVlanCommands(),
 ];
