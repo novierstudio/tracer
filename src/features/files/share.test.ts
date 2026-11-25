@@ -13,6 +13,11 @@ describe('share links', () => {
     expect(decodeLab(data)).toEqual({ ok: true, value: lab });
   });
 
+  it("carries the lab's spanning tree timers setting", () => {
+    const lab = { ...buildLab().topology, settings: { stpTimers: 'ios' as const } };
+    expect(decodeLab(encodeLab(lab))).toEqual({ ok: true, value: lab });
+  });
+
   it('keeps a 20-device lab under the long-link warning', () => {
     const url = `https://novierstudio.github.io/tracer/${SHARE_PREFIX}${encodeLab(classroomLab(16))}`;
     expect(url.length).toBeLessThan(LONG_LINK_CHARS);
