@@ -10,6 +10,7 @@ import { FileDialogs } from '@/features/files/FileDialogs';
 import { fileSession } from '@/features/files/session';
 import { InspectorPanel } from '@/features/inspector/InspectorPanel';
 import { consoleRequests } from '@/features/inspector/requests';
+import { OnboardingLayer } from '@/features/onboarding/OnboardingLayer';
 import { PalettePanel, type PaletteSection } from '@/features/palette/PalettePanel';
 import { BottomPanel } from '@/features/simulation/BottomPanel';
 import { simulation } from '@/features/simulation/controller';
@@ -202,7 +203,7 @@ export function Shell() {
       defaultLayout={bottomLayout.defaultLayout}
       onLayoutChanged={bottomLayout.onLayoutChanged}
     >
-      <Panel id="canvas" minSize={160}>
+      <Panel id="canvas" minSize={160} className="relative">
         <Canvas fullscreen={focus}>
           {focus && (
             <Button size="sm" className="shadow-pop" onClick={() => setFocus(false)}>
@@ -212,6 +213,7 @@ export function Shell() {
             </Button>
           )}
         </Canvas>
+        <OnboardingLayer />
       </Panel>
       <ResizeHandle orientation="vertical" />
       <Panel
