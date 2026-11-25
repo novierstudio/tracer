@@ -19,7 +19,10 @@ export interface DeviceContext {
 }
 
 export interface ModuleContext<S> extends DeviceContext {
-  /** This module's own state on this device. No other module or device can reach it. */
+  /**
+   * This module's own state on this device. No other module or device can reach it. It must be
+   * plain data (objects, arrays, Maps, Sets), since a snapshot copies it; callbacks are kept as is.
+   */
   state: S;
 }
 

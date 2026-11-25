@@ -1,10 +1,11 @@
 import type { Device, DeviceId, Endpoint, Link, LinkId, Topology } from '@/model';
 import { err, ok, type Result } from '@/model/result';
+import { cloneState } from './core/clone';
 import { createEventLog, type EventLog } from './core/log';
-import { createEventQueue, type QueueEntry } from './core/queue';
-import { createRandom } from './core/random';
+import { createEventQueue, type QueueEntry, type SavedEntry } from './core/queue';
+import { drawRandom } from './core/random';
 import { after, ms, START, type SimDuration, type SimTime } from './core/time';
-import type { SimEvent } from './events';
+import type { EventId, SimEvent } from './events';
 import type { Frame } from './frame';
 import { endUp } from './l1';
 import type { DeviceUnavailable, ModuleContext, SimModule, Stacks } from './module';
@@ -38,6 +39,31 @@ export type Engine = {
   ): Result<R, DeviceUnavailable>;
   /** Whether each link in the simulation is up now. */
   linkStates(): Record<LinkId, boolean>;
+  /** Everything the run depends on now, so `restore` can return to this moment. */
+  snapshot(): EngineSnapshot;
+  /**
+   * Puts the run back to a snapshot it took. Its log forgets the events logged since, and no
+   * module hook runs, so nothing outside the engine hears about it.
+   */
+  restore(snapshot: EngineSnapshot): void;
+};
+
+/** A timer entry names its slot by device and stack position, since slots are rebuilt. */
+type SavedScheduled =
+  | Exclude<Scheduled, { kind: 'timer' }>
+  | { kind: 'timer'; device: DeviceId; slot: number; key: string };
+
+/** A run frozen at one moment. Treat it as opaque: only the engine that took it reads it. */
+export type EngineSnapshot = {
+  readonly now: SimTime;
+  /** The newest event logged when it was taken. */
+  readonly head: EventId;
+  readonly random: number;
+  readonly generations: number;
+  readonly devices: ReadonlyMap<DeviceId, Device>;
+  readonly links: readonly Readonly<LinkState>[];
+  readonly running: ReadonlyMap<DeviceId, readonly { module: SimModule; state: unknown }[]>;
+  readonly queue: { entries: readonly SavedEntry<SavedScheduled>[]; seq: number };
 };
 
 type Slot = {
@@ -80,9 +106,15 @@ export function createEngine({
   const links = new Map<LinkId, LinkState>();
   const portLinks = new Map<string, LinkState>();
   const running = new Map<DeviceId, Slot[]>();
-  let random = createRandom(seed);
+  let randomState = seed >>> 0;
   let now = START;
   let generations = 0;
+
+  function random() {
+    const draw = drawRandom(randomState);
+    randomState = draw.state;
+    return draw.value;
+  }
 
   function send(from: Endpoint, frame: Frame) {
     const state = portLinks.get(endpointKey(from));
@@ -140,7 +172,7 @@ export function createEngine({
           queue.cancel(pending);
           slot.timers.delete(key);
         },
-        random: () => random(),
+        random,
         note: (text) =>
           log.append({ kind: 'note', time: now, device: id, module: module.id, text }),
       },
@@ -171,6 +203,14 @@ export function createEngine({
     }
   }
 
+  function indexPorts() {
+    portLinks.clear();
+    for (const state of links.values()) {
+      portLinks.set(endpointKey(state.link.a), state);
+      portLinks.set(endpointKey(state.link.b), state);
+    }
+  }
+
   function applyPatch(patch: TopologyPatch) {
     const touched = Object.keys(patch.devices) as DeviceId[];
     for (const id of touched) {
@@ -189,11 +229,7 @@ export function createEngine({
       else if (current && sameWiring(current.link, next)) current.link = next;
       else links.set(id, { link: next, up: false, generation: 0 });
     }
-    portLinks.clear();
-    for (const state of links.values()) {
-      portLinks.set(endpointKey(state.link.a), state);
-      portLinks.set(endpointKey(state.link.b), state);
-    }
+    indexPorts();
 
     for (const id of touched) if (running.has(id) && !devices.get(id)?.powered) stop(id);
 
@@ -225,7 +261,7 @@ export function createEngine({
     links.clear();
     portLinks.clear();
     running.clear();
-    random = createRandom(seed);
+    randomState = seed >>> 0;
     now = START;
     generations = 0;
     applyPatch({ devices: topology.devices, links: topology.links });
@@ -298,6 +334,78 @@ export function createEngine({
     return ok(run(slot.ctx as ModuleContext<S>));
   }
 
+  function snapshot(): EngineSnapshot {
+    const places = new Map<Slot, { device: DeviceId; slot: number }>();
+    const saved = new Map<DeviceId, { module: SimModule; state: unknown }[]>();
+    for (const [device, slots] of running) {
+      slots.forEach((slot, index) => places.set(slot, { device, slot: index }));
+      saved.set(
+        device,
+        slots.map((slot) => ({ module: slot.module, state: cloneState(slot.ctx.state) })),
+      );
+    }
+    const { entries, seq } = queue.save();
+    return {
+      now,
+      head: log.lastId,
+      random: randomState,
+      generations,
+      devices: new Map(devices),
+      links: [...links.values()].map((state) => ({ ...state })),
+      running: saved,
+      queue: {
+        seq,
+        entries: entries.map(({ time, seq, value }) => ({
+          time,
+          seq,
+          value:
+            value.kind === 'timer'
+              ? { ...places.get(value.slot)!, kind: 'timer', key: value.key }
+              : value,
+        })),
+      },
+    };
+  }
+
+  function restore(saved: EngineSnapshot) {
+    devices.clear();
+    for (const [id, device] of saved.devices) devices.set(id, device);
+    links.clear();
+    for (const state of saved.links) links.set(state.link.id, { ...state });
+    indexPorts();
+
+    running.clear();
+    for (const [id, images] of saved.running) {
+      const slots = images.map(({ module, state }) => {
+        const slot = createSlot(id, module);
+        slot.ctx.state = cloneState(state);
+        return slot;
+      });
+      running.set(id, slots);
+    }
+
+    const entries = saved.queue.entries.map(({ time, seq, value }) => ({
+      time,
+      seq,
+      value:
+        value.kind === 'timer'
+          ? ({
+              kind: 'timer',
+              slot: running.get(value.device)![value.slot]!,
+              key: value.key,
+            } as const)
+          : value,
+    }));
+    for (const entry of queue.restore(entries, saved.queue.seq)) {
+      if (entry.value.kind === 'timer') entry.value.slot.timers.set(entry.value.key, entry);
+    }
+
+    now = saved.now;
+    randomState = saved.random;
+    generations = saved.generations;
+    log.truncate(saved.head);
+  }
+
   return {
     get now() {
       return now;
@@ -309,6 +417,8 @@ export function createEngine({
     step,
     runUntil,
     withModule,
+    snapshot,
+    restore,
     linkStates: () =>
       Object.fromEntries([...links].map(([id, state]) => [id, state.up])) as Record<
         LinkId,

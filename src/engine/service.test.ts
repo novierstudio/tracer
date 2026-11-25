@@ -59,6 +59,8 @@ describe('createSimService', () => {
         mode: 'realtime',
         playing: false,
         events: [expect.objectContaining({ kind: 'link', link: link.id, up: true })],
+        head: 1,
+        canStepBack: false,
         links: { [link.id]: true },
       },
     ]);
@@ -138,8 +140,8 @@ describe('createSimService', () => {
     expect(last().now).toBe(13);
   });
 
-  it('switching mode pauses playback', () => {
-    const { sim, frame, last } = setup();
+  it('switching to Simulation pauses the clock, and switching back runs it in realtime', () => {
+    const { sim, frame, last } = setup({ period: 10 });
     sim.play(1);
     frame();
     sim.setMode('simulation');
@@ -148,6 +150,25 @@ describe('createSimService', () => {
 
     frame(50);
     expect(last()).toMatchObject({ mode: 'simulation', playing: false, now });
+
+    sim.setMode('realtime');
+    frame(20);
+    expect(last()).toMatchObject({ mode: 'realtime', playing: true, now: now + 20 });
+  });
+
+  it('setting the mode it is already in changes nothing', () => {
+    const { sim, frame, last } = setup({ period: 10 });
+    sim.setMode('simulation');
+    sim.step();
+    sim.setMode('simulation');
+    frame();
+    expect(last()).toMatchObject({ mode: 'simulation', playing: false, canStepBack: true });
+
+    sim.setMode('realtime');
+    sim.pause();
+    sim.setMode('realtime');
+    frame();
+    expect(last()).toMatchObject({ mode: 'realtime', playing: false });
   });
 
   it('rejects a speed that is not a positive number', () => {

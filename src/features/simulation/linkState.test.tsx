@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { SimEventBatch } from '@/engine/api';
 import type { BatchListener } from '@/engine/client';
 import type { SimTime } from '@/engine/core/time';
+import type { EventId } from '@/engine/events';
 import { useLinkLights } from '@/features/canvas/lights';
 import type { LinkId } from '@/model';
 import { trackLinkStates } from './linkState';
@@ -26,6 +27,8 @@ function fakeClient(initial: Record<LinkId, boolean>) {
       mode: 'realtime',
       playing: true,
       events: [],
+      head: 0 as EventId,
+      canStepBack: false,
       links,
     };
     act(() => listeners.forEach((listener) => listener(batch)));
