@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { DeviceId, Ipv4Address } from '@/model';
 import type { PingEvent, SimAPI, SimEventBatch } from './api';
-import { ms } from './core/time';
+import { ms, simTime } from './core/time';
 import { createEngine } from './engine';
 import type { EventId, FrameEvent, SimEvent } from './events';
 import { createHistory } from './history';
@@ -14,6 +14,13 @@ import { ip, routedLab } from './testing';
 const PC1_IP = ip('192.168.1.10');
 const PC2_IP = ip('192.168.2.10');
 
+/**
+ * Spanning tree forwards from 30 s and its roots send a hello every 2 s, so between 31 s and the
+ * hello at 32 s the network is quiet but for what a test starts.
+ */
+const QUIET = simTime(31_000);
+const NEXT_HELLO = simTime(32_000);
+
 /** A service on the routed lab, already in Simulation mode, with a manual frame clock. */
 function routed() {
   const { lab, ...devices } = routedLab();
@@ -22,6 +29,7 @@ function routed() {
   const sim = createSimService({ engine, frames: { now: () => 0, request: (c) => due.push(c) } });
   const batches: SimEventBatch[] = [];
   sim.load(lab.topology);
+  engine.runUntil(QUIET);
   sim.subscribe((batch) => batches.push(batch));
   sim.setMode('simulation');
   const frame = () => {
@@ -41,7 +49,16 @@ function routed() {
         const payload = frame.kind === 'ethernet' ? frame.payload.kind : frame.kind;
         return `${names.get(from.device)} > ${names.get(to.device)} ${payload}`;
       });
-  return { sim, frame, hops, ...devices };
+  /** Every step until spanning tree's next hello, each step's events in order. */
+  const stepAll = (): SimEvent[][] => {
+    const steps: SimEvent[][] = [];
+    for (let next = engine.nextTime(); next !== undefined && next < NEXT_HELLO;) {
+      steps.push(sim.step());
+      next = engine.nextTime();
+    }
+    return steps;
+  };
+  return { sim, frame, hops, stepAll, ...devices };
 }
 
 function ping(sim: SimAPI, from: DeviceId, target: Ipv4Address, count = 1) {
@@ -50,18 +67,12 @@ function ping(sim: SimAPI, from: DeviceId, target: Ipv4Address, count = 1) {
   return heard;
 }
 
-function stepAll(sim: SimAPI): SimEvent[][] {
-  const steps: SimEvent[][] = [];
-  for (let events = sim.step(); events.length > 0; events = sim.step()) steps.push(events);
-  return steps;
-}
-
 describe('stepping in Simulation mode', () => {
   it('moves every packet one hop per step across the router', () => {
-    const { sim, hops, pc1 } = routed();
+    const { sim, hops, stepAll, pc1 } = routed();
     ping(sim, pc1, PC2_IP);
 
-    expect(stepAll(sim).map(hops)).toEqual(
+    expect(stepAll().map(hops)).toEqual(
       [
         'PC1 > SW1 arp',
         'SW1 > R1 arp',
@@ -101,12 +112,12 @@ describe('stepping in Simulation mode', () => {
   });
 
   it('replays the same events with the same ids, and the ping hears each reply once', () => {
-    const { sim, pc1 } = routed();
+    const { sim, stepAll, pc1 } = routed();
     const heard = ping(sim, pc1, PC2_IP);
-    const original = stepAll(sim);
+    const original = stepAll();
 
     while (sim.stepBack());
-    const replayed = stepAll(sim);
+    const replayed = stepAll();
 
     expect(replayed).toEqual(original);
     expect(heard).toEqual([
@@ -129,20 +140,20 @@ describe('stepping in Simulation mode', () => {
       expect(roundTrip.sim.arpTable(device)).toEqual(direct.sim.arpTable(device));
     }
     expect(roundTrip.sim.macTable(direct.sw2)).toEqual(direct.sim.macTable(direct.sw2));
-    expect(stepAll(roundTrip.sim)).toEqual(stepAll(direct.sim));
+    expect(roundTrip.stepAll()).toEqual(direct.stepAll());
   });
 
   it('repeats a ping started mid-history when stepping forward through that moment again', () => {
-    const { sim, hops, pc1, pc2 } = routed();
+    const { sim, hops, stepAll, pc1, pc2 } = routed();
     ping(sim, pc1, PC2_IP);
     for (let index = 0; index < 3; index++) sim.step();
     const back = ping(sim, pc2, PC1_IP);
-    const original = stepAll(sim);
+    const original = stepAll();
 
     for (let index = 0; index < original.length + 2; index++) sim.stepBack();
     sim.step();
     sim.step();
-    const replayed = stepAll(sim);
+    const replayed = stepAll();
 
     expect(replayed.slice(-original.length)).toEqual(original);
     expect(original.flatMap(hops)).toContain('PC2 > SW2 arp');
@@ -150,7 +161,7 @@ describe('stepping in Simulation mode', () => {
   });
 
   it('cuts the future when something new happens after stepping back', () => {
-    const { sim, hops, pc1, pc2 } = routed();
+    const { sim, hops, stepAll, pc1, pc2 } = routed();
     ping(sim, pc1, PC2_IP);
     for (let index = 0; index < 4; index++) sim.step();
     const later = ping(sim, pc2, PC1_IP);
@@ -163,18 +174,23 @@ describe('stepping in Simulation mode', () => {
     ping(sim, pc1, PC2_IP);
     expect(later).toEqual([{ kind: 'summary', target: PC1_IP, sent: 0, received: 0 }]);
     // PC2 still answers, but never asks R1 for its MAC to ping PC1 itself.
-    const rest = stepAll(sim).flatMap(hops);
+    const rest = stepAll().flatMap(hops);
     expect(rest).toContain('PC2 > SW2 ipv4');
     expect(rest.filter((hop) => hop === 'PC2 > SW2 arp')).toHaveLength(1);
   });
 });
 
 describe('createHistory', () => {
+  const END = simTime(35_000);
+
   function run(snapshotEvery: number) {
     const { lab, pc1 } = routedLab();
     const engine = createEngine({ seed: 1, stacks: STACKS, linkDelay: ms(1) });
     engine.load(lab.topology);
+    engine.runUntil(QUIET);
     const history = createHistory(engine, { snapshotEvery });
+    /** Steps the three echoes and the spanning tree hellos among them, to 35 s. */
+    const forward = () => (engine.nextTime() ?? Infinity) < END && history.forward();
     history.input({
       apply: () =>
         engine.withModule(pc1, ipModule, (ctx) =>
@@ -182,13 +198,13 @@ describe('createHistory', () => {
         ),
     });
     const heads: number[] = [];
-    while (history.forward()) heads.push(engine.log.lastId);
-    const forward = engine.log.since(0 as EventId);
+    while (forward()) heads.push(engine.log.lastId);
+    const once = engine.log.since(0 as EventId);
 
     for (let index = 0; index < heads.length - 3; index++) history.back();
     const backHead = engine.log.lastId;
-    while (history.forward());
-    return { heads, backHead, forward, again: engine.log.since(0 as EventId) };
+    while (forward());
+    return { heads, backHead, forward: once, again: engine.log.since(0 as EventId) };
   }
 
   it('gives the same run whether it snapshots every event or almost never', () => {

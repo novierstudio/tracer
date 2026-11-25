@@ -26,12 +26,13 @@ export type EthernetFrame = {
   readonly payload: EthernetPayload;
 };
 
-export type EthernetPayload = ArpPacket | Ipv4Packet;
+export type EthernetPayload = ArpPacket | Ipv4Packet | Bpdu;
 
+/** A BPDU has no EtherType: it rides in an 802.3 frame with an LLC and SNAP header instead. */
 export const ETHER_TYPE = {
   arp: 0x0806,
   ipv4: 0x0800,
-} as const satisfies Record<EthernetPayload['kind'], number>;
+} as const satisfies Record<Exclude<EthernetPayload['kind'], 'bpdu'>, number>;
 
 export const DOT1Q_TPID = 0x8100;
 
@@ -97,6 +98,47 @@ export const UNREACHABLE_CODE = {
   network: 0,
   host: 1,
 } as const satisfies Record<UnreachableCode, number>;
+
+/** Where Cisco PVST+ sends its BPDUs, one per VLAN, tagged on a trunk like the VLAN's frames. */
+export const PVST_MAC = '01:00:0c:cc:cc:cd' as MacAddress;
+
+/** A bridge in spanning tree: the lower priority wins, then the lower MAC address. */
+export type BridgeId = {
+  /** The configured priority plus the VLAN, which PVST+ carries as the extended system ID. */
+  readonly priority: number;
+  readonly mac: MacAddress;
+};
+
+/** A port in its bridge's BPDUs, written `128.1`: the lower priority wins, then the lower number. */
+export type StpPortId = { readonly priority: number; readonly number: number };
+
+/**
+ * An 802.1D bridge protocol data unit. Times are in seconds, as `show spanning-tree` prints them;
+ * the wire carries 1/256ths.
+ */
+export type Bpdu = ConfigBpdu | TcnBpdu;
+
+/** What a designated bridge says about the path to the root on a segment. */
+export type ConfigBpdu = {
+  readonly kind: 'bpdu';
+  readonly type: 'config';
+  readonly root: BridgeId;
+  readonly rootPathCost: number;
+  readonly bridge: BridgeId;
+  readonly port: StpPortId;
+  /** Seconds since the root sent this, plus one for each bridge that passed it on. */
+  readonly messageAge: number;
+  readonly maxAge: number;
+  readonly helloTime: number;
+  readonly forwardDelay: number;
+  /** The root says the topology changed: bridges age out learned addresses after forward delay. */
+  readonly topologyChange: boolean;
+  /** Acknowledges a topology change notification that arrived on this segment. */
+  readonly topologyChangeAck: boolean;
+};
+
+/** A topology change notification, sent out of the root port toward the root. */
+export type TcnBpdu = { readonly kind: 'bpdu'; readonly type: 'tcn' };
 
 /** A frame on a serial link. Cisco HDLC needs no addresses: the link has one peer. */
 export type HdlcFrame = { readonly kind: 'hdlc'; readonly payload: Ipv4Packet };

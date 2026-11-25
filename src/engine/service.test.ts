@@ -61,7 +61,7 @@ describe('createSimService', () => {
         events: [expect.objectContaining({ kind: 'link', link: link.id, up: true })],
         head: 1,
         canStepBack: false,
-        links: { [link.id]: true },
+        links: { [link.id]: { a: 'up', b: 'up' } },
       },
     ]);
 
@@ -192,11 +192,11 @@ describe('createSimService', () => {
   it('carries every link state in each batch, so a link going down shows in the next one', () => {
     const { sim, frame, last, link, pc } = setup();
     frame();
-    expect(last().links).toEqual({ [link.id]: true });
+    expect(last().links).toEqual({ [link.id]: { a: 'up', b: 'up' } });
 
     sim.applyPatch({ devices: { [pc.id]: { ...pc, powered: false } }, links: {} });
     frame();
-    expect(last().links).toEqual({ [link.id]: false });
+    expect(last().links).toEqual({ [link.id]: { a: 'down', b: 'down' } });
   });
 
   it('sends batches only to the latest listener', () => {

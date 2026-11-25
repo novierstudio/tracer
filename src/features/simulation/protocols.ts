@@ -1,14 +1,15 @@
 import type { FrameEvent } from '@/engine/events';
 import type { Frame } from '@/engine/frame';
-import type { ArpPacket, IcmpMessage, Ipv4Packet } from '@/engine/pdu';
+import type { ArpPacket, Bpdu, IcmpMessage, Ipv4Packet } from '@/engine/pdu';
 
 /** The protocol a frame shows as: the innermost one the engine models. */
-export type ProtocolId = 'arp' | 'icmp' | 'hello';
+export type ProtocolId = 'arp' | 'icmp' | 'stp' | 'hello';
 
 /** Each protocol's short label and colour token. The label means colour is never the only cue. */
 export const PROTOCOLS: Record<ProtocolId, { label: string; token: `--proto-${string}` }> = {
   arp: { label: 'ARP', token: '--proto-arp' },
   icmp: { label: 'ICMP', token: '--proto-icmp' },
+  stp: { label: 'STP', token: '--proto-stp' },
   hello: { label: 'Hello', token: '--proto-stp' },
 };
 
@@ -28,7 +29,14 @@ export function protocolOf(frame: Frame): ProtocolId {
     case 'hdlc':
       return ipProtocol(frame.payload);
     case 'ethernet':
-      return frame.payload.kind === 'arp' ? 'arp' : ipProtocol(frame.payload);
+      switch (frame.payload.kind) {
+        case 'arp':
+          return 'arp';
+        case 'bpdu':
+          return 'stp';
+        case 'ipv4':
+          return ipProtocol(frame.payload);
+      }
   }
 }
 
@@ -61,6 +69,17 @@ function describeIcmp(packet: Ipv4Packet, message: IcmpMessage): string {
   }
 }
 
+function describeBpdu(bpdu: Bpdu): string {
+  if (bpdu.type === 'tcn') return 'Topology change notification';
+  const flags = [
+    ...(bpdu.topologyChange ? ['topology change'] : []),
+    ...(bpdu.topologyChangeAck ? ['TC ack'] : []),
+  ];
+  const { root, bridge, port } = bpdu;
+  const text = `Root ${root.priority} ${root.mac}, cost ${bpdu.rootPathCost}, from ${bridge.priority} ${bridge.mac} port ${port.priority}.${port.number}`;
+  return flags.length > 0 ? `${text} · ${flags.join(', ')}` : text;
+}
+
 function describePacket(packet: Ipv4Packet): string {
   return describeIcmp(packet, packet.payload);
 }
@@ -76,8 +95,13 @@ export function describeFrame({ frame, outcome }: Pick<FrameEvent, 'frame' | 'ou
       text = describePacket(frame.payload);
       break;
     case 'ethernet': {
+      const { payload } = frame;
       const body =
-        frame.payload.kind === 'arp' ? describeArp(frame.payload) : describePacket(frame.payload);
+        payload.kind === 'arp'
+          ? describeArp(payload)
+          : payload.kind === 'bpdu'
+            ? describeBpdu(payload)
+            : describePacket(payload);
       text = frame.tag ? `${body} · VLAN ${frame.tag.vlan}` : body;
       break;
     }

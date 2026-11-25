@@ -111,6 +111,39 @@ export const LAB = {
   annotations: {},
 };
 
+/** The simulation client `src/features/simulation/devHandle.ts` puts on `window`, as far as used here. */
+type SimWindow = {
+  tracerSim?: {
+    sim: { play(speed: number): Promise<void> };
+    onBatch(listener: (batch: { now: number }) => void): () => void;
+  };
+};
+
+/** How long a switch port takes to forward after it comes up: listening, then learning, 15 s each. */
+export const STP_CONVERGENCE_S = 30;
+
+/**
+ * Runs the realtime clock 100 times faster until `seconds` of simulated time have passed, then
+ * back at 1x. Spanning tree holds a new switch port for 30 simulated seconds before it forwards.
+ */
+export async function fastForward(page: Page, seconds = STP_CONVERGENCE_S + 1) {
+  await page.waitForFunction(() => (window as unknown as SimWindow).tracerSim !== undefined);
+  await page.evaluate(async (millis) => {
+    const client = (window as unknown as SimWindow).tracerSim!;
+    await new Promise<void>((resolve) => {
+      let until: number | undefined;
+      const stop = client.onBatch(({ now }) => {
+        until ??= now + millis;
+        if (now < until) return;
+        stop();
+        resolve();
+      });
+      void client.sim.play(100);
+    });
+    await client.sim.play(1);
+  }, seconds * 1000);
+}
+
 /** Opens the app and waits for the canvas, which loads after the shell. */
 export async function gotoCanvas(page: Page) {
   await page.goto('./');

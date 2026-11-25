@@ -74,7 +74,7 @@ export const ipModule: SimModule<IpState> = {
         if (!iface) return;
         if (frame.dst !== iface.medium.mac && frame.dst !== BROADCAST_MAC) return;
         if (frame.payload.kind === 'arp') onArp(ctx, iface, port, frame.payload);
-        else receive(ctx, frame.payload);
+        else if (frame.payload.kind === 'ipv4') receive(ctx, frame.payload);
         return;
       }
       case 'hello':

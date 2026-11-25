@@ -22,8 +22,14 @@ import {
   type Topology,
 } from '@/model';
 import { expectOk } from '@/model/testing';
-import { ms, type SimDuration } from './core/time';
+import { ms, simTime, type SimDuration } from './core/time';
 import type { SimModule, Stacks } from './module';
+
+/**
+ * When a lab loaded at time 0 has every switch port forwarding: spanning tree holds a new port
+ * through listening and learning, a forward delay of 15 s each.
+ */
+export const STP_CONVERGED = simTime(30_000);
 
 export function stacksOf(modules: Partial<Record<DeviceKind, readonly SimModule[]>>): Stacks {
   return { router: [], switch: [], pc: [], server: [], ...modules };
@@ -166,6 +172,11 @@ export function labBuilder(seed = 1) {
       if (device.kind !== 'switch') throw new Error('not a switch');
       for (const [name, switchport] of Object.entries(switchports)) {
         device.config.interfaces[PortId.parse(name)] = { shutdown: false, switchport };
+        // As `switchport access vlan` does: a port in a VLAN the switch lacks would stay inactive.
+        if (switchport.mode === 'access') {
+          const vlan = switchport.vlan;
+          device.config.vlans[vlan] ??= { name: `VLAN${String(vlan).padStart(4, '0')}` };
+        }
       }
       return add(device);
     },

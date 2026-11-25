@@ -1,12 +1,12 @@
 // @vitest-environment node
 import { Terminal } from '@xterm/headless';
 import { describe, expect, it, vi } from 'vitest';
-import { ms } from '@/engine/core/time';
+import { after, ms } from '@/engine/core/time';
 import { createEngine } from '@/engine/engine';
 import { diffTopology } from '@/engine/patch';
 import { createSimService } from '@/engine/service';
 import { STACKS } from '@/engine/stacks';
-import { ip, labBuilder } from '@/engine/testing';
+import { ip, labBuilder, STP_CONVERGED } from '@/engine/testing';
 import type { OutputStream } from '@/cli';
 import { createIdSource } from '@/model';
 import { createEditorStore } from '@/model/store';
@@ -59,22 +59,36 @@ function lab() {
     ping: async (...args) => sim.ping(...args),
   };
   const consoles = createConsoleRegistry(store, async () => queries);
-  /** Pings and runs the simulation until the ping is over. */
+  /** Runs until spanning tree forwards: a port a config change moved into a VLAN starts over. */
+  const converge = () => engine.runUntil(after(engine.now, ms(STP_CONVERGED)));
+  /** Pings and runs the simulation until the ping is over, once spanning tree forwards. */
   const ping = (from: typeof pc1, target: string) => {
+    converge();
     let done = false;
     sim.ping(from, ip(target), { count: 2, timeoutMs: 1000 }, (event) => {
       done ||= event.kind === 'summary';
     });
     while (!done && engine.nextTime() !== undefined) engine.step();
   };
-  /** Runs the simulation until `tty` shows its prompt again, as a playing simulation would. */
+  /**
+   * Runs the simulation until `tty` shows its prompt again, as a playing simulation would. It lets
+   * the console print after every event, since spanning tree's timers never leave the queue empty.
+   */
   const runUntilPrompt = async (tty: Tty, prompt: string) => {
     for (let i = 0; i < 10_000 && !tty.transcript.endsWith(prompt); i++) {
-      if (engine.nextTime() === undefined) await new Promise(setImmediate);
-      else engine.step();
+      if (engine.nextTime() !== undefined) engine.step();
+      await new Promise(setImmediate);
     }
   };
-  return { consoles, r1: consoles.get(r1)!, sw1: consoles.get(sw1)!, pc1, ping, runUntilPrompt };
+  return {
+    consoles,
+    r1: consoles.get(r1)!,
+    sw1: consoles.get(sw1)!,
+    pc1,
+    converge,
+    ping,
+    runUntilPrompt,
+  };
 }
 
 /** Types lines into a console, one at a time, waiting for each prompt to come back. */
@@ -149,9 +163,10 @@ describe('a console reading live state', () => {
   });
 
   it('pings from the router, printing a mark per echo as the simulation settles it', async () => {
-    const { r1, sw1, runUntilPrompt } = lab();
+    const { r1, sw1, converge, runUntilPrompt } = lab();
     await type(r1, R1_CONFIG);
     await type(sw1, SW1_CONFIG);
+    converge();
 
     r1.input('ping 192.168.20.10\r', SIZE);
     await runUntilPrompt(r1, '\r\nR1#');

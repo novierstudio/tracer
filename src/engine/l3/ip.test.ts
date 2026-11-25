@@ -6,12 +6,13 @@ import { createEngine, type Engine } from '../engine';
 import type { EventId } from '../events';
 import { createSimService } from '../service';
 import { STACKS } from '../stacks';
-import { ip, labBuilder, routedLab, staticRoute } from '../testing';
+import { ip, labBuilder, routedLab, staticRoute, STP_CONVERGED } from '../testing';
 
 function simulate(topology: Topology) {
   const engine = createEngine({ seed: 1, stacks: STACKS, linkDelay: ms(1) });
   const sim = createSimService({ engine, frames: { now: () => 0, request: () => {} } });
   sim.load(topology);
+  engine.runUntil(STP_CONVERGED);
 
   /** Starts a ping. Its events land in the returned array as the engine runs. */
   const startPing = (from: DeviceId, target: string, { count = 4, timeoutMs = 1000 } = {}) => {
@@ -172,7 +173,10 @@ describe('ping on one LAN', () => {
       { kind: 'reply', seq: 1, from: '192.168.1.10', timeMs: 0, ttl: 128 },
       { kind: 'reply', seq: 2, from: '192.168.1.10', timeMs: 0, ttl: 128 },
     ]);
-    expect(engine.log.since(mark).filter((event) => event.kind === 'frame')).toEqual([]);
+    const sent = engine.log
+      .since(mark)
+      .filter((event) => event.kind === 'frame' && event.from.device === pc1);
+    expect(sent).toEqual([]);
   });
 
   it('times out on a powered-off host, after ARP gives up on it', () => {
@@ -410,7 +414,7 @@ describe('SimAPI.ping', () => {
     const { engine, startPing } = simulate(lab.topology);
 
     const events = startPing(pc1, '192.168.1.20');
-    engine.runUntil(simTime(1500));
+    engine.runUntil(simTime(engine.now + 1500));
     engine.applyPatch({ devices: { [pc1]: { ...lab.device(pc1), powered: false } }, links: {} });
 
     expect(events.map((event) => event.kind)).toEqual(['reply', 'reply', 'summary']);

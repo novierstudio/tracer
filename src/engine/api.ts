@@ -1,7 +1,9 @@
 import type { DeviceId, Ipv4Address, LinkId, PortId, Result, Topology } from '@/model';
 import type { SimTime } from './core/time';
+import type { LinkEnd, LinkStatus } from './engine';
 import type { EventId, SimEvent } from './events';
-import type { MacTableEntry } from './l2/switching';
+import type { MacTableEntry, SpanningTreeVlan } from './l2/switching';
+import type { PortRole, PortState, SpanningTreePort, StpTimes } from './l2/stp';
 import type { ArpTableEntry } from './l3/arp';
 import type { PingEvent, PingListener, PingOptions, PingReply, PingSummary } from './l3/ping';
 import type { Route } from './l3/routes';
@@ -11,13 +13,20 @@ import type { TopologyPatch } from './patch';
 export type {
   ArpTableEntry,
   DeviceUnavailable,
+  LinkEnd,
+  LinkStatus,
   MacTableEntry,
   PingEvent,
   PingListener,
   PingOptions,
   PingReply,
   PingSummary,
+  PortRole,
+  PortState,
   Route,
+  SpanningTreePort,
+  SpanningTreeVlan,
+  StpTimes,
 };
 
 export type SimMode = 'realtime' | 'simulation';
@@ -36,8 +45,8 @@ export type SimEventBatch = {
   head: EventId;
   /** Simulation mode only: whether `stepBack` has a moment to return to. */
   canStepBack: boolean;
-  /** Whether each link is up. Every batch carries them all, so one batch is enough to draw them. */
-  links: Record<LinkId, boolean>;
+  /** What each end of each link is doing. Every batch carries them all, so one is enough to draw them. */
+  links: Record<LinkId, LinkStatus>;
 };
 
 export type CliResult = { kind: 'not-implemented' };
@@ -91,6 +100,8 @@ export interface SimAPI {
   routes(device: DeviceId): Result<Route[], DeviceUnavailable>;
   /** The addresses a switch has learned and not yet aged out, by VLAN then MAC. */
   macTable(device: DeviceId): Result<MacTableEntry[], DeviceUnavailable>;
+  /** A switch's spanning tree instances, by VLAN, for `show spanning-tree`. */
+  spanningTree(device: DeviceId): Result<SpanningTreeVlan[], DeviceUnavailable>;
   /** Whether each of a device's ports has its link up now, for interface status in `show`. */
   portStates(device: DeviceId): Result<Record<PortId, boolean>, DeviceUnavailable>;
   /** Sets the one batch listener. Calling it again replaces the previous listener. */

@@ -46,6 +46,11 @@ export interface SimModule<S = unknown> {
    * dropped. Settle what waits on it. It must not send or set timers, and the device may be gone.
    */
   onStop?(ctx: ModuleContext<S>): void;
+  /**
+   * Whether the module holds an up port back from forwarding frames, as spanning tree does until
+   * the port forwards. The port's end of its link shows as held while any module says so.
+   */
+  holdsPort?(ctx: ModuleContext<S>, port: PortId): boolean;
 }
 
 /** Why a module cannot run on a device: no such device, it is off, or its kind does not run the module. */

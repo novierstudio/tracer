@@ -19,7 +19,7 @@ import type { SimModule, Stacks } from './module';
 import type { TopologyPatch } from './patch';
 import { createSimService } from './service';
 import { STACKS } from './stacks';
-import { helloModule, ip, listenerModule, routedLab, stacksOf } from './testing';
+import { helloModule, ip, listenerModule, routedLab, stacksOf, STP_CONVERGED } from './testing';
 
 function lab() {
   const base = buildLab();
@@ -577,11 +577,12 @@ describe('determinism', () => {
       const engine = createEngine({ seed: 1, stacks: STACKS, linkDelay: ms(1) });
       const sim = createSimService({ engine, frames: { now: () => 0, request: () => {} } });
       sim.load(lab.topology);
+      engine.runUntil(STP_CONVERGED);
       const events: PingEvent[] = [];
       sim.ping(pc1, ip('192.168.2.10'), { count: 4, timeoutMs: 1000 }, (event) =>
         events.push(event),
       );
-      engine.runUntil(simTime(10_000));
+      engine.runUntil(simTime(STP_CONVERGED + 10_000));
       return { trace: trace(engine), events };
     };
 
@@ -590,7 +591,13 @@ describe('determinism', () => {
 
     expect(first.events.at(-1)).toMatchObject({ kind: 'summary', sent: 4, received: 4 });
     // Four echo round trips of 8 hops, and two ARP exchanges of 4: PC1 for R1, R1 for PC2.
-    expect(frames(first.trace)).toHaveLength(40);
+    const data = frames(first.trace).filter(
+      (event) => !(event.frame.kind === 'ethernet' && event.frame.payload.kind === 'bpdu'),
+    );
+    expect(data).toHaveLength(40);
+    // Each switch is its own root and sends a hello out of both its ports every 2 s.
+    const hellos = (STP_CONVERGED + 10_000) / 2_000;
+    expect(frames(first.trace).length - data.length).toBe(hellos * 2 * 2);
     expect(second).toEqual(first);
     for (const clock of clocks) expect(clock).not.toHaveBeenCalled();
   });

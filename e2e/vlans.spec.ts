@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { select, terminalIn } from './lab';
+import { fastForward, select, terminalIn } from './lab';
 
 test.use({ viewport: { width: 1440, height: 900 } });
 
@@ -192,6 +192,8 @@ test('builds router-on-a-stick from the CLI and shows its live routes and MAC ta
   };
   await paste('dev_R1', R1_CONFIG, 'R1#');
   await paste('dev_SW1', SW1_CONFIG, 'SW1#');
+  // The access ports and the trunk just joined VLANs 10 and 20, so spanning tree starts them over.
+  await fastForward(page);
 
   const events = await ping(page, 'dev_PC1', '192.168.20.10');
   expect(events).toEqual([

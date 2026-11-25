@@ -46,10 +46,19 @@ const HOPS = [
 const eventGrid = (page: Page) => page.getByRole('grid', { name: 'Events' });
 const eventRows = (page: Page) => eventGrid(page).getByRole('rowgroup').getByRole('row');
 
-/** The list renders only the rows near its scroll position; the grid's row count has them all. */
+/**
+ * The list renders only the rows near its scroll position; the grid's row count has them all. With
+ * no events there is no grid, and with every event filtered out there is one with only its header.
+ */
 async function expectRowCount(page: Page, count: number) {
-  if (count === 0) await expect(eventGrid(page)).toHaveCount(0);
-  else await expect(eventGrid(page)).toHaveAttribute('aria-rowcount', String(count + 1));
+  if (count === 0) {
+    const empty = async () =>
+      (await eventGrid(page).count()) === 0 ||
+      (await eventGrid(page).getAttribute('aria-rowcount')) === '1';
+    await expect.poll(empty).toBe(true);
+  } else {
+    await expect(eventGrid(page)).toHaveAttribute('aria-rowcount', String(count + 1));
+  }
 }
 
 /** Last device, at device and type of each rendered row, by its position in the whole list. */
@@ -74,6 +83,19 @@ async function enterSimulation(page: Page) {
   await expect(page.getByRole('toolbar', { name: 'Simulation timeline' })).toBeVisible();
 }
 
+/**
+ * Steps past the switches' next hello, then hides spanning tree. Their BPDUs cross the switch links
+ * every 2 s, and a step stops at them whatever the filters show, so a ping then has 2 s of quiet.
+ */
+async function skipNextHello(page: Page) {
+  await page.getByRole('button', { name: 'Step forward' }).click();
+  await page
+    .getByRole('group', { name: 'Protocol filters' })
+    .getByRole('button', { name: /STP/ })
+    .click();
+  await expectRowCount(page, 0);
+}
+
 test('in realtime, a ping across the router shows ARP and ICMP chips on the links they cross', async ({
   page,
 }) => {
@@ -84,7 +106,10 @@ test('in realtime, a ping across the router shows ARP and ICMP chips on the link
   await expect
     .poll(
       async () => {
-        for (const chip of await chips(page)) seen.add(`${chip.protocol} ${chip.link}`);
+        // Spanning tree hellos cross the switch links on their own every 2 s.
+        for (const chip of await chips(page)) {
+          if (chip.protocol !== 'stp') seen.add(`${chip.protocol} ${chip.link}`);
+        }
         return [...seen];
       },
       { intervals: [50] },
@@ -111,6 +136,7 @@ test('in Simulation mode, a cross-router ping steps hop by hop, forwards and bac
   await openRoutedLab(page);
   await enterSimulation(page);
   await expect(page.getByRole('button', { name: 'Step back' })).toBeDisabled();
+  await skipNextHello(page);
   await pingPc2(page);
   // Paused: nothing moves until a step.
   await page.waitForTimeout(200);
@@ -147,6 +173,7 @@ test('filtering out ARP hides its rows and its chips, and clicking a row pans to
 }) => {
   await openRoutedLab(page);
   await enterSimulation(page);
+  await skipNextHello(page);
   await pingPc2(page);
   const step = page.getByRole('button', { name: 'Step forward' });
   for (let index = 0; index < 8; index++) await step.click();
@@ -188,6 +215,7 @@ test('the Add simple PDU tool queues an echo from the clicked source to the clic
 }) => {
   await openRoutedLab(page);
   await enterSimulation(page);
+  await skipNextHello(page);
   // The bottom panel took room from the canvas: fit the lab into what is left.
   await page.keyboard.press('1');
 

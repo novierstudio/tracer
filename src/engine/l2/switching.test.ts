@@ -6,7 +6,7 @@ import type { SimEvent } from '../events';
 import type { SimModule } from '../module';
 import { BROADCAST_MAC, type EthernetFrame } from '../pdu';
 import { createSimService } from '../service';
-import { access, ip, labBuilder, stacksOf, trunk } from '../testing';
+import { access, ip, labBuilder, stacksOf, STP_CONVERGED, trunk } from '../testing';
 import { switchingModule } from './switching';
 
 /** A host that sends what a test tells it to and runs no protocol. */
@@ -69,6 +69,7 @@ function switchedLab({
   });
   const sim = createSimService({ engine, frames: { now: () => 0, request: () => {} } });
   sim.load(lab.topology);
+  engine.runUntil(STP_CONVERGED);
 
   const name = (id: DeviceId) => lab.device(id).config.hostname;
   const mac = (id: DeviceId): MacAddress => {
@@ -85,9 +86,12 @@ function switchedLab({
     engine.withModule(from, nic, (ctx) => ctx.send(FA0, frame));
     return hops(engine.runUntil(simTime(engine.now + 10)));
   };
+  /** Data frames only: spanning tree's BPDUs come and go on their own clock. */
   const hops = (events: SimEvent[]) =>
     events.flatMap((event) =>
-      event.kind === 'frame' && event.outcome === 'delivered'
+      event.kind === 'frame' &&
+      event.outcome === 'delivered' &&
+      !(event.frame.kind === 'ethernet' && event.frame.payload.kind === 'bpdu')
         ? [`${name(event.from.device)} > ${name(event.to.device)}`]
         : [],
     );
@@ -139,8 +143,10 @@ describe('the switch', () => {
 
   it('forgets an address 300 s after it last heard from it, then floods again', () => {
     const { engine, sw1, pc1, pc2, mac, send, table } = switchedLab();
+    // Past the topology change the ports raised by forwarding, which ages addresses in 15 s.
+    engine.runUntil(simTime(STP_CONVERGED + 35_000));
     send(pc1, pc2);
-    const learnedAt = 1;
+    const learnedAt = STP_CONVERGED + 35_001;
 
     engine.runUntil(simTime(learnedAt + 299_999));
     expect(table(sw1).map(([, address]) => address)).toContain(mac(pc1));
@@ -185,7 +191,11 @@ describe('the switch', () => {
     const tags = engine.log
       .since(mark)
       .flatMap((event) =>
-        event.kind === 'frame' && event.frame.kind === 'ethernet' ? [event.frame.tag] : [],
+        event.kind === 'frame' &&
+        event.frame.kind === 'ethernet' &&
+        event.frame.payload.kind !== 'bpdu'
+          ? [event.frame.tag]
+          : [],
       );
     expect(tags).toEqual([undefined, { vlan: 10 }, undefined]);
   });
@@ -204,7 +214,11 @@ describe('the switch', () => {
     const tagged = engine.log
       .since(mark)
       .filter(
-        (event) => event.kind === 'frame' && event.frame.kind === 'ethernet' && event.frame.tag,
+        (event) =>
+          event.kind === 'frame' &&
+          event.frame.kind === 'ethernet' &&
+          event.frame.payload.kind !== 'bpdu' &&
+          event.frame.tag,
       );
     expect(tagged).toEqual([]);
   });
