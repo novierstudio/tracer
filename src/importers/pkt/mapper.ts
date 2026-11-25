@@ -27,11 +27,12 @@ import {
   type PortKind,
   type Result,
   type RoutedInterface,
-  type RouterConfig,
-  type SwitchConfig,
+  RouterConfig,
+  SwitchConfig,
   type SwitchInterface,
   type Topology,
 } from '@/model';
+import { applyLines, type IosDevice } from '@/cli';
 import { decryptPkt, type DecryptError } from './codec';
 import {
   readPtNetwork,
@@ -43,20 +44,24 @@ import {
 } from './network';
 import type { ImportReport, LinkDropReason, PtLinkEnd, ReportEntry } from './report';
 
-export type IosConfig = RouterConfig | SwitchConfig;
-
 /**
- * Replays a router's or switch's running-config onto the config the mapper built from its PORT
- * elements, as if the lines were typed in config mode. Lines it cannot apply belong in
- * `unknownLines`. The mapper sets `hostname` back to the canvas label afterwards, so that labels
- * stay unique.
+ * Replays a router's or switch's running-config onto the device the mapper built from its PORT
+ * elements, as if the lines were typed in config mode, and returns the resulting config. Lines it
+ * cannot apply belong in `unknownLines`. The mapper sets `hostname` back to the canvas label
+ * afterwards, so that labels stay unique.
  */
-export type ReplayConfig = <C extends IosConfig>(config: C, lines: readonly string[]) => C;
+export type ReplayConfig = <D extends IosDevice>(
+  device: D,
+  lines: readonly string[],
+) => D['config'];
 
-/** Keeps every line verbatim in `unknownLines`: the default until the CLI can apply config. */
-export const keepLinesAsUnknown: ReplayConfig = (config, lines) => ({
-  ...config,
-  unknownLines: [...config.unknownLines, ...lines],
+/** The default: runs each line through Tracer's IOS command set. */
+export const replayWithIos: ReplayConfig = (device, lines) => applyLines(device, lines).config;
+
+/** Keeps every line verbatim in `unknownLines` without applying any. */
+export const keepLinesAsUnknown: ReplayConfig = (device, lines) => ({
+  ...device.config,
+  unknownLines: [...device.config.unknownLines, ...lines],
 });
 
 export type MapOptions = {
@@ -149,7 +154,7 @@ type Placed = { readonly pt: PtDevice; readonly mapped: Mapped | undefined };
 function mapNetwork(network: PtNetwork, options: MapOptions): PktImport {
   const ctx: Context = {
     ids: options.ids ?? createIdSource(),
-    replay: options.replayConfig ?? keepLinesAsUnknown,
+    replay: options.replayConfig ?? replayWithIos,
     entries: [],
     hostname: hostnameAllocator(),
   };
@@ -275,12 +280,12 @@ function mapDevice(pt: PtDevice, rule: KindRule, position: Point, ctx: Context):
   };
   // "!" lines only separate blocks in a running-config.
   const lines = pt.runningConfig.filter((line) => !/^\s*!?\s*$/.test(line));
-  const replay = <C extends IosConfig>(config: C): C => {
-    const replayed = ctx.replay(config, lines);
+  const replay = <D extends IosDevice>(device: D): D => {
+    const replayed = ctx.replay(device, lines);
     if (replayed.unknownLines.length > 0) {
       entries.push({ kind: 'config-kept', device: id, lines: replayed.unknownLines });
     }
-    return { ...replayed, hostname };
+    return { ...device, config: { ...replayed, hostname } };
   };
 
   let device: Device;
@@ -296,7 +301,9 @@ function mapDevice(pt: PtDevice, rule: KindRule, position: Point, ctx: Context):
           },
         ]),
       );
-      device = { ...fields, kind, config: replay({ hostname, interfaces, unknownLines: [] }) };
+      // Parsing fills the IOS settings the file has no PORT data for with their defaults.
+      const config = RouterConfig.parse({ hostname, interfaces, unknownLines: [] });
+      device = replay({ ...fields, kind, config });
       break;
     }
     case 'switch': {
@@ -310,8 +317,13 @@ function mapDevice(pt: PtDevice, rule: KindRule, position: Point, ctx: Context):
           },
         ]),
       );
-      const config = { hostname, interfaces, vlans: switchVlans(pt), unknownLines: [] };
-      device = { ...fields, kind, config: replay(config) };
+      const config = SwitchConfig.parse({
+        hostname,
+        interfaces,
+        vlans: switchVlans(pt),
+        unknownLines: [],
+      });
+      device = replay({ ...fields, kind, config });
       break;
     }
     case 'pc':
