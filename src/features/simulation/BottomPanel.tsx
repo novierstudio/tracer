@@ -1,13 +1,19 @@
-import { ChevronDownIcon, ListIcon, TerminalIcon } from 'lucide-react';
+import { ChevronDownIcon, ListIcon, MailIcon, PlayIcon, TerminalIcon } from 'lucide-react';
 import { useState } from 'react';
+import { formatShortcut } from '@/app/shell/shortcuts';
 import { HostPrompt } from '@/features/desktop/HostPrompt';
 import { DeviceTerminal } from '@/features/terminal/Terminal';
 import type { DeviceId } from '@/model';
 import { useEditor } from '@/model/react';
 import type { EditorState } from '@/model/store';
 import { Button } from '@/ui/button';
+import { cn } from '@/ui/cn';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/ui/tabs';
 import { Tooltip } from '@/ui/tooltip';
+import { simulation } from './controller';
+import { EventList } from './EventList';
+import { useSimulation } from './store';
+import { Timeline } from './Timeline';
 
 const emptyClass =
   'flex flex-col items-center justify-center gap-1 overflow-y-auto px-6 pb-4 text-center text-xs text-balance text-fg-2';
@@ -26,8 +32,49 @@ function consoleDevice({ topology, selection }: EditorState) {
 
 type BottomPanelProps = { onCollapse: () => void; collapseShortcut: string };
 
+function SimulationEvents() {
+  const empty = useSimulation((state) => state.frames.length === 0);
+  return (
+    <>
+      <Timeline />
+      {empty ? (
+        <div className={cn(emptyClass, 'flex-1')}>
+          <p className="font-medium text-fg-1">No packets yet</p>
+          <p>
+            Add a simple PDU, or ping from a device, then step forward with → or press Play. Each
+            hop shows up here and moves on the canvas.
+          </p>
+          <Button size="sm" className="mt-2" onClick={simulation.startPdu}>
+            <MailIcon />
+            Add simple PDU
+          </Button>
+        </div>
+      ) : (
+        <EventList />
+      )}
+    </>
+  );
+}
+
+function RealtimeEvents() {
+  return (
+    <div className={cn(emptyClass, 'flex-1')}>
+      <p className="font-medium text-fg-1">Events are captured in Simulation mode</p>
+      <p>
+        Simulation pauses the network so you can step through every frame, hop by hop, and step
+        back. Switch with {formatShortcut('toggleMode')}.
+      </p>
+      <Button size="sm" className="mt-2" onClick={() => simulation.setMode('simulation')}>
+        <PlayIcon />
+        Switch to Simulation
+      </Button>
+    </div>
+  );
+}
+
 export function BottomPanel({ onCollapse, collapseShortcut }: BottomPanelProps) {
   const [tab, setTab] = useState(lastTab);
+  const mode = useSimulation((state) => state.mode);
   const device = useEditor(consoleDevice);
   // Focus follows the terminal only when someone picks its tab, not when the panel reopens or
   // the selection changes.
@@ -76,9 +123,8 @@ export function BottomPanel({ onCollapse, collapseShortcut }: BottomPanelProps) 
             </Button>
           </Tooltip>
         </div>
-        <TabsContent value="events" className={emptyClass}>
-          <p className="font-medium text-fg-1">No events yet</p>
-          <p>In Simulation mode, every frame a packet sends shows up here, hop by hop.</p>
+        <TabsContent value="events" className="flex flex-col">
+          {mode === 'simulation' ? <SimulationEvents /> : <RealtimeEvents />}
         </TabsContent>
         {device ? (
           <TabsContent value="terminal" className="pr-1 pb-2 pl-3">
