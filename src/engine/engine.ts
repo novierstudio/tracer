@@ -45,6 +45,8 @@ export type Engine = {
     module: SimModule<S>,
     run: (ctx: ModuleContext<S>) => R,
   ): Result<R, DeviceUnavailable>;
+  /** Whether each link in the simulation is up now. */
+  linkStates(): Record<LinkId, boolean>;
 };
 
 type Slot = {
@@ -316,5 +318,10 @@ export function createEngine({
     step,
     runUntil,
     withModule,
+    linkStates: () =>
+      Object.fromEntries([...links].map(([id, state]) => [id, state.up])) as Record<
+        LinkId,
+        boolean
+      >,
   };
 }

@@ -1,4 +1,4 @@
-import type { DeviceId, Ipv4Address, Result, Topology } from '@/model';
+import type { DeviceId, Ipv4Address, LinkId, Result, Topology } from '@/model';
 import type { SimTime } from './core/time';
 import type { SimEvent } from './events';
 import type { MacTableEntry } from './l2/switching';
@@ -23,7 +23,14 @@ export type {
 export type SimMode = 'realtime' | 'simulation';
 
 /** What the worker sends once per animation frame when something changed. */
-export type SimEventBatch = { now: SimTime; mode: SimMode; playing: boolean; events: SimEvent[] };
+export type SimEventBatch = {
+  now: SimTime;
+  mode: SimMode;
+  playing: boolean;
+  events: SimEvent[];
+  /** Whether each link is up. Every batch carries them all, so one batch is enough to draw them. */
+  links: Record<LinkId, boolean>;
+};
 
 export type CliResult = { kind: 'not-implemented' };
 

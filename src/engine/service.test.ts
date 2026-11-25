@@ -59,6 +59,7 @@ describe('createSimService', () => {
         mode: 'realtime',
         playing: false,
         events: [expect.objectContaining({ kind: 'link', link: link.id, up: true })],
+        links: { [link.id]: true },
       },
     ]);
 
@@ -108,7 +109,7 @@ describe('createSimService', () => {
     ]);
 
     frame();
-    expect(last()).toEqual({ now: 3, mode: 'realtime', playing: false, events: stepped });
+    expect(last()).toMatchObject({ now: 3, mode: 'realtime', playing: false, events: stepped });
     frame(1000);
     expect(last().now).toBe(3);
   });
@@ -165,6 +166,16 @@ describe('createSimService', () => {
     sim.load(topology);
     frame();
     expect(last()).toMatchObject({ now: 0, playing: false, events: [{ id: 1, kind: 'link' }] });
+  });
+
+  it('carries every link state in each batch, so a link going down shows in the next one', () => {
+    const { sim, frame, last, link, pc } = setup();
+    frame();
+    expect(last().links).toEqual({ [link.id]: true });
+
+    sim.applyPatch({ devices: { [pc.id]: { ...pc, powered: false } }, links: {} });
+    frame();
+    expect(last().links).toEqual({ [link.id]: false });
   });
 
   it('sends batches only to the latest listener', () => {
