@@ -5,6 +5,6 @@ import { App } from './App';
 it('shows the product name and the Cisco disclaimer', () => {
   render(<App />);
 
-  expect(screen.getByRole('heading', { level: 1, name: 'Tracer' })).toBeInTheDocument();
+  expect(screen.getByRole('heading', { level: 1, name: 'NotTracer' })).toBeInTheDocument();
   expect(screen.getByText(/not affiliated with .*Cisco/)).toBeInTheDocument();
 });
