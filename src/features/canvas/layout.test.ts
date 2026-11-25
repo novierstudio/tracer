@@ -6,7 +6,7 @@ import { createIdSource, PortId, type DeviceId } from '@/model';
 import { createEditorStore } from '@/model/store';
 import { expectOk } from '@/model/testing';
 import { autoLayout } from './edit';
-import { snap } from './geometry';
+import { snapCentre } from './geometry';
 import { layoutTopology } from './layout';
 
 const port = (name: string) => PortId.parse(name);
@@ -56,7 +56,7 @@ describe('layoutTopology', () => {
     for (const pc of pcs) expect(y(pc.id)).toBeGreaterThan(Math.max(...switches.map(y)));
 
     const points = [...at.values()];
-    for (const p of points) expect(p).toEqual({ x: snap(p.x), y: snap(p.y) });
+    for (const p of points) expect(p).toEqual({ x: snapCentre(p.x), y: snapCentre(p.y) });
     expect(new Set(points.map((p) => `${p.x},${p.y}`)).size).toBe(points.length);
   });
 
