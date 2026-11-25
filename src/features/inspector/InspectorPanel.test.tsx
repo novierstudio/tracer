@@ -1,10 +1,17 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DeviceId, LinkId } from '@/model';
 import { editorStore } from '@/model/store';
 import { TooltipProvider } from '@/ui/tooltip';
 import { InspectorPanel } from './InspectorPanel';
 import { buildOffice } from './testing';
+
+// xterm needs a real browser; the e2e suite drives it. Here the CLI tab only has to pick the device.
+vi.mock('@/features/terminal/Terminal', () => ({
+  DeviceTerminal: ({ device, autoFocus }: { device: DeviceId; autoFocus: boolean }) => (
+    <div role="log" aria-label={`Console of ${device}`} data-autofocus={autoFocus} />
+  ),
+}));
 
 let lab: ReturnType<typeof buildOffice>;
 
@@ -64,7 +71,15 @@ describe('InspectorPanel', () => {
     expect(within(row('Gi0/1')).getByRole('switch', { name: 'Gi0/1 enabled' })).not.toBeChecked();
 
     openTab('CLI');
-    expect(screen.getByText('CLI comes with device sessions')).toBeVisible();
+    const console = screen.getByRole('log', { name: `Console of ${lab.r1.id}` });
+    expect(console).toHaveAttribute('data-autofocus', 'true');
+
+    // Moving the selection keeps the tab but does not pull focus into the next console.
+    select([lab.sw.id]);
+    expect(screen.getByRole('log', { name: `Console of ${lab.sw.id}` })).toHaveAttribute(
+      'data-autofocus',
+      'false',
+    );
   });
 
   it('turns a device off and on from the header, undoably', () => {
@@ -85,7 +100,8 @@ describe('InspectorPanel', () => {
   it('labels the console tab Desktop for an end host', () => {
     renderPanel();
     select([lab.pc.id]);
-    expect(screen.getByRole('tab', { name: 'Desktop' })).toBeVisible();
+    openTab('Desktop');
+    expect(screen.getByText('Desktop comes with the engine')).toBeVisible();
   });
 
   it('renames on Enter, and undo restores the old name in the field', () => {

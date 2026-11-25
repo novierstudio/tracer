@@ -1,6 +1,7 @@
-import { MonitorIcon, TerminalSquareIcon, Trash2Icon } from 'lucide-react';
+import { MonitorIcon, Trash2Icon } from 'lucide-react';
 import { Switch } from 'radix-ui';
 import { useId, useState, type ReactNode } from 'react';
+import { DeviceTerminal } from '@/features/terminal/Terminal';
 import type { Device, Topology } from '@/model';
 import { editorStore } from '@/model/store';
 import { Button } from '@/ui/button';
@@ -31,12 +32,14 @@ type Props = {
   topology: Topology;
   tab: DeviceTab;
   onTabChange: (tab: DeviceTab) => void;
+  /** Focus the CLI when it mounts: someone just picked its tab. */
+  focusConsole: boolean;
 };
 
 /** Routers and switches get an IOS CLI; end hosts get a desktop, as in the UI/UX doc. */
 const isHost = (device: Device) => device.kind === 'pc' || device.kind === 'server';
 
-export function DeviceInspector({ device, topology, tab, onTabChange }: Props) {
+export function DeviceInspector({ device, topology, tab, onTabChange, focusConsole }: Props) {
   const rows = portRows(topology, device);
   const host = isHost(device);
   return (
@@ -62,18 +65,18 @@ export function DeviceInspector({ device, topology, tab, onTabChange }: Props) {
         <TabsContent value="config">
           <ConfigTab device={device} rows={rows} />
         </TabsContent>
-        <TabsContent value="console" className="pt-10">
-          {host ? (
-            <EmptyState icon={MonitorIcon} title="Desktop comes with device sessions">
+        {host ? (
+          <TabsContent value="console" className="pt-10">
+            <EmptyState icon={MonitorIcon} title="Desktop comes with the engine">
               Command Prompt and the web browser will open here. Set the address in the Config tab
               for now.
             </EmptyState>
-          ) : (
-            <EmptyState icon={TerminalSquareIcon} title="CLI comes with device sessions">
-              Type IOS commands into {device.config.hostname} here once device sessions land.
-            </EmptyState>
-          )}
-        </TabsContent>
+          </TabsContent>
+        ) : (
+          <TabsContent value="console" className="h-full pt-2 pr-1 pb-2 pl-3">
+            <DeviceTerminal device={device.id} autoFocus={focusConsole} />
+          </TabsContent>
+        )}
       </div>
     </Tabs>
   );
