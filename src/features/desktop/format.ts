@@ -5,7 +5,7 @@ import {
   type MacAddress,
   type Port,
 } from '@/model';
-import type { ArpEntry, PingReply } from './backend';
+import type { ArpTableEntry, PingReply } from './backend';
 
 export type HostDevice = Extract<Device, { kind: 'pc' | 'server' }>;
 
@@ -70,18 +70,19 @@ export function formatIpconfig(device: HostDevice, connected: boolean, all: bool
   ];
 }
 
-/** `arp -a`: one table for the host's interface, or Windows' line for an empty cache. */
+/** `arp -a`: the addresses the host has learned, or Windows' line for an empty cache. */
 export function formatArp(
   address: Ipv4Address | undefined,
-  entries: readonly ArpEntry[],
+  entries: readonly ArpTableEntry[],
 ): string[] {
-  if (!address || entries.length === 0) return ['No ARP Entries Found.', ''];
+  const learned = entries.filter((entry) => entry.kind === 'dynamic');
+  if (!address || learned.length === 0) return ['No ARP Entries Found.', ''];
   const row = (a: string, b: string, c: string) => `  ${a.padEnd(22)}${b.padEnd(22)}${c}`;
   return [
     '',
     `Interface: ${address} --- 0x2`,
     row('Internet Address', 'Physical Address', 'Type'),
-    ...entries.map((e) => row(e.address, windowsMac(e.mac), e.type)),
+    ...learned.map((entry) => row(entry.address, windowsMac(entry.mac), 'dynamic')),
     '',
   ];
 }
@@ -100,14 +101,18 @@ export function formatReply(reply: PingReply): string {
     }
     case 'timeout':
       return 'Request timed out.';
-    case 'unreachable':
-      return `Reply from ${reply.from}: Destination host unreachable.`;
+    case 'unreachable': {
+      const what = reply.code === 'network' ? 'net' : 'host';
+      return `Reply from ${reply.from}: Destination ${what} unreachable.`;
+    }
+    case 'ttl-expired':
+      return `Reply from ${reply.from}: TTL expired in transit.`;
   }
 }
 
 /**
- * The statistics block. Unlike Windows, an unreachable answer counts as lost, not received, so
- * the numbers say what a student means by "it worked".
+ * The statistics block. As in the engine's summary and unlike Windows, only echo replies count as
+ * received, so the numbers say what a student means by "it worked".
  */
 export function pingSummary(target: Ipv4Address, replies: readonly PingReply[]): string[] {
   const times = replies.flatMap((r) => (r.kind === 'reply' ? [Math.round(r.timeMs)] : []));

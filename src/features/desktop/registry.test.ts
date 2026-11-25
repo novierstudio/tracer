@@ -47,7 +47,7 @@ describe('host prompt registry', () => {
   it('stops a running ping and drops the prompt when the host is deleted', async () => {
     const { store, prompts, pc, aborted } = setup();
     const tty = prompts.get(pc.id)!;
-    tty.input('ping -t 192.168.1.1\r', SIZE);
+    tty.input('ping -n 50 192.168.1.1\r', SIZE);
     await vi.waitFor(() => expect(tty.transcript).toContain('Pinging'));
     store.getState().removeDevices([pc.id]);
     expect(aborted).toHaveBeenCalled();

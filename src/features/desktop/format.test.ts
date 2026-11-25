@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildOffice } from '@/features/inspector/testing';
-import { Ipv4Address, MacAddress } from '@/model';
+import { Ipv4Address, MacAddress, PortId } from '@/model';
 import type { PingReply } from './backend';
 import { formatArp, formatIpconfig, formatReply, pingSummary, type HostDevice } from './format';
 
@@ -63,12 +63,20 @@ describe('formatIpconfig', () => {
 });
 
 describe('formatArp', () => {
-  it('lists entries under the host interface', () => {
+  it('lists learned entries under the host interface, without its own', () => {
     const entries = [
       {
+        kind: 'interface' as const,
+        address: ip('192.168.1.10'),
+        mac: MacAddress.parse('02:00:00:00:00:0a'),
+        port: PortId.parse('FastEthernet0'),
+      },
+      {
+        kind: 'dynamic' as const,
         address: ip('192.168.1.1'),
         mac: MacAddress.parse('00:d0:ba:01:02:03'),
-        type: 'dynamic' as const,
+        port: PortId.parse('FastEthernet0'),
+        ageMs: 1200,
       },
     ];
     expect(formatArp(ip('192.168.1.10'), entries)).toEqual([
@@ -88,6 +96,7 @@ describe('formatArp', () => {
 describe('ping lines', () => {
   const reply = (timeMs: number): PingReply => ({
     kind: 'reply',
+    seq: 1,
     from: ip('10.0.0.2'),
     bytes: 32,
     timeMs,
@@ -97,15 +106,21 @@ describe('ping lines', () => {
   it('prints each answer as Windows does', () => {
     expect(formatReply(reply(1))).toBe('Reply from 10.0.0.2: bytes=32 time=1ms TTL=128');
     expect(formatReply(reply(0))).toBe('Reply from 10.0.0.2: bytes=32 time<1ms TTL=128');
-    expect(formatReply({ kind: 'timeout' })).toBe('Request timed out.');
-    expect(formatReply({ kind: 'unreachable', from: ip('10.0.0.1') })).toBe(
+    expect(formatReply({ kind: 'timeout', seq: 1 })).toBe('Request timed out.');
+    expect(formatReply({ kind: 'unreachable', seq: 1, from: ip('10.0.0.1'), code: 'host' })).toBe(
       'Reply from 10.0.0.1: Destination host unreachable.',
+    );
+    expect(
+      formatReply({ kind: 'unreachable', seq: 1, from: ip('10.0.0.1'), code: 'network' }),
+    ).toBe('Reply from 10.0.0.1: Destination net unreachable.');
+    expect(formatReply({ kind: 'ttl-expired', seq: 1, from: ip('10.0.0.254') })).toBe(
+      'Reply from 10.0.0.254: TTL expired in transit.',
     );
   });
 
   it('sums up replies with round-trip times', () => {
     expect(
-      pingSummary(ip('10.0.0.2'), [reply(1), reply(0), { kind: 'timeout' }, reply(5)]),
+      pingSummary(ip('10.0.0.2'), [reply(1), reply(0), { kind: 'timeout', seq: 3 }, reply(5)]),
     ).toEqual([
       '',
       'Ping statistics for 10.0.0.2:',
@@ -116,8 +131,13 @@ describe('ping lines', () => {
   });
 
   it('counts unreachable as lost and leaves out times when nothing came back', () => {
-    const unreachable: PingReply = { kind: 'unreachable', from: ip('10.0.0.1') };
-    expect(pingSummary(ip('10.0.0.2'), [unreachable, { kind: 'timeout' }])).toEqual([
+    const unreachable: PingReply = {
+      kind: 'unreachable',
+      seq: 1,
+      from: ip('10.0.0.1'),
+      code: 'host',
+    };
+    expect(pingSummary(ip('10.0.0.2'), [unreachable, { kind: 'timeout', seq: 2 }])).toEqual([
       '',
       'Ping statistics for 10.0.0.2:',
       '    Packets: Sent = 2, Received = 0, Lost = 2 (100% loss),',

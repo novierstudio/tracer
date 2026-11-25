@@ -3,16 +3,8 @@ import { editorStore, type EditorStore } from '@/model/store';
 import type { HostBackend } from './backend';
 import { engineBackend } from './engineBackend';
 import { addressPort, isHostDevice } from './format';
-import { createMockBackend } from './mockBackend';
 import { hostShell } from './shell';
 import { createHostTty, type HostTty } from './tty';
-
-declare global {
-  interface Window {
-    /** Set before load to answer pings from the mock backend instead of the engine. */
-    __TRACER_MOCK_HOST__?: boolean;
-  }
-}
 
 /** One Command Prompt per PC or server, kept while the device exists. */
 export interface HostPromptRegistry {
@@ -52,9 +44,4 @@ export function createHostPromptRegistry(
   };
 }
 
-const mocked = typeof window !== 'undefined' && window.__TRACER_MOCK_HOST__;
-
-export const hostPrompts = createHostPromptRegistry(
-  editorStore,
-  mocked ? createMockBackend(editorStore) : engineBackend,
-);
+export const hostPrompts = createHostPromptRegistry(editorStore, engineBackend(editorStore));

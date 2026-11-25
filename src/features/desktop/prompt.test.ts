@@ -14,6 +14,7 @@ const ip = (text: string) => Ipv4Address.parse(text);
 
 const reply = (timeMs: number): PingReply => ({
   kind: 'reply',
+  seq: 1,
   from: ip('192.168.1.1'),
   bytes: 32,
   timeMs,
@@ -108,8 +109,13 @@ describe('the Command Prompt', () => {
   });
 
   it('shows timeouts and unreachable answers as they come', async () => {
-    const unreachable: PingReply = { kind: 'unreachable', from: ip('192.168.1.10') };
-    const { run } = await prompt(scripted([{ kind: 'timeout' }, unreachable]).backend);
+    const unreachable: PingReply = {
+      kind: 'unreachable',
+      seq: 2,
+      from: ip('192.168.1.10'),
+      code: 'host',
+    };
+    const { run } = await prompt(scripted([{ kind: 'timeout', seq: 1 }, unreachable]).backend);
     expect(await run('ping 192.168.1.99 -n 2')).toEqual([
       '',
       'Pinging 192.168.1.99 with 32 bytes of data:',
@@ -125,7 +131,7 @@ describe('the Command Prompt', () => {
 
   it('shows no prompt and ignores typing while a ping runs', async () => {
     const { screen, type } = await prompt(scripted([reply(1)]).backend);
-    type('ping -t 192.168.1.1\r');
+    type('ping -n 50 192.168.1.1\r');
     await vi.waitFor(async () => expect(await screen()).toContain(formatReply(reply(1))));
     type('ipconfig\r');
     const rows = await screen();
@@ -135,7 +141,7 @@ describe('the Command Prompt', () => {
 
   it('stops a running ping on Ctrl+C with the summary so far', async () => {
     const { screen, type, idle } = await prompt(scripted([reply(1), reply(0)]).backend);
-    type('ping -t 192.168.1.1\r');
+    type('ping -n 50 192.168.1.1\r');
     await vi.waitFor(async () =>
       expect((await screen()).filter((r) => r.startsWith('Reply'))).toHaveLength(2),
     );

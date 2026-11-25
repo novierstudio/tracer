@@ -5,7 +5,6 @@ test.use({ viewport: { width: 1440, height: 900 } });
 
 type DevWindow = {
   __TRACER_DEV__?: boolean;
-  __TRACER_MOCK_HOST__?: boolean;
   tracer: {
     editorStore: {
       getState(): {
@@ -91,10 +90,7 @@ const LAB = {
 
 async function openLab(page: Page) {
   await page.addInitScript(() => {
-    const dev = window as unknown as DevWindow;
-    dev.__TRACER_DEV__ = true;
-    // The engine has no ICMP yet (NOV-206), so ping answers from the mock backend.
-    dev.__TRACER_MOCK_HOST__ = true;
+    (window as unknown as DevWindow).__TRACER_DEV__ = true;
   });
   await page.goto('./');
   await page.evaluate((topology) => {
@@ -196,7 +192,7 @@ test('stops a running ping with Ctrl+C', async ({ page }) => {
 
   const prompt = terminalIn(page, inspector);
   await expect.poll(prompt.lastRow).toBe('C:\\>');
-  await page.keyboard.type('ping -t 192.168.1.11');
+  await page.keyboard.type('ping -n 10 192.168.1.11');
   await page.keyboard.press('Enter');
   await expect
     .poll(async () => (await prompt.rows()).filter((row) => row.startsWith('Reply')).length)
