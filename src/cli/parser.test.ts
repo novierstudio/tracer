@@ -30,7 +30,10 @@ const tree = buildTree([
   command({
     modes: ['global-config'],
     path: [keyword('vlan', 'VLAN commands'), num('id', 1, 4094, 'ISL VLAN IDs 1-1005')],
-    run: ({ id }, ctx) => void ctx.log.push(`vlan ${id.toFixed(0)}`),
+    run: ({ id }, ctx) => {
+      ctx.log.push(`vlan ${id.toFixed(0)}`);
+      return [];
+    },
   }),
   command({
     modes: ['interface-config'],
@@ -38,8 +41,14 @@ const tree = buildTree([
       keyword('description', 'Interface specific description'),
       line('text', 'Up to 240 characters describing this interface'),
     ],
-    run: ({ text }, ctx) => void ctx.log.push(text),
-    no: (_args, ctx) => void ctx.log.push('(none)'),
+    run: ({ text }, ctx) => {
+      ctx.log.push(text);
+      return [];
+    },
+    no: (_args, ctx) => {
+      ctx.log.push('(none)');
+      return [];
+    },
   }),
 ]);
 
