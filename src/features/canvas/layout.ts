@@ -1,8 +1,8 @@
 import type { ElkNode } from 'elkjs/lib/elk-api';
 import type { Device, DeviceKind, Move, Point, Topology } from '@/model';
-import { LABEL_GAP, snap, TILE } from './geometry';
+import { LABEL_GAP, snapCentre, TILE } from './geometry';
 
-export type LayoutEngine = (graph: ElkNode) => Promise<ElkNode>;
+type LayoutEngine = (graph: ElkNode) => Promise<ElkNode>;
 
 // Links point down the network: routers on top, then switches, then the hosts.
 const TIER: Record<DeviceKind, number> = { router: 0, switch: 1, pc: 2, server: 2 };
@@ -73,7 +73,10 @@ export async function layoutTopology(topology: Topology, engine?: LayoutEngine):
   return devices.flatMap((device) => {
     const point = placed.get(device.id);
     if (!point) return [];
-    const position = { x: snap(point.x - to.x + from.x), y: snap(point.y - to.y + from.y) };
+    const position = {
+      x: snapCentre(point.x - to.x + from.x),
+      y: snapCentre(point.y - to.y + from.y),
+    };
     const same = position.x === device.position.x && position.y === device.position.y;
     return same ? [] : [{ device: device.id, position }];
   });
