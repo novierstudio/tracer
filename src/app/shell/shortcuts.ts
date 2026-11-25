@@ -2,6 +2,9 @@ export type ShortcutId =
   | 'commandPalette'
   | 'undo'
   | 'redo'
+  | 'save'
+  | 'saveAs'
+  | 'open'
   | 'togglePalette'
   | 'toggleInspector'
   | 'toggleBottom'
@@ -19,6 +22,9 @@ export const SHORTCUTS: Record<ShortcutId, Shortcut> = {
   commandPalette: { key: 'k', mod: true, inTextFields: true, label: 'Command palette' },
   undo: { key: 'z', mod: true, shift: false, label: 'Undo' },
   redo: { key: 'z', mod: true, shift: true, label: 'Redo' },
+  save: { key: 's', mod: true, shift: false, inTextFields: true, label: 'Save lab' },
+  saveAs: { key: 's', mod: true, shift: true, inTextFields: true, label: 'Save lab as' },
+  open: { key: 'o', mod: true, inTextFields: true, label: 'Open lab' },
   togglePalette: { key: '[', label: 'Toggle device palette' },
   toggleInspector: { key: ']', label: 'Toggle inspector' },
   toggleBottom: { key: '`', label: 'Toggle bottom panel' },

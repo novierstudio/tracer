@@ -5,6 +5,8 @@ import { CanvasPlaceholder } from '@/features/canvas/CanvasPlaceholder';
 import { appCommands } from '@/features/command/appCommands';
 import { CommandPalette } from '@/features/command/CommandPalette';
 import { useRegisterCommands } from '@/features/command/registry';
+import { FileDialogs } from '@/features/files/FileDialogs';
+import { fileSession } from '@/features/files/session';
 import { InspectorPanel } from '@/features/inspector/InspectorPanel';
 import { PalettePanel, type PaletteSection } from '@/features/palette/PalettePanel';
 import { BottomPanel } from '@/features/simulation/BottomPanel';
@@ -137,6 +139,9 @@ export function Shell() {
       commandPalette: () => setCommandsOpen((open) => !open),
       undo: () => editorStore.getState().undo(),
       redo: () => editorStore.getState().redo(),
+      save: () => void fileSession.save(),
+      saveAs: () => void fileSession.saveAs(),
+      open: () => void fileSession.open(),
       togglePalette: panelAction(
         () => openSide('palette'),
         () => toggleSide('palette'),
@@ -304,6 +309,7 @@ export function Shell() {
       )}
       <HelpDialogs open={help} onOpenChange={setHelp} />
       <CommandPalette open={commandsOpen} onOpenChange={setCommandsOpen} />
+      <FileDialogs />
     </div>
   );
 }

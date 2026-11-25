@@ -1,7 +1,5 @@
 import {
   ChevronDownIcon,
-  FilePlusIcon,
-  FolderOpenIcon,
   InfoIcon,
   KeyboardIcon,
   PanelBottomIcon,
@@ -10,17 +8,17 @@ import {
   PlayIcon,
   RadioIcon,
   Redo2Icon,
-  SaveIcon,
   SearchIcon,
   Undo2Icon,
 } from 'lucide-react';
 import { useState } from 'react';
+import { FileMenuItems } from '@/features/files/FileMenuItems';
+import { fileSession } from '@/features/files/session';
 import { Button } from '@/ui/button';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuShortcut,
   DropdownMenuTrigger,
@@ -28,12 +26,12 @@ import {
 import { Kbd } from '@/ui/kbd';
 import { Segmented } from '@/ui/segmented';
 import { editorStore } from '@/model/store';
-import { useHistory } from '@/model/react';
+import { useEditor, useHistory } from '@/model/react';
 import { Tooltip } from '@/ui/tooltip';
 import iconUrl from '../../../assets/icon.svg';
 import { ThemeMenu } from '../ThemeMenu';
 import type { HelpDialog } from './HelpDialogs';
-import { formatKeys, formatShortcut, SHORTCUTS, type ShortcutId } from './shortcuts';
+import { formatShortcut, matchShortcut, SHORTCUTS, type ShortcutId } from './shortcuts';
 
 export type Mode = 'realtime' | 'simulation';
 
@@ -79,21 +77,7 @@ function AppMenu({ onOpenHelp }: Pick<TopBarProps, 'onOpenHelp'>) {
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="min-w-56">
-        <DropdownMenuLabel>File · coming soon</DropdownMenuLabel>
-        <DropdownMenuItem disabled>
-          <FilePlusIcon />
-          New lab
-        </DropdownMenuItem>
-        <DropdownMenuItem disabled>
-          <FolderOpenIcon />
-          Open…
-          <DropdownMenuShortcut>{formatKeys('o', true)}</DropdownMenuShortcut>
-        </DropdownMenuItem>
-        <DropdownMenuItem disabled>
-          <SaveIcon />
-          Save
-          <DropdownMenuShortcut>{formatKeys('s', true)}</DropdownMenuShortcut>
-        </DropdownMenuItem>
+        <FileMenuItems />
         <DropdownMenuSeparator />
         <DropdownMenuItem onSelect={() => onOpenHelp('shortcuts')}>
           <KeyboardIcon />
@@ -109,16 +93,25 @@ function AppMenu({ onOpenHelp }: Pick<TopBarProps, 'onOpenHelp'>) {
   );
 }
 
+// Shows the lab name and keeps edits local until blur or Enter, so typing is one undo step.
 function FileName() {
-  const [name, setName] = useState('Untitled lab');
+  const name = useEditor((state) => state.topology.meta.name);
+  const [draft, setDraft] = useState<string | null>(null);
   return (
     <input
       aria-label="Lab name"
-      value={name}
-      onChange={(e) => setName(e.target.value)}
-      onBlur={() => setName((n) => n.trim() || 'Untitled lab')}
+      value={draft ?? name}
+      onFocus={() => setDraft(name)}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={() => {
+        if (draft !== null) fileSession.rename(draft);
+        setDraft(null);
+      }}
       onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === 'Escape') e.currentTarget.blur();
+        // Commit before a shortcut such as Save acts on the lab.
+        const shortcut = matchShortcut(e.nativeEvent);
+        const commit = shortcut && SHORTCUTS[shortcut].inTextFields;
+        if (e.key === 'Enter' || e.key === 'Escape' || commit) e.currentTarget.blur();
       }}
       className="h-7 w-44 min-w-0 truncate rounded-md border border-transparent bg-transparent px-1.5 text-sm text-fg-1 outline-none hover:border-line focus-visible:border-accent focus-visible:bg-surface-1 focus-visible:outline-none max-sm:flex-1"
     />

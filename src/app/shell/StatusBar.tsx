@@ -1,4 +1,5 @@
 import { KeyboardIcon } from 'lucide-react';
+import { SaveStatus } from '@/features/files/SaveStatus';
 import { cn } from '@/ui/cn';
 import type { HelpDialog } from './HelpDialogs';
 import type { Mode } from './TopBar';
@@ -23,6 +24,7 @@ export function StatusBar({ mode, onOpenHelp, inert }: StatusBarProps) {
       </span>
       <span className="max-sm:hidden">Empty lab</span>
       <div className="ml-auto flex h-full items-center">
+        <SaveStatus />
         <button type="button" className={linkClass} onClick={() => onOpenHelp('shortcuts')}>
           <KeyboardIcon className="size-3.5" />
           <span className="max-sm:sr-only">Shortcuts</span>
