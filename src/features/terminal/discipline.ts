@@ -259,11 +259,35 @@ function submit(
   return { state: next.state, out: head + next.out };
 }
 
+/** A password line: nothing echoes, only Backspace edits, `?` is a character, and no history. */
+function secret(session: TerminalSession, state: LineState, key: Key): Step {
+  const typed = (line: string) => ({ state: { ...state, line, cursor: line.length }, out: '' });
+  const finish = (echo: string, output: readonly string[]) => {
+    const next = show(session, { ...state, line: '', cursor: 0, recall: undefined }, output);
+    return { state: next.state, out: `${echo}\r\n${next.out}` };
+  };
+  switch (key.kind) {
+    case 'text':
+      return typed(state.line + key.text);
+    case 'help':
+      return typed(`${state.line}?`);
+    case 'backspace':
+      return typed(state.line.slice(0, -1));
+    case 'enter':
+      return finish('', session.run(state.line));
+    case 'interrupt':
+      return finish('^C', []);
+    default:
+      return { state, out: '' };
+  }
+}
+
 export function reduce(state: LineState, input: Input, session: TerminalSession): Step {
   if (input.kind === 'resize') {
     return { state: { ...state, cols: input.cols, rows: input.rows }, out: '' };
   }
   if (state.more) return page(session, state, input);
+  if (session.masked) return secret(session, state, input);
   const { line, cursor } = state;
   switch (input.kind) {
     case 'text':

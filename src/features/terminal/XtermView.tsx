@@ -2,20 +2,10 @@ import { FitAddon } from '@xterm/addon-fit';
 import { Terminal, type ITheme } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
 import { useEffect, useEffectEvent, useId, useRef } from 'react';
-import { feed, initialState, reduce } from './discipline';
-import { createDemoSession, type TerminalSession } from './session';
+import type { Tty } from './tty';
 
 const FONT_FAMILY = '"JetBrains Mono Variable", ui-monospace, monospace';
 const FONT_SIZE = 13;
-
-interface Console {
-  readonly term: Terminal;
-  readonly fit: FitAddon;
-  /** xterm renders into this element. It moves between mounts so scrollback survives. */
-  readonly element: HTMLDivElement;
-}
-
-const consoles = new WeakMap<TerminalSession, Console>();
 
 function themeFrom(element: Element): ITheme {
   const css = getComputedStyle(element);
@@ -32,10 +22,8 @@ function themeFrom(element: Element): ITheme {
   };
 }
 
-function connect(session: TerminalSession, parent: HTMLElement): Console {
-  const element = document.createElement('div');
-  element.style.height = '100%';
-  parent.append(element);
+/** A fresh xterm on `tty`: it replays the transcript, then types into and shows the tty. */
+function connect(tty: Tty, parent: HTMLElement) {
   const term = new Terminal({
     fontFamily: FONT_FAMILY,
     fontSize: FONT_SIZE,
@@ -47,16 +35,7 @@ function connect(session: TerminalSession, parent: HTMLElement): Console {
   });
   const fit = new FitAddon();
   term.loadAddon(fit);
-
-  let state = initialState(term.cols, term.rows);
-  term.onData((data) => {
-    const step = feed(state, data, session);
-    state = step.state;
-    term.write(step.out);
-  });
-  term.onResize(({ cols, rows }) => {
-    state = reduce(state, { kind: 'resize', cols, rows }, session).state;
-  });
+  term.onData((data) => tty.input(data, { cols: term.cols, rows: term.rows }));
   // Keys the browser handles instead of xterm: Shift+Tab moves focus out of the terminal,
   // Ctrl+V pastes, and Ctrl+C copies a selection instead of abandoning the line.
   const forBrowser = (event: KeyboardEvent) =>
@@ -64,14 +43,13 @@ function connect(session: TerminalSession, parent: HTMLElement): Console {
     (event.ctrlKey && event.key.toLowerCase() === 'v') ||
     (event.ctrlKey && event.key === 'c' && term.hasSelection());
   term.attachCustomKeyEventHandler((event) => !forBrowser(event));
-  term.open(element);
-  term.write(session.prompt);
-  return { term, fit, element };
+  term.open(parent);
+  return { term, fit };
 }
 
-type XtermViewProps = { session: TerminalSession; autoFocus: boolean };
+type XtermViewProps = { tty: Tty; autoFocus: boolean };
 
-export function XtermView({ session, autoFocus }: XtermViewProps) {
+export default function XtermView({ tty, autoFocus }: XtermViewProps) {
   const host = useRef<HTMLDivElement>(null);
   const hintId = useId();
 
@@ -87,10 +65,7 @@ export function XtermView({ session, autoFocus }: XtermViewProps) {
     // xterm measures the cell size once, so the font must be ready first.
     void document.fonts.load(`${FONT_SIZE}px ${FONT_FAMILY}`).then(() => {
       if (cancelled) return;
-      let view = consoles.get(session);
-      if (view) parent.append(view.element);
-      else consoles.set(session, (view = connect(session, parent)));
-      const { term, fit, element } = view;
+      const { term, fit } = connect(tty, parent);
 
       const refit = () => {
         if (parent.clientWidth > 0 && parent.clientHeight > 0) fit.fit();
@@ -100,6 +75,8 @@ export function XtermView({ session, autoFocus }: XtermViewProps) {
       };
       refit();
       applyTheme();
+      term.write(tty.transcript);
+      const unsubscribe = tty.subscribe((out) => term.write(out));
       const resizes = new ResizeObserver(refit);
       resizes.observe(parent);
       const themes = new MutationObserver(applyTheme);
@@ -107,16 +84,17 @@ export function XtermView({ session, autoFocus }: XtermViewProps) {
       onAttach(term);
 
       detach = () => {
+        unsubscribe();
         resizes.disconnect();
         themes.disconnect();
-        element.remove();
+        term.dispose();
       };
     });
     return () => {
       cancelled = true;
       detach?.();
     };
-  }, [session]);
+  }, [tty]);
 
   return (
     <div className="h-full min-h-0">
@@ -126,10 +104,4 @@ export function XtermView({ session, autoFocus }: XtermViewProps) {
       <div ref={host} className="h-full" />
     </div>
   );
-}
-
-const demo = createDemoSession();
-
-export default function DemoTerminal({ autoFocus }: { autoFocus: boolean }) {
-  return <XtermView session={demo} autoFocus={autoFocus} />;
 }

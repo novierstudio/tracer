@@ -1,6 +1,9 @@
 import { ChevronDownIcon, ListIcon, TerminalIcon } from 'lucide-react';
 import { useState } from 'react';
-import { DemoTerminal } from '@/features/terminal/Terminal';
+import { DeviceTerminal } from '@/features/terminal/Terminal';
+import type { DeviceId } from '@/model';
+import { useEditor } from '@/model/react';
+import type { EditorState } from '@/model/store';
 import { Button } from '@/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/ui/tabs';
 import { Tooltip } from '@/ui/tooltip';
@@ -13,17 +16,27 @@ type Tab = 'events' | 'terminal';
 // The shell unmounts this panel while it is collapsed; reopening it returns to the last tab.
 let lastTab: Tab = 'events';
 
+/** The one selected router or switch, whose console the Terminal tab shows. */
+function consoleDevice({ topology, selection }: EditorState) {
+  const [id, ...others] = selection.devices;
+  if (!id || others.length > 0 || selection.links.length > 0) return undefined;
+  const device = topology.devices[id];
+  return device?.kind === 'router' || device?.kind === 'switch' ? device : undefined;
+}
+
 type BottomPanelProps = { onCollapse: () => void; collapseShortcut: string };
 
 export function BottomPanel({ onCollapse, collapseShortcut }: BottomPanelProps) {
   const [tab, setTab] = useState(lastTab);
-  // Focus follows the terminal only when someone picks its tab, not when the panel reopens.
-  const [focusTerminal, setFocusTerminal] = useState(false);
+  const device = useEditor(consoleDevice);
+  // Focus follows the terminal only when someone picks its tab, not when the panel reopens or
+  // the selection changes.
+  const [focusFor, setFocusFor] = useState<DeviceId>();
 
   const selectTab = (next: string) => {
     lastTab = next === 'terminal' ? 'terminal' : 'events';
     setTab(lastTab);
-    setFocusTerminal(lastTab === 'terminal');
+    setFocusFor(lastTab === 'terminal' ? device?.id : undefined);
   };
 
   return (
@@ -45,9 +58,9 @@ export function BottomPanel({ onCollapse, collapseShortcut }: BottomPanelProps) 
               Terminal
             </TabsTrigger>
           </TabsList>
-          {tab === 'terminal' && (
+          {tab === 'terminal' && device && (
             <p className="ml-1 min-w-0 truncate text-xs text-fg-3">
-              Demo router — devices arrive in a later milestone
+              {device.config.hostname} console
             </p>
           )}
           <Tooltip label="Hide bottom panel" shortcut={collapseShortcut}>
@@ -66,9 +79,16 @@ export function BottomPanel({ onCollapse, collapseShortcut }: BottomPanelProps) 
           <p className="font-medium text-fg-1">No events yet</p>
           <p>In Simulation mode, every frame a packet sends shows up here, hop by hop.</p>
         </TabsContent>
-        <TabsContent value="terminal" className="pr-1 pb-2 pl-3">
-          <DemoTerminal autoFocus={focusTerminal} />
-        </TabsContent>
+        {device ? (
+          <TabsContent value="terminal" className="pr-1 pb-2 pl-3">
+            <DeviceTerminal device={device.id} autoFocus={focusFor === device.id} />
+          </TabsContent>
+        ) : (
+          <TabsContent value="terminal" className={emptyClass}>
+            <p className="font-medium text-fg-1">Select a router or switch</p>
+            <p>Its IOS console opens here, and in the CLI tab of the inspector.</p>
+          </TabsContent>
+        )}
       </Tabs>
     </section>
   );
