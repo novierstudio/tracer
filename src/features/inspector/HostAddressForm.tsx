@@ -126,10 +126,13 @@ export function HostAddressForm({
         onValueChange={(mode) => edit({ mode })}
         options={[
           { value: 'static', label: 'Static' },
-          { value: 'dhcp', label: 'DHCP' },
+          { value: 'dhcp', label: 'DHCP', disabled: config.ipv4.mode !== 'dhcp' },
         ]}
         className="self-start"
       />
+      {config.ipv4.mode !== 'dhcp' && (
+        <p className="text-2xs text-fg-3">DHCP arrives with DHCP servers in a later update.</p>
+      )}
       {dhcp ? (
         <p className="text-xs text-fg-2">
           The address, gateway and DNS server will come from a DHCP server on this network.
