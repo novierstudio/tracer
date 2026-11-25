@@ -19,6 +19,7 @@ import {
   type Drawn,
   type Scene,
 } from './draw';
+import { decide, dropLabel } from './pdu/decision';
 import { protocolOf } from './protocols';
 import { findFrame, simulationStore, useSimulation } from './store';
 import type { ChipPlace } from './traffic';
@@ -186,6 +187,12 @@ export function TrafficOverlay() {
 
   useSimulationKeys();
   usePduClicks(canvas);
+  // The decision logic loads with the canvas rather than in the main bundle.
+  useEffect(() => {
+    traffic.labelDrops((event) =>
+      dropLabel(decide(event, editorStore.getState().topology.devices[event.to.device])),
+    );
+  }, []);
 
   useEffect(() => {
     const element = canvas.current;

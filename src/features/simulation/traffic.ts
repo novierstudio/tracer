@@ -1,8 +1,6 @@
 import type { FrameEvent } from '@/engine/events';
 import { BROADCAST_MAC } from '@/engine/pdu';
-import type { Device, DeviceId } from '@/model';
-import { editorStore } from '@/model/store';
-import { decide, dropLabel } from './pdu/decision';
+import type { DeviceId } from '@/model';
 import { protocolOf, type ProtocolId } from './protocols';
 
 /**
@@ -141,19 +139,25 @@ export type Moment = {
 
 export type Traffic = ReturnType<typeof createTraffic>;
 
-const deviceInEditor = (id: DeviceId) => editorStore.getState().topology.devices[id];
+/** Why a frame was dropped, such as "No route", or undefined when it was not. */
+export type DropLabeller = (event: FrameEvent) => string | undefined;
+
+/** All a frame says by itself: whether its link was down. The overlay brings the rest. */
+const linkDrops: DropLabeller = (event) =>
+  event.outcome === 'link-down' ? 'Link down' : undefined;
 
 /**
  * The chips the overlay draws. In realtime, a frame sent the instant another arrived at its
  * device continues that packet's journey, so its chip waits for the earlier chip to land: a
  * packet crosses the network hop by hop, and a broadcast fans out from where it arrived. In
- * Simulation mode, chips show the current moment instead. `device` finds a frame's receiver,
- * to tell whether it dropped the frame.
+ * Simulation mode, chips show the current moment instead. `drop` names why a frame was
+ * dropped. It is passed in, so the main bundle need not carry the decision logic.
  */
 export function createTraffic({
   cap = CHIP_CAP,
-  device = deviceInEditor,
-}: { cap?: number; device?: (id: DeviceId) => Device | undefined } = {}) {
+  drop = linkDrops,
+}: { cap?: number; drop?: DropLabeller } = {}) {
+  let labelDrop = drop;
   let chips: Chip[] = [];
   let rings: Ring[] = [];
   let nextId = 1;
@@ -176,7 +180,7 @@ export function createTraffic({
     start,
     duration,
     motion,
-    drop: dropLabel(decide(event, device(event.to.device))),
+    drop: labelDrop(event),
     chained,
   });
 
@@ -262,6 +266,11 @@ export function createTraffic({
         ...resting.map((event) => chip(event, wallNow, slideMs, 'rest')),
       ];
       addRings(arrived, wallNow);
+    },
+
+    /** Names drops from now on with `next`, as the overlay does once it has loaded. */
+    labelDrops(next: DropLabeller) {
+      labelDrop = next;
     },
 
     clear() {

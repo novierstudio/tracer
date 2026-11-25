@@ -7,6 +7,7 @@ import { createSimService } from '@/engine/service';
 import { STACKS } from '@/engine/stacks';
 import { ip, routedLab, STP_CONVERGED } from '@/engine/testing';
 import type { DeviceId, MacAddress, Topology } from '@/model';
+import { decide, dropLabel } from './pdu/decision';
 import { arpRequest, hop } from './testing';
 import { CHIP_CAP, createTraffic, DROP_LINGER_MS, RING_MS, travelMs } from './traffic';
 
@@ -295,6 +296,9 @@ function pingFrames(topology: Topology, from: DeviceId, target: string): FrameEv
     .filter(({ frame }) => frame.kind !== 'ethernet' || frame.payload.kind !== 'bpdu');
 }
 
+const dropsIn = (topology: Topology) => (event: FrameEvent) =>
+  dropLabel(decide(event, topology.devices[event.to.device]));
+
 /** The echo request PC1 sends R1 for an address R1 has no route to, and R1's topology. */
 function echoToNowhere() {
   const { lab, pc1 } = routedLab();
@@ -305,14 +309,14 @@ function echoToNowhere() {
       frame.payload.kind === 'ipv4' &&
       topology.devices[to.device]!.kind === 'router',
   )!;
-  return { event, traffic: createTraffic({ device: (id) => topology.devices[id] }) };
+  return { event, traffic: createTraffic({ drop: dropsIn(topology) }) };
 }
 
 describe('dropped frames', () => {
   it('name why the router dropped a ping it has no route for, and no other hop', () => {
     const { lab, pc1 } = routedLab();
     const { topology } = lab;
-    const traffic = createTraffic({ device: (id) => topology.devices[id] });
+    const traffic = createTraffic({ drop: dropsIn(topology) });
     traffic.showMoment(
       { arriving: [], resting: pingFrames(topology, pc1, '10.9.9.9'), leaving: [] },
       0,
