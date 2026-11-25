@@ -264,6 +264,39 @@ describe('when a link is down', () => {
     expect(overRouterLink).toMatchObject([{ sentAt: 10, time: 13, outcome: 'delivered' }]);
   });
 
+  it('takes a link down when a port at either end is shut down, and up when it is enabled', () => {
+    const { topology, sw, pcLink } = lab();
+    if (sw.kind !== 'switch') throw new Error('SW1 is not a switch');
+    const engine = engineFor(stacksOf({}));
+    engine.load(topology);
+    const withFa01 = (shutdown: boolean) => {
+      const fa01 = port('FastEthernet0/1');
+      const interfaces = {
+        ...sw.config.interfaces,
+        [fa01]: { ...sw.config.interfaces[fa01]!, shutdown },
+      };
+      return patch({ devices: { [sw.id]: { ...sw, config: { ...sw.config, interfaces } } } });
+    };
+    const mark = engine.log.lastId;
+
+    engine.applyPatch(withFa01(true));
+    engine.applyPatch(withFa01(false));
+
+    expect(linkEvents(engine.log.since(mark))).toEqual([
+      [pcLink.id, false],
+      [pcLink.id, true],
+    ]);
+  });
+
+  it('keeps a link down when its cable does not fit the ports', () => {
+    const { topology, pcLink } = lab();
+    const engine = engineFor(stacksOf({}));
+    const serialOnCopper: Link = { ...pcLink, cable: 'serial', dce: 'a' };
+    engine.load({ ...topology, links: { ...topology.links, [pcLink.id]: serialOnCopper } });
+
+    expect(linkEvents(trace(engine)).filter(([link]) => link === pcLink.id)).toEqual([]);
+  });
+
   it('drops a frame in flight when its link is deleted', () => {
     const { topology, pc, sw, pcLink } = lab();
     const engine = engineFor(stacksOf({ pc: [helloModule()], switch: [listenerModule] }));
