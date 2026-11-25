@@ -84,7 +84,10 @@ const FIELD_NAME = { ipv4: 'IPv4 address', gateway: 'gateway', dns: 'DNS server'
 const plural = (count: number, one: string, many = `${one}s`) =>
   `${count} ${count === 1 ? one : many}`;
 
-const endName = (end: PtLinkEnd) => [end.device, end.port].filter(Boolean).join(' ');
+/** "Switch0 FastEthernet0/1", or just the device when the file names no port. */
+const at = (device: string, port: string) => [device, port].filter(Boolean).join(' ');
+
+const endName = (end: PtLinkEnd) => at(end.device, end.port);
 
 function dropReason(reason: LinkDropReason): string {
   switch (reason.kind) {
@@ -142,7 +145,7 @@ export function summarizeReport(report: ImportReport, topology: Topology): Repor
         break;
       case 'port-approximated':
         add('approximated', {
-          label: `${name(entry.device)} ${entry.port}: fiber port imported as copper`,
+          label: `${at(name(entry.device), entry.port)}: fiber port imported as copper`,
         });
         break;
       case 'port-names-guessed':
@@ -156,7 +159,7 @@ export function summarizeReport(report: ImportReport, topology: Topology): Repor
       case 'cable-approximated': {
         const link = topology.links[entry.link];
         const ends = link
-          ? `${name(link.a.device)} ${link.a.port} ↔ ${name(link.b.device)} ${link.b.port}`
+          ? `${at(name(link.a.device), link.a.port)} ↔ ${at(name(link.b.device), link.b.port)}`
           : entry.link;
         add('approximated', {
           label: `${ends}: ${entry.ptCable} cable imported as ${CABLE_NAME[entry.cable]}`,
@@ -165,7 +168,7 @@ export function summarizeReport(report: ImportReport, topology: Topology): Repor
       }
       case 'port-skipped':
         add('skipped-settings', {
-          label: `${name(entry.device)} ${entry.port}: ${entry.ptType} port`,
+          label: `${at(name(entry.device), entry.port)}: ${entry.ptType} port`,
         });
         break;
       case 'value-ignored':
