@@ -72,6 +72,14 @@ export type MapOptions = {
   readonly replayConfig?: ReplayConfig;
 };
 
+/** The steps of `importPkt`, in order. */
+export type PktStage = 'decrypting' | 'decompressing' | 'mapping';
+
+export type ImportOptions = MapOptions & {
+  /** Called as each step starts. */
+  readonly onStage?: (stage: PktStage) => void;
+};
+
 export type PktImport = { readonly topology: Topology; readonly report: ImportReport };
 
 export type PktImportError =
@@ -79,10 +87,12 @@ export type PktImportError =
 
 export function importPkt(
   bytes: Uint8Array,
-  options?: MapOptions,
+  { onStage, ...options }: ImportOptions = {},
 ): Result<PktImport, PktImportError> {
-  const decrypted = decryptPkt(bytes);
+  onStage?.('decrypting');
+  const decrypted = decryptPkt(bytes, () => onStage?.('decompressing'));
   if (!decrypted.ok) return err({ kind: 'decrypt-failed', error: decrypted.error });
+  onStage?.('mapping');
   return mapPktXml(decrypted.xml, options);
 }
 

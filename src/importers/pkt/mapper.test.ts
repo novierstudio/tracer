@@ -650,6 +650,19 @@ describe('importPkt', () => {
     ]);
   });
 
+  it('announces each step as it starts', () => {
+    const stages: string[] = [];
+    importPkt(encryptPkt(networkXml([pc('PC1')])), {
+      ...options(),
+      onStage: (stage) => stages.push(stage),
+    });
+    expect(stages).toEqual(['decrypting', 'decompressing', 'mapping']);
+
+    stages.length = 0;
+    importPkt(new Uint8Array(64).fill(7), { onStage: (stage) => stages.push(stage) });
+    expect(stages).toEqual(['decrypting']);
+  });
+
   describe('Packet Tracer 7.1 EIGRP lab (links by device index)', () => {
     const eigrp = fixture('pt7.1-eigrp-lab.pkt');
 
