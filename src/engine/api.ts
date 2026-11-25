@@ -1,7 +1,11 @@
-import type { DeviceId, Topology } from '@/model';
+import type { DeviceId, Result, Topology } from '@/model';
 import type { SimTime } from './core/time';
 import type { SimEvent } from './events';
+import type { MacTableEntry } from './l2/switching';
+import type { DeviceUnavailable } from './module';
 import type { TopologyPatch } from './patch';
+
+export type { DeviceUnavailable, MacTableEntry };
 
 export type SimMode = 'realtime' | 'simulation';
 
@@ -26,6 +30,8 @@ export interface SimAPI {
   play(speed: number): void;
   pause(): void;
   runCommand(device: DeviceId, line: string): CliResult;
+  /** The addresses a switch has learned and not yet aged out, by VLAN then MAC. */
+  macTable(device: DeviceId): Result<MacTableEntry[], DeviceUnavailable>;
   /** Sets the one batch listener. Calling it again replaces the previous listener. */
   subscribe(listener: (batch: SimEventBatch) => void): void;
 }
