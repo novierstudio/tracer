@@ -1,7 +1,7 @@
-import type { ArpTableEntry, PingOptions, PingReply } from '@/engine/api';
+import type { ArpTableEntry, PingOptions, PingReply, TraceOptions, TraceProbe } from '@/engine/api';
 import type { DeviceId, Ipv4Address } from '@/model';
 
-export type { ArpTableEntry, PingOptions, PingReply };
+export type { ArpTableEntry, PingOptions, PingReply, TraceOptions, TraceProbe };
 
 /**
  * Everything the Command Prompt asks of the network, in the engine's own types. `engineBackend.ts`
@@ -11,7 +11,8 @@ export type { ArpTableEntry, PingOptions, PingReply };
 export interface HostBackend {
   /**
    * Sends `count` echo requests from `device`, calling `onReply` once per request as its answer
-   * arrives. Resolves after the last one, or soon after `signal` aborts.
+   * arrives. Resolves after the last one. Aborting `signal` stops the ping in the simulation and
+   * resolves soon after.
    */
   ping(
     device: DeviceId,
@@ -20,6 +21,18 @@ export interface HostBackend {
     onReply: (reply: PingReply) => void,
     signal: AbortSignal,
   ): Promise<void>;
+  /**
+   * Traces the route from `device` to `target`, calling `onProbe` once per probe as it settles.
+   * Resolves when the trace is done. Aborting `signal` stops it as it does a ping.
+   */
+  traceroute(
+    device: DeviceId,
+    target: Ipv4Address,
+    options: TraceOptions,
+    onProbe: (probe: TraceProbe) => void,
+    signal: AbortSignal,
+  ): Promise<void>;
   arpTable(device: DeviceId): Promise<ArpTableEntry[]>;
-  clearArp(device: DeviceId): Promise<void>;
+  /** Forgets `address`, or every learned address. Resolves with how many entries went. */
+  clearArp(device: DeviceId, address?: Ipv4Address): Promise<number>;
 }

@@ -1,4 +1,4 @@
-import type { HostBackend, PingReply } from './backend';
+import type { HostBackend, PingReply, TraceProbe } from './backend';
 import { HELP, parseCommand } from './commands';
 import {
   formatArp,
@@ -6,12 +6,16 @@ import {
   formatReply,
   pingHeader,
   pingSummary,
+  tracertHeader,
+  tracertLines,
   type HostDevice,
 } from './format';
 
 /** Where a running command writes. `signal` aborts on Ctrl+C. */
 export type ShellIo = {
   print(lines: readonly string[]): void;
+  /** Writes part of a line, or more. `\n` breaks lines. */
+  write(text: string): void;
   clear(): void;
   readonly signal: AbortSignal;
 };
@@ -25,6 +29,9 @@ export type ShellContext = { host(): HostView | undefined; backend: HostBackend 
 export type HostShell = (line: string, io: ShellIo) => Promise<void>;
 
 const PING_TIMEOUT_MS = 4000;
+
+/** Windows tracert sends 3 probes per hop. */
+const TRACERT_PROBES = 3;
 
 /** Every line ends with a blank one before the next prompt, as in cmd. */
 const block = (lines: readonly string[]) => (lines.at(-1) === '' ? lines : [...lines, '']);
@@ -53,9 +60,13 @@ export function hostShell({ host, backend }: ShellContext): HostShell {
           return io.print(formatIpconfig(device, connected, command.all));
         case 'arp-show':
           return io.print(formatArp(address?.address, await backend.arpTable(device.id)));
-        case 'arp-clear':
-          await backend.clearArp(device.id);
+        case 'arp-clear': {
+          const cleared = await backend.clearArp(device.id, command.address);
+          if (command.address && cleared === 0) {
+            return io.print(['The ARP entry deletion failed: Element not found.', '']);
+          }
           return io.print(['']);
+        }
         case 'ping': {
           if (!address) return io.print(['PING: transmit failed. General failure.', '']);
           io.print(pingHeader(command.target));
@@ -73,6 +84,22 @@ export function hostShell({ host, backend }: ShellContext): HostShell {
           ]);
           io.print(pingSummary(command.target, replies));
           return io.print(io.signal.aborted ? ['Control-C', '^C', ''] : ['']);
+        }
+        case 'tracert': {
+          if (!address) return io.print(['Unable to contact IP driver. General failure.', '']);
+          const { target, maxHops, timeoutMs } = command;
+          io.print(tracertHeader(target, maxHops));
+          const lines = tracertLines(TRACERT_PROBES);
+          const onProbe = (probe: TraceProbe) => {
+            if (!io.signal.aborted) io.write(lines.next(probe));
+          };
+          const options = { maxHops, probesPerHop: TRACERT_PROBES, timeoutMs };
+          await Promise.race([
+            backend.traceroute(device.id, target, options, onProbe, io.signal),
+            aborted(io.signal),
+          ]);
+          io.write(lines.close());
+          return io.print(io.signal.aborted ? ['^C', ''] : ['', 'Trace complete.', '']);
         }
       }
     } catch (error) {

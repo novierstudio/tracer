@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { HELP, parseCommand, PING_USAGE } from './commands';
+import { HELP, parseCommand, PING_USAGE, TRACERT_USAGE } from './commands';
 
 const parsed = (line: string) => {
   const result = parseCommand(line);
@@ -21,8 +21,31 @@ describe('parseCommand', () => {
     expect(parsed('ping /n 1 10.0.0.2')).toMatchObject({ count: 1 });
   });
 
-  it('has no -t, since the engine cannot stop a ping yet', () => {
-    expect(parsed('ping -t 10.0.0.2')).toEqual({ error: ['Bad option -t.', ...PING_USAGE] });
+  it('pings until stopped with -t, whatever -n says', () => {
+    expect(parsed('ping -t 10.0.0.2')).toEqual({
+      kind: 'ping',
+      target: '10.0.0.2',
+      count: Infinity,
+    });
+    expect(parsed('ping 10.0.0.2 -n 3 /T')).toMatchObject({ count: Infinity });
+  });
+
+  it('reads tracert with its -d, -h and -w options', () => {
+    expect(parsed('tracert 10.0.0.2')).toEqual({
+      kind: 'tracert',
+      target: '10.0.0.2',
+      maxHops: 30,
+      timeoutMs: 4000,
+    });
+    expect(parsed('TRACERT -d -h 5 /w 500 10.0.0.2')).toMatchObject({ maxHops: 5, timeoutMs: 500 });
+    expect(parsed('tracert')).toEqual({ error: TRACERT_USAGE });
+    expect(parsed('tracert -h 0 10.0.0.2')).toEqual({
+      error: ['Bad value for option -h, valid range is from 1 to 255.'],
+    });
+    expect(parsed('tracert -x 10.0.0.2')).toEqual({ error: TRACERT_USAGE });
+    expect(parsed('tracert server.lan')).toEqual({
+      error: ['Unable to resolve target system name server.lan.'],
+    });
   });
 
   it('rejects bad ping arguments with the Windows wording', () => {
@@ -59,6 +82,10 @@ describe('parseCommand', () => {
     expect(parsed('arp -a')).toEqual({ kind: 'arp-show' });
     expect(parsed('arp -d')).toEqual({ kind: 'arp-clear' });
     expect(parsed('arp -d *')).toEqual({ kind: 'arp-clear' });
+    expect(parsed('arp -d 10.0.0.2')).toEqual({ kind: 'arp-clear', address: '10.0.0.2' });
+    expect(parsed('arp -d 10.0.0.256')).toMatchObject({
+      error: expect.arrayContaining(['ARP -a']),
+    });
     expect(parsed('arp')).toMatchObject({ error: expect.arrayContaining(['ARP -a']) });
   });
 

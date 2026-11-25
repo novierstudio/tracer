@@ -5,7 +5,7 @@ import { hostPrompts } from './registry';
 const XtermView = lazy(() => import('@/features/terminal/XtermView'));
 
 const HINT =
-  'A host command prompt. Type help for the commands. Up and Down recall earlier lines, Ctrl+C stops a running ping, and Shift+Tab leaves the terminal.';
+  'A host command prompt. Type help for the commands. Up and Down recall earlier lines, Ctrl+C stops a running ping or tracert, and Shift+Tab leaves the terminal.';
 
 /** A PC or server's Command Prompt. Every view of one host shows the same session. */
 export function HostPrompt({ device, autoFocus }: { device: DeviceId; autoFocus: boolean }) {

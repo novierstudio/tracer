@@ -45,6 +45,9 @@ export function createHostTty(shell: HostShell): HostTty {
       print: (lines) => {
         if (job === controller) write(lines.map((l) => `${l}\r\n`).join(''));
       },
+      write: (text) => {
+        if (job === controller) write(text.replaceAll('\n', '\r\n'));
+      },
       clear: () => {
         if (job !== controller) return;
         transcript = '';

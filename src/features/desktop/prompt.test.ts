@@ -3,7 +3,7 @@ import { Terminal } from '@xterm/headless';
 import { describe, expect, it, vi } from 'vitest';
 import { buildOffice } from '@/features/inspector/testing';
 import { Ipv4Address, type DeviceId } from '@/model';
-import type { HostBackend, PingReply } from './backend';
+import type { HostBackend, PingReply, TraceProbe } from './backend';
 import { formatReply, isHostDevice } from './format';
 import { hostShell } from './shell';
 import { createHostTty, PROMPT } from './tty';
@@ -21,12 +21,24 @@ const reply = (timeMs: number): PingReply => ({
   ttl: 255,
 });
 
-/** Answers each echo request from `script` in turn, a tick apart; after the script, it hangs. */
-function scripted(script: readonly PingReply[]) {
+type ScriptOptions = { trace: readonly TraceProbe[]; hang: boolean; learned: number };
+
+/**
+ * Answers each echo request from `script` in turn, a tick apart; after the script, it hangs. A
+ * traceroute plays `trace` the same way, then is done or, with `hang`, waits for Ctrl+C. The ARP
+ * cache holds `learned` entries.
+ */
+function scripted(
+  script: readonly PingReply[],
+  { trace = [], hang = false, learned = 0 }: Partial<ScriptOptions> = {},
+) {
   const calls: { device: DeviceId; target: string; count: number }[] = [];
+  const cleared: (string | undefined)[] = [];
+  const signals: AbortSignal[] = [];
   const backend: HostBackend = {
     async ping(device, target, { count }, onReply, signal) {
       calls.push({ device, target, count });
+      signals.push(signal);
       for (let sent = 0; sent < count; sent++) {
         const next = script[sent];
         if (!next) return new Promise<void>(() => {});
@@ -35,10 +47,22 @@ function scripted(script: readonly PingReply[]) {
         onReply(next);
       }
     },
+    async traceroute(_device, _target, _options, onProbe, signal) {
+      signals.push(signal);
+      for (const probe of trace) {
+        await new Promise((resolve) => setTimeout(resolve, 1));
+        if (signal.aborted) return;
+        onProbe(probe);
+      }
+      if (hang) return new Promise<void>(() => {});
+    },
     arpTable: async () => [],
-    clearArp: async () => {},
+    clearArp: async (_device, address) => {
+      cleared.push(address);
+      return address ? Math.min(learned, 1) : learned;
+    },
   };
-  return { backend, calls };
+  return { backend, calls, cleared, signals };
 }
 
 /** PC1's prompt in the office lab, drawn by a real terminal. */
@@ -160,6 +184,109 @@ describe('the Command Prompt', () => {
     ]);
   });
 
+  it('pings until Ctrl+C with -t, then stops the ping and prints the summary', async () => {
+    const { backend, calls, signals } = scripted([reply(1), reply(0), reply(0)]);
+    const { screen, type, idle } = await prompt(backend);
+    type('ping -t 192.168.1.1\r');
+    await vi.waitFor(async () =>
+      expect((await screen()).filter((r) => r.startsWith('Reply'))).toHaveLength(3),
+    );
+    type('\x03');
+    await idle();
+    expect(calls).toEqual([{ device: 'dev_PC1', target: '192.168.1.1', count: Infinity }]);
+    expect(signals.map((signal) => signal.aborted)).toEqual([true]);
+    expect((await screen()).slice(-9, -5)).toEqual([
+      '',
+      'Ping statistics for 192.168.1.1:',
+      '    Packets: Sent = 3, Received = 3, Lost = 0 (0% loss),',
+      'Approximate round trip times in milli-seconds:',
+    ]);
+  });
+
+  it('traces the route a column at a time, in Windows format', async () => {
+    const hop = (n: number, from: string, times: (number | undefined)[]): TraceProbe[] =>
+      times.map((timeMs, i) =>
+        timeMs === undefined
+          ? { kind: 'timeout', hop: n, probe: i + 1 }
+          : { kind: 'ttl-expired', hop: n, probe: i + 1, from: ip(from), timeMs },
+      );
+    const trace: TraceProbe[] = [
+      ...hop(1, '192.168.1.1', [0, 0, 1]),
+      ...hop(2, '10.0.0.2', [undefined, undefined, undefined]),
+      ...hop(3, '10.0.0.6', [12, undefined, 8]),
+      ...[1, 2, 3].map((probe): TraceProbe => ({
+        kind: 'reply',
+        hop: 4,
+        probe,
+        from: ip('192.168.2.10'),
+        timeMs: 16,
+        ttl: 125,
+      })),
+    ];
+    const { run } = await prompt(scripted([], { trace }).backend);
+    expect(await run('tracert 192.168.2.10')).toEqual([
+      '',
+      'Tracing route to 192.168.2.10 over a maximum of 30 hops',
+      '',
+      '  1    <1 ms    <1 ms     1 ms  192.168.1.1',
+      '  2     *        *        *     Request timed out.',
+      '  3    12 ms     *        8 ms  10.0.0.6',
+      '  4    16 ms    16 ms    16 ms  192.168.2.10',
+      '',
+      'Trace complete.',
+      '',
+    ]);
+  });
+
+  it("ends a trace at a router's Destination Unreachable report", async () => {
+    const trace: TraceProbe[] = [
+      { kind: 'ttl-expired', hop: 1, probe: 1, from: ip('192.168.1.1'), timeMs: 0 },
+      { kind: 'ttl-expired', hop: 1, probe: 2, from: ip('192.168.1.1'), timeMs: 0 },
+      { kind: 'ttl-expired', hop: 1, probe: 3, from: ip('192.168.1.1'), timeMs: 0 },
+      {
+        kind: 'unreachable',
+        hop: 2,
+        probe: 1,
+        from: ip('192.168.1.1'),
+        code: 'network',
+        timeMs: 0,
+      },
+    ];
+    const { run } = await prompt(scripted([], { trace }).backend);
+    expect((await run('tracert -h 5 10.99.0.1')).slice(1, -3)).toEqual([
+      'Tracing route to 10.99.0.1 over a maximum of 5 hops',
+      '',
+      '  1    <1 ms    <1 ms    <1 ms  192.168.1.1',
+      '  2  192.168.1.1  reports: Destination net unreachable.',
+    ]);
+  });
+
+  it('stops a trace on Ctrl+C mid-line', async () => {
+    const trace: TraceProbe[] = [{ kind: 'timeout', hop: 1, probe: 1 }];
+    const { backend, signals } = scripted([], { trace, hang: true });
+    const { screen, type, idle } = await prompt(backend);
+    type('tracert 10.99.0.1\r');
+    await vi.waitFor(async () => expect((await screen()).at(-1)).toBe('  1     *'));
+    type('\x03');
+    await idle();
+    expect(signals.map((signal) => signal.aborted)).toEqual([true]);
+    expect((await screen()).slice(-4)).toEqual(['  1     *', '^C', '', PROMPT]);
+  });
+
+  it('clears the ARP cache, or one address in it, with arp -d', async () => {
+    const { backend, cleared } = scripted([], { learned: 2 });
+    const { run } = await prompt(backend);
+    expect(await run('arp -d')).toEqual(['']);
+    expect(await run('arp -d 192.168.1.1')).toEqual(['']);
+    expect(cleared).toEqual([undefined, '192.168.1.1']);
+
+    const { run: runEmpty } = await prompt(scripted([]).backend);
+    expect(await runEmpty('arp -d 192.168.1.1')).toEqual([
+      'The ARP entry deletion failed: Element not found.',
+      '',
+    ]);
+  });
+
   it('recalls earlier lines with Up', async () => {
     const { run, type, screen, tty } = await prompt(scripted([]).backend);
     await run('help');
@@ -186,8 +313,9 @@ describe('the Command Prompt', () => {
   it('prints what the backend cannot do', async () => {
     const failing: HostBackend = {
       ping: () => Promise.reject(new Error('PING: no engine')),
+      traceroute: () => Promise.reject(new Error('TRACERT: no engine')),
       arpTable: () => Promise.reject(new Error('ARP: no engine')),
-      clearArp: async () => {},
+      clearArp: async () => 0,
     };
     const { run } = await prompt(failing);
     expect(await run('arp -a')).toEqual(['ARP: no engine', '']);
