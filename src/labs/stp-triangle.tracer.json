@@ -1529,7 +1529,9 @@
         "x": 528,
         "y": -16
       },
-      "text": "SW1 has bridge priority 4096, lower than the default 32768, so it is the root bridge."
+      "text": "SW1 has bridge priority 4096, lower than the default 32768, so it is the root bridge.",
+      "width": 192,
+      "color": "amber"
     },
     "ann_stloop": {
       "id": "ann_stloop",
@@ -1538,7 +1540,9 @@
         "x": 328,
         "y": 288
       },
-      "text": "A loop would carry broadcasts forever. Spanning tree blocks one port on this link to break it."
+      "text": "A loop would carry broadcasts forever. Spanning tree blocks one port on this link to break it.",
+      "width": 192,
+      "color": "amber"
     }
   }
 }

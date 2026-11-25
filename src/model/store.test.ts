@@ -114,7 +114,7 @@ describe('editor store', () => {
     editor().undo();
 
     expect(editor().topology).toEqual(beforeMove);
-    expect(editor().selection).toEqual({ devices: [server.id], links: [] });
+    expect(editor().selection).toEqual({ devices: [server.id], links: [], annotations: [] });
   });
 
   it('drops removed devices and their links from the selection', () => {
@@ -131,7 +131,7 @@ describe('editor store', () => {
 
     editor().removeDevices([pc.id]);
 
-    expect(editor().selection).toEqual({ devices: [server.id], links: [] });
+    expect(editor().selection).toEqual({ devices: [server.id], links: [], annotations: [] });
   });
 
   it('drops a device from the selection when undo removes it', () => {
@@ -142,7 +142,7 @@ describe('editor store', () => {
 
     editor().undo();
 
-    expect(editor().selection).toEqual({ devices: [], links: [] });
+    expect(editor().selection).toEqual({ devices: [], links: [], annotations: [] });
   });
 
   it('records a whole drag as one undo step', () => {
@@ -204,7 +204,7 @@ describe('editor store', () => {
     editor().undo();
 
     expect(editor().topology).toEqual(fresh);
-    expect(editor().selection).toEqual({ devices: [], links: [] });
+    expect(editor().selection).toEqual({ devices: [], links: [], annotations: [] });
   });
 
   it('undoes power, cable and lab name changes one step each', () => {

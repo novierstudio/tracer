@@ -560,7 +560,9 @@
         "x": 544,
         "y": -16
       },
-      "text": "Both PCs are in 192.168.1.0/24. The switch forwards frames by MAC address, so no router is needed."
+      "text": "Both PCs are in 192.168.1.0/24. The switch forwards frames by MAC address, so no router is needed.",
+      "width": 192,
+      "color": "amber"
     }
   }
 }

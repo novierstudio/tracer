@@ -3,6 +3,7 @@ import { createStore, type StoreApi } from 'zustand/vanilla';
 import * as commands from './commands';
 import type {
   AnnotationMove,
+  AnnotationSpec,
   CableChange,
   CommandResult,
   ConfigUpdate,
@@ -19,12 +20,13 @@ import {
   type LinkId,
 } from './ids';
 import { ok, type Result } from './result';
-import { emptyTopology, type Point, type Topology, type TopologyError } from './topology';
+import { emptyTopology, type Annotation, type Topology, type TopologyError } from './topology';
 import type { Hostname } from './values';
 
 export const HISTORY_LIMIT = 200;
 
-export type Selection = { devices: DeviceId[]; links: LinkId[] };
+/** What is selected on the canvas. The inspector shows it. */
+export type Selection = { devices: DeviceId[]; links: LinkId[]; annotations: AnnotationId[] };
 
 export type EditorState = {
   topology: Topology;
@@ -41,11 +43,13 @@ export type EditorState = {
   renameLab(name: string): void;
   /** Ids, MACs and names must already be fresh: the batch goes in as given, or not at all. */
   addElements(elements: Elements): Result<void, TopologyError>;
-  addNote(note: { position: Point; text: string }): Result<AnnotationId, TopologyError>;
-  editNote(edit: { annotation: AnnotationId; text: string }): Result<void, TopologyError>;
+  addAnnotation(spec: AnnotationSpec): Result<AnnotationId, TopologyError>;
+  /** Replaces the annotation with the same id. An identical one adds no undo step. */
+  updateAnnotation(annotation: Annotation): Result<void, TopologyError>;
   moveAnnotations(moves: readonly AnnotationMove[]): void;
   removeAnnotations(ids: readonly AnnotationId[]): void;
-  select(selection: Selection): void;
+  /** Selects exactly what is given. A kind left out has nothing selected. */
+  select(selection: Partial<Selection>): void;
   beginGesture(): void;
   endGesture(): void;
   undo(): void;
@@ -59,14 +63,17 @@ export type EditorHistory = TemporalState<History>;
 
 export type EditorStore = StoreApi<EditorState> & { temporal: StoreApi<EditorHistory> };
 
-const NOTHING_SELECTED: Selection = { devices: [], links: [] };
+const NOTHING_SELECTED: Selection = { devices: [], links: [], annotations: [] };
 
 function pruneSelection(selection: Selection, topology: Topology): Selection {
   const devices = selection.devices.filter((id) => id in topology.devices);
   const links = selection.links.filter((id) => id in topology.links);
+  const annotations = selection.annotations.filter((id) => id in topology.annotations);
   const unchanged =
-    devices.length === selection.devices.length && links.length === selection.links.length;
-  return unchanged ? selection : { devices, links };
+    devices.length === selection.devices.length &&
+    links.length === selection.links.length &&
+    annotations.length === selection.annotations.length;
+  return unchanged ? selection : { devices, links, annotations };
 }
 
 export function createEditorStore({
@@ -132,20 +139,22 @@ export function createEditorStore({
           setLinkCable: (change) => apply(commands.setLinkCable(get().topology, change)),
           renameLab: (name) => commit(commands.renameLab(get().topology, { name, now: now() })),
           addElements: (elements) => apply(commands.addElements(get().topology, elements)),
-          addNote: ({ position, text }) => {
-            const { topology } = get();
-            let id = ids.annotationId();
-            while (id in topology.annotations) id = ids.annotationId();
-            const result = commands.addAnnotation(topology, { id, kind: 'note', position, text });
+          addAnnotation: (spec) => {
+            const annotation = commands.createAnnotation(spec, { ids, topology: get().topology });
+            const result = commands.addAnnotation(get().topology, annotation);
             if (!result.ok) return result;
             commit(result.value);
-            return ok(id);
+            return ok(annotation.id);
           },
-          editNote: (edit) => apply(commands.editNote(get().topology, edit)),
+          updateAnnotation: (annotation) =>
+            apply(commands.updateAnnotation(get().topology, annotation)),
           moveAnnotations: (moves) => commit(commands.moveAnnotations(get().topology, moves)),
           removeAnnotations: (annotationIds) =>
             commit(commands.removeAnnotations(get().topology, annotationIds)),
-          select: (selection) => set({ selection: pruneSelection(selection, get().topology) }),
+          select: (selection) =>
+            set({
+              selection: pruneSelection({ ...NOTHING_SELECTED, ...selection }, get().topology),
+            }),
           beginGesture: () => {
             if (gestureStart) return;
             gestureStart = get().topology;

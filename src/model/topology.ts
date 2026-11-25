@@ -303,10 +303,71 @@ export const Link = z.discriminatedUnion('cable', [
 export type Link = z.infer<typeof Link>;
 export type Cable = Link['cable'];
 
+export const Size = z.object({ width: z.number().positive(), height: z.number().positive() });
+export type Size = z.infer<typeof Size>;
+
+/** The palette annotations draw from. The canvas maps each name to a colour token per theme. */
+export const ANNOTATION_COLORS = [
+  'slate',
+  'blue',
+  'teal',
+  'green',
+  'amber',
+  'red',
+  'purple',
+] as const;
+export const AnnotationColor = z.enum(ANNOTATION_COLORS);
+export type AnnotationColor = z.infer<typeof AnnotationColor>;
+
+export const TEXT_SIZES = ['small', 'medium', 'large'] as const;
+export type TextSize = (typeof TEXT_SIZES)[number];
+
+export const SHAPES = ['rectangle', 'ellipse'] as const;
+export type Shape = (typeof SHAPES)[number];
+
+/** A note card's width before anyone resizes it. Its height grows with the text. */
+export const NOTE_WIDTH = 192;
+
+// Every annotation is placed by its top-left corner. Fields added after notes shipped have
+// defaults, so files saved with notes only still load.
+const annotationFields = { id: AnnotationId, position: Point };
+
 export const Annotation = z.discriminatedUnion('kind', [
-  z.object({ id: AnnotationId, kind: z.literal('note'), position: Point, text: z.string() }),
+  z.object({
+    ...annotationFields,
+    kind: z.literal('note'),
+    text: z.string(),
+    width: z.number().positive().default(NOTE_WIDTH),
+    color: AnnotationColor.default('amber'),
+  }),
+  /** Free text. Without a width it is as wide as its longest line. */
+  z.object({
+    ...annotationFields,
+    kind: z.literal('text'),
+    text: z.string(),
+    textSize: z.enum(TEXT_SIZES).default('medium'),
+    width: z.number().positive().optional(),
+    color: AnnotationColor.default('slate'),
+  }),
+  /** A labelled, tinted region drawn behind devices and links, such as "Building A". */
+  z.object({
+    ...annotationFields,
+    kind: z.literal('area'),
+    label: z.string(),
+    size: Size,
+    color: AnnotationColor.default('blue'),
+  }),
+  /** An outline with no fill. */
+  z.object({
+    ...annotationFields,
+    kind: z.literal('shape'),
+    shape: z.enum(SHAPES),
+    size: Size,
+    color: AnnotationColor.default('slate'),
+  }),
 ]);
 export type Annotation = z.infer<typeof Annotation>;
+export type AnnotationKind = Annotation['kind'];
 
 const TopologyShape = z.object({
   version: z.literal(TOPOLOGY_VERSION),

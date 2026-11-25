@@ -1322,7 +1322,9 @@
         "x": 136,
         "y": 512
       },
-      "text": "LAN A: 192.168.1.0/24. Default gateway 192.168.1.1, R1’s Gi0/0."
+      "text": "LAN A: 192.168.1.0/24. Default gateway 192.168.1.1, R1’s Gi0/0.",
+      "width": 192,
+      "color": "amber"
     },
     "ann_tlrlanB": {
       "id": "ann_tlrlanB",
@@ -1331,7 +1333,9 @@
         "x": 648,
         "y": 512
       },
-      "text": "LAN B: 192.168.2.0/24. Default gateway 192.168.2.1, R1’s Gi0/1."
+      "text": "LAN B: 192.168.2.0/24. Default gateway 192.168.2.1, R1’s Gi0/1.",
+      "width": 192,
+      "color": "amber"
     }
   }
 }

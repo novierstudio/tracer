@@ -17,6 +17,7 @@ import {
   Ipv4Address,
   Ipv4Cidr,
   LinkId,
+  NOTE_WIDTH,
   PortId,
   updateConfig,
   type Device,
@@ -102,8 +103,9 @@ function labBuilder(id: string) {
     },
 
     note(name: string, x: number, y: number, text: string) {
-      const annotation = { id: AnnotationId.parse(`ann_${tag}${name}`), kind: 'note' as const };
-      topology = unwrap(addAnnotation(topology, { ...annotation, position: { x, y }, text }));
+      const id = AnnotationId.parse(`ann_${tag}${name}`);
+      const note = { id, kind: 'note' as const, position: { x, y }, text };
+      topology = unwrap(addAnnotation(topology, { ...note, width: NOTE_WIDTH, color: 'amber' }));
     },
 
     get topology(): Topology {
