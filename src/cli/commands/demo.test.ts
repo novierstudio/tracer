@@ -7,7 +7,7 @@ import { DEFAULT_HOSTNAME, demoTree, type DemoContext, type InterfaceAddress } f
 
 const g00 = 'GigabitEthernet0/0' as InterfaceId;
 const IF: Mode = { kind: 'interface-config', interfaces: [g00] };
-const LINE: Mode = { kind: 'line-config', line: 'console 0' };
+const LINE: Mode = { kind: 'line-config', line: { kind: 'console' } };
 const ROUTER: Mode = { kind: 'router-config', protocol: 'rip' };
 
 /** A terminal-like driver: echo-free, returns the lines IOS would print. */

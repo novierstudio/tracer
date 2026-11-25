@@ -6,7 +6,7 @@ const g00 = 'GigabitEthernet0/0' as InterfaceId;
 const g01 = 'GigabitEthernet0/1' as InterfaceId;
 const IF: Mode = { kind: 'interface-config', interfaces: [g00] };
 const IF_RANGE: Mode = { kind: 'interface-config', interfaces: [g00, g01] };
-const LINE: Mode = { kind: 'line-config', line: 'console 0' };
+const LINE: Mode = { kind: 'line-config', line: { kind: 'console' } };
 const ROUTER: Mode = { kind: 'router-config', protocol: 'rip' };
 
 describe('modes', () => {
