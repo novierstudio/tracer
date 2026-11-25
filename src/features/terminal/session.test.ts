@@ -7,6 +7,7 @@ import { diffTopology } from '@/engine/patch';
 import { createSimService } from '@/engine/service';
 import { STACKS } from '@/engine/stacks';
 import { ip, labBuilder } from '@/engine/testing';
+import type { OutputStream } from '@/cli';
 import { createIdSource } from '@/model';
 import { createEditorStore } from '@/model/store';
 import { createConsoleRegistry } from './registry';
@@ -55,6 +56,7 @@ function lab() {
     macTable: async (device) => sim.macTable(device),
     portStates: async (device) => sim.portStates(device),
     now: () => engine.now,
+    ping: async (...args) => sim.ping(...args),
   };
   const consoles = createConsoleRegistry(store, async () => queries);
   /** Pings and runs the simulation until the ping is over. */
@@ -65,7 +67,14 @@ function lab() {
     });
     while (!done && engine.nextTime() !== undefined) engine.step();
   };
-  return { consoles, r1: consoles.get(r1)!, sw1: consoles.get(sw1)!, pc1, ping };
+  /** Runs the simulation until `tty` shows its prompt again, as a playing simulation would. */
+  const runUntilPrompt = async (tty: Tty, prompt: string) => {
+    for (let i = 0; i < 10_000 && !tty.transcript.endsWith(prompt); i++) {
+      if (engine.nextTime() === undefined) await new Promise(setImmediate);
+      else engine.step();
+    }
+  };
+  return { consoles, r1: consoles.get(r1)!, sw1: consoles.get(sw1)!, pc1, ping, runUntilPrompt };
 }
 
 /** Types lines into a console, one at a time, waiting for each prompt to come back. */
@@ -76,35 +85,39 @@ async function type(tty: Tty, lines: readonly string[]) {
   }
 }
 
+const R1_CONFIG = [
+  'enable',
+  'configure terminal',
+  'interface g0/0',
+  'no shutdown',
+  'interface g0/0.10',
+  'encapsulation dot1Q 10',
+  'ip address 192.168.10.1 255.255.255.0',
+  'interface g0/0.20',
+  'encapsulation dot1Q 20',
+  'ip address 192.168.20.1 255.255.255.0',
+  'end',
+];
+
+const SW1_CONFIG = [
+  'enable',
+  'configure terminal',
+  'interface f0/1',
+  'switchport mode access',
+  'switchport access vlan 10',
+  'interface f0/2',
+  'switchport mode access',
+  'switchport access vlan 20',
+  'interface g0/1',
+  'switchport mode trunk',
+  'end',
+];
+
 describe('a console reading live state', () => {
   it('builds router-on-a-stick from the CLI and shows the routes and MACs it uses', async () => {
     const { r1, sw1, pc1, ping } = lab();
-    await type(r1, [
-      'enable',
-      'configure terminal',
-      'interface g0/0',
-      'no shutdown',
-      'interface g0/0.10',
-      'encapsulation dot1Q 10',
-      'ip address 192.168.10.1 255.255.255.0',
-      'interface g0/0.20',
-      'encapsulation dot1Q 20',
-      'ip address 192.168.20.1 255.255.255.0',
-      'end',
-    ]);
-    await type(sw1, [
-      'enable',
-      'configure terminal',
-      'interface f0/1',
-      'switchport mode access',
-      'switchport access vlan 10',
-      'interface f0/2',
-      'switchport mode access',
-      'switchport access vlan 20',
-      'interface g0/1',
-      'switchport mode trunk',
-      'end',
-    ]);
+    await type(r1, R1_CONFIG);
+    await type(sw1, SW1_CONFIG);
     ping(pc1, '192.168.20.10');
 
     await type(r1, ['show ip route']);
@@ -132,6 +145,35 @@ describe('a console reading live state', () => {
       ['10', expect.any(String), 'DYNAMIC', 'Gi0/1'],
       ['20', expect.any(String), 'DYNAMIC', 'Fa0/2'],
       ['20', expect.any(String), 'DYNAMIC', 'Gi0/1'],
+    ]);
+  });
+
+  it('pings from the router, printing a mark per echo as the simulation settles it', async () => {
+    const { r1, sw1, runUntilPrompt } = lab();
+    await type(r1, R1_CONFIG);
+    await type(sw1, SW1_CONFIG);
+
+    r1.input('ping 192.168.20.10\r', SIZE);
+    await runUntilPrompt(r1, '\r\nR1#');
+    // R1 has no route to 192.168.30.0/24, so each echo times out, as on IOS.
+    r1.input('ping 192.168.30.10 repeat 2 timeout 1\r', SIZE);
+    await runUntilPrompt(r1, '\r\nR1#');
+
+    const shown = await rows(r1);
+    expect(shown.slice(shown.indexOf('R1#ping 192.168.20.10'))).toEqual([
+      'R1#ping 192.168.20.10',
+      'Type escape sequence to abort.',
+      'Sending 5, 100-byte ICMP Echos to 192.168.20.10, timeout is 2 seconds:',
+      '!!!!!',
+      expect.stringMatching(
+        /^Success rate is 100 percent \(5\/5\), round-trip min\/avg\/max = \d+\/\d+\/\d+ ms$/,
+      ),
+      'R1#ping 192.168.30.10 repeat 2 timeout 1',
+      'Type escape sequence to abort.',
+      'Sending 2, 100-byte ICMP Echos to 192.168.30.10, timeout is 1 seconds:',
+      '..',
+      'Success rate is 0 percent (0/2)',
+      'R1#',
     ]);
   });
 
@@ -196,5 +238,43 @@ describe('a tty waiting on output', () => {
       'ran next',
       '>',
     ]);
+  });
+
+  it.each([
+    ['Ctrl+C', '\x03'],
+    ['Ctrl+Shift+6', '\x1e'],
+  ])('writes a stream as it arrives, and %s aborts it', async (_name, key) => {
+    let write: (text: string) => void = () => {};
+    let finish: () => void = () => {};
+    const stream: OutputStream = {
+      start: (next) => {
+        write = next;
+        return new Promise<void>((resolve) => (finish = resolve));
+      },
+      abort: () => {
+        write('\naborted\n');
+        finish();
+      },
+    };
+    const session = {
+      prompt: '> ',
+      masked: false,
+      run: (line: string) => (line === 'ping' ? stream : [`ran ${line}`]),
+      help: () => [],
+      complete: () => ({ line: undefined, candidates: [] }),
+      end: () => [],
+    };
+    const tty = createTty(session);
+
+    tty.input('ping\r', SIZE);
+    write('head\n');
+    write('!');
+    write('!');
+    tty.input('next\r', SIZE);
+    expect(await rows(tty)).toEqual(['> ping', 'head', '!!']);
+
+    tty.input(key, SIZE);
+    await vi.waitFor(async () => expect((await rows(tty)).at(-1)).toBe('>'));
+    expect(await rows(tty)).toEqual(['> ping', 'head', '!!', 'aborted', '> next', 'ran next', '>']);
   });
 });
