@@ -1,4 +1,4 @@
-import type { TerminalSession } from './session';
+import type { Reply, TerminalSession } from './session';
 
 /**
  * The line discipline between xterm and a CLI session: it turns raw terminal input into line
@@ -25,7 +25,11 @@ type Action =
 
 export type Key = { readonly kind: 'text'; readonly text: string } | { readonly kind: Action };
 
-export type Input = Key | { readonly kind: 'resize'; readonly cols: number; readonly rows: number };
+export type Input =
+  | Key
+  | { readonly kind: 'resize'; readonly cols: number; readonly rows: number }
+  /** The output a line was waiting on has arrived. */
+  | { readonly kind: 'output'; readonly lines: readonly string[] };
 
 export interface LineState {
   readonly line: string;
@@ -42,6 +46,11 @@ export interface LineState {
 export interface Step {
   readonly state: LineState;
   readonly out: string;
+  /**
+   * Output the session is still producing, such as a show command waiting on the simulation.
+   * Hold later keys, and send the lines back as an `output` input when they arrive.
+   */
+  readonly pending?: Promise<readonly string[]>;
 }
 
 const HISTORY_SIZE = 50;
@@ -246,26 +255,23 @@ function remember(history: readonly string[], line: string): readonly string[] {
   return [...history, line].slice(-HISTORY_SIZE);
 }
 
-/** Runs the line, or ends config mode, and starts a fresh line after its output. */
-function submit(
-  session: TerminalSession,
-  state: LineState,
-  echo: string,
-  run: () => readonly string[],
-): Step {
-  const head = leave(session, state, echo);
+/** Writes `head`, then the reply and a fresh prompt, or leaves the reply pending. */
+function respond(session: TerminalSession, state: LineState, head: string, reply: Reply): Step {
   const cleared = { ...state, line: '', cursor: 0, recall: undefined };
-  const next = show(session, cleared, run());
+  if (reply instanceof Promise) return { state: cleared, out: head, pending: reply };
+  const next = show(session, cleared, reply);
   return { state: next.state, out: head + next.out };
+}
+
+/** Runs the line, or ends config mode, and starts a fresh line after its output. */
+function submit(session: TerminalSession, state: LineState, echo: string, run: () => Reply): Step {
+  return respond(session, state, leave(session, state, echo), run());
 }
 
 /** A password line: nothing echoes, only Backspace edits, `?` is a character, and no history. */
 function secret(session: TerminalSession, state: LineState, key: Key): Step {
   const typed = (line: string) => ({ state: { ...state, line, cursor: line.length }, out: '' });
-  const finish = (echo: string, output: readonly string[]) => {
-    const next = show(session, { ...state, line: '', cursor: 0, recall: undefined }, output);
-    return { state: next.state, out: `${echo}\r\n${next.out}` };
-  };
+  const finish = (echo: string, reply: Reply) => respond(session, state, `${echo}\r\n`, reply);
   switch (key.kind) {
     case 'text':
       return typed(state.line + key.text);
@@ -286,6 +292,7 @@ export function reduce(state: LineState, input: Input, session: TerminalSession)
   if (input.kind === 'resize') {
     return { state: { ...state, cols: input.cols, rows: input.rows }, out: '' };
   }
+  if (input.kind === 'output') return show(session, state, input.lines);
   if (state.more) return page(session, state, input);
   if (session.masked) return secret(session, state, input);
   const { line, cursor } = state;
@@ -348,13 +355,22 @@ export function reduce(state: LineState, input: Input, session: TerminalSession)
   }
 }
 
-/** Decodes a chunk of terminal input and applies every key in order. */
-export function feed(state: LineState, data: string, session: TerminalSession): Step {
+/**
+ * Applies terminal input in order, decoding a chunk of text first. It stops after a step whose
+ * output is pending, and `rest` holds the input after it.
+ */
+export function feed(
+  state: LineState,
+  data: string | readonly Input[],
+  session: TerminalSession,
+): Step & { readonly rest: readonly Input[] } {
+  const inputs = typeof data === 'string' ? decode(data) : data;
   let out = '';
-  for (const key of decode(data)) {
-    const step = reduce(state, key, session);
+  for (const [i, input] of inputs.entries()) {
+    const step = reduce(state, input, session);
     state = step.state;
     out += step.out;
+    if (step.pending) return { state, out, pending: step.pending, rest: inputs.slice(i + 1) };
   }
-  return { state, out };
+  return { state, out, rest: [] };
 }
