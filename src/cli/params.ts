@@ -1,13 +1,10 @@
+import { Ipv4Address, SubnetMask, type InterfaceId, type PrefixLength } from '../model';
 import {
   expandInterfaceRange,
   INTERFACE_TYPES,
   normalizeInterface,
   resolveInterfaceType,
-  type InterfaceName,
 } from './interfaces';
-
-export type Ipv4Address = string & { readonly __brand: 'Ipv4Address' };
-export type SubnetMask = string & { readonly __brand: 'SubnetMask' };
 
 export interface Token {
   readonly text: string;
@@ -106,22 +103,6 @@ function restOfLine<T>(
   };
 }
 
-function ipv4ToNumber(text: string): number | undefined {
-  const parts = text.split('.');
-  if (parts.length !== 4) return undefined;
-  let n = 0;
-  for (const part of parts) {
-    if (!/^\d{1,3}$/.test(part) || Number(part) > 255) return undefined;
-    n = n * 256 + Number(part);
-  }
-  return n;
-}
-
-function isContiguousMask(n: number): boolean {
-  const inverted = ~n >>> 0;
-  return (inverted & (inverted + 1)) === 0;
-}
-
 export function word<N extends string>(name: N, help: string): Param<N, string> {
   return param(
     name,
@@ -144,17 +125,45 @@ export function num<N extends string>(
 }
 
 export function ipv4<N extends string>(name: N, help: string): Param<N, Ipv4Address> {
-  const read = (text: string) =>
-    ipv4ToNumber(text) === undefined ? undefined : (text as Ipv4Address);
-  return param(name, help, singleToken('ipv4', 'A.B.C.D', read));
+  return param(
+    name,
+    help,
+    singleToken('ipv4', 'A.B.C.D', (text) => Ipv4Address.safeParse(text).data),
+  );
 }
 
-export function mask<N extends string>(name: N, help: string): Param<N, SubnetMask> {
-  const read = (text: string) => {
-    const n = ipv4ToNumber(text);
-    return n !== undefined && isContiguousMask(n) ? (text as SubnetMask) : undefined;
+/** A dotted subnet mask such as `255.255.255.0`, read as its prefix length. */
+export function mask<N extends string>(name: N, help: string): Param<N, PrefixLength> {
+  return param(
+    name,
+    help,
+    singleToken('mask', 'A.B.C.D', (text) => SubnetMask.safeParse(text).data),
+  );
+}
+
+/**
+ * One of a fixed set of words, such as `speed 10|100|1000|auto`. An exact word wins over a word it
+ * prefixes, so `10` picks 10 rather than being ambiguous with 100.
+ */
+export function choice<N extends string, const W extends string>(
+  name: N,
+  words: Readonly<Record<W, string>>,
+): Param<N, W> {
+  const all = Object.keys(words) as W[];
+  const matching = (partial: string) => {
+    const p = partial.toLowerCase();
+    return all.filter((w) => w.startsWith(p));
   };
-  return param(name, help, singleToken('mask', 'A.B.C.D', read));
+  const read = (text: string): W | undefined => {
+    const exact = all.find((w) => w === text.toLowerCase());
+    const prefixed = matching(text);
+    return exact ?? (prefixed.length === 1 ? prefixed[0] : undefined);
+  };
+  return param(name, '', {
+    ...singleToken(`choice:${all.join('|')}`, '', read),
+    entries: () => all.map((w) => ({ name: w, help: words[w] })),
+    complete: matching,
+  });
 }
 
 const interfaceEntries = () => INTERFACE_TYPES.map((t) => ({ name: t.name, help: t.help }));
@@ -166,7 +175,7 @@ function completeInterfaceType(partial: string): readonly string[] {
 }
 
 /** One interface, written `g0/0` or `gi 0/0`. */
-export function iface<N extends string>(name: N, help: string): Param<N, InterfaceName> {
+export function iface<N extends string>(name: N, help: string): Param<N, InterfaceId> {
   return param(name, help, {
     id: 'interface',
     restOfLine: false,
@@ -193,7 +202,7 @@ export function iface<N extends string>(name: N, help: string): Param<N, Interfa
 export function ifaceRange<N extends string>(
   name: N,
   help: string,
-): Param<N, readonly InterfaceName[]> {
+): Param<N, readonly InterfaceId[]> {
   const read = (text: string) => {
     const names = expandInterfaceRange(text);
     if (names) return names;

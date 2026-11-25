@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { formatError } from '../format';
-import type { InterfaceName } from '../interfaces';
+import type { InterfaceId } from '../../model';
 import { GLOBAL_CONFIG, PRIV_EXEC, prompt, USER_EXEC, type Mode } from '../modes';
 import { complete, help, parse } from '../parser';
 import { DEFAULT_HOSTNAME, demoTree, type DemoContext, type InterfaceAddress } from './demo';
 
-const g00 = 'GigabitEthernet0/0' as InterfaceName;
+const g00 = 'GigabitEthernet0/0' as InterfaceId;
 const IF: Mode = { kind: 'interface-config', interfaces: [g00] };
 const LINE: Mode = { kind: 'line-config', line: 'console 0' };
 const ROUTER: Mode = { kind: 'router-config', protocol: 'rip' };
@@ -14,8 +14,8 @@ const ROUTER: Mode = { kind: 'router-config', protocol: 'rip' };
 function session() {
   let hostname = DEFAULT_HOSTNAME;
   let mode: Mode = USER_EXEC;
-  const addresses = new Map<InterfaceName, InterfaceAddress | undefined>();
-  const shutdown = new Map<InterfaceName, boolean>();
+  const addresses = new Map<InterfaceId, InterfaceAddress | undefined>();
+  const shutdown = new Map<InterfaceId, boolean>();
   const ctx: DemoContext = {
     get hostname() {
       return hostname;
@@ -65,7 +65,7 @@ describe('demo commands: abbreviation', () => {
 
   it('types the ip address args', () => {
     expect(parse('ip add 10.0.0.1 255.255.255.0', IF, demoTree)).toMatchObject({
-      args: { ip: '10.0.0.1', mask: '255.255.255.0' },
+      args: { ip: '10.0.0.1', mask: 24 },
     });
   });
 });
@@ -126,7 +126,7 @@ describe('demo commands: no and do', () => {
   it.each<[string, Mode, string, object]>([
     ['no shut', IF, 'shutdown', {}],
     ['no ip address', IF, 'ip address', {}],
-    ['no ip add 10.0.0.1 255.0.0.0', IF, 'ip address', { ip: '10.0.0.1', mask: '255.0.0.0' }],
+    ['no ip add 10.0.0.1 255.0.0.0', IF, 'ip address', { ip: '10.0.0.1', mask: 8 }],
     ['no hostname', GLOBAL_CONFIG, 'hostname', {}],
     ['no host R2', GLOBAL_CONFIG, 'hostname', { name: 'R2' }],
   ])('%j negates %s', (input, mode, command, args) => {
@@ -160,11 +160,7 @@ describe('demo commands: mode transitions', () => {
     ['exit', GLOBAL_CONFIG, PRIV_EXEC],
     ['end', GLOBAL_CONFIG, PRIV_EXEC],
     ['interface Gi 0/0', GLOBAL_CONFIG, IF],
-    [
-      'int fa0/1',
-      IF,
-      { kind: 'interface-config', interfaces: ['FastEthernet0/1' as InterfaceName] },
-    ],
+    ['int fa0/1', IF, { kind: 'interface-config', interfaces: ['FastEthernet0/1' as InterfaceId] }],
     ['exit', IF, GLOBAL_CONFIG],
     ['end', IF, PRIV_EXEC],
     ['exit', LINE, GLOBAL_CONFIG],
@@ -176,7 +172,7 @@ describe('demo commands: mode transitions', () => {
     [
       'int g0/1',
       ROUTER,
-      { kind: 'interface-config', interfaces: ['GigabitEthernet0/1' as InterfaceName] },
+      { kind: 'interface-config', interfaces: ['GigabitEthernet0/1' as InterfaceId] },
     ],
   ])('%j moves %o to %o', (input, from, to) => {
     expect(parse(input, from, demoTree)).toMatchObject({ kind: 'command', mode: to });
@@ -254,7 +250,7 @@ describe('demo commands: mode transitions', () => {
       ['R1(config-if)#end'],
     ]);
     expect(s.prompt).toBe('R1#');
-    expect(s.addresses.get(g00)).toEqual({ ip: '10.0.0.1', mask: '255.255.255.0' });
+    expect(s.addresses.get(g00)).toEqual({ ip: '10.0.0.1', mask: 24 });
     expect(s.shutdown.get(g00)).toBe(false);
   });
 
@@ -290,7 +286,7 @@ describe('demo commands: ? help', () => {
     [
       'interface ',
       GLOBAL_CONFIG,
-      ['Ethernet', 'FastEthernet', 'GigabitEthernet', 'Loopback', 'Serial', 'Vlan', 'range'],
+      ['FastEthernet', 'GigabitEthernet', 'Loopback', 'Serial', 'Vlan', 'range'],
     ],
   ])('%j in %o lists %o', (input, mode, expected) => {
     expect(names(input, mode)).toEqual(expected);
