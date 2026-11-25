@@ -1,4 +1,4 @@
-import { isConfigMode, PRIV_EXEC, type Mode } from './modes';
+import { GLOBAL_CONFIG, isConfigMode, PRIV_EXEC, type Mode } from './modes';
 import type { HelpEntry, Token } from './params';
 import type { CommandTree, TrieNode } from './tree';
 
@@ -167,7 +167,20 @@ function terminalAt<Ctx>({ node, negated }: Position<Ctx>) {
   return negated ? node?.negation : node?.terminal;
 }
 
+/**
+ * A sub-config mode falls back to global config, as IOS does: `hostname R2` typed at
+ * `(config-if)#` runs and leaves the session in `(config)#`. Running-configs rely on this.
+ */
 export function parse<Ctx>(line: string, mode: Mode, tree: CommandTree<Ctx>): ParseResult<Ctx> {
+  const result = parseIn(line, mode, tree);
+  if (result.kind !== 'error' || !isConfigMode(mode) || mode.kind === 'global-config') {
+    return result;
+  }
+  const fallback = parseIn(line, GLOBAL_CONFIG, tree);
+  return fallback.kind === 'command' ? fallback : result;
+}
+
+function parseIn<Ctx>(line: string, mode: Mode, tree: CommandTree<Ctx>): ParseResult<Ctx> {
   const tokens = tokenize(line);
   if (tokens.length === 0) return { kind: 'empty' };
   const result = walk(tree, mode, line, tokens);

@@ -170,8 +170,42 @@ describe('demo commands: mode transitions', () => {
     ['exit', LINE, GLOBAL_CONFIG],
     ['end', ROUTER, PRIV_EXEC],
     ['hostname R1', GLOBAL_CONFIG, GLOBAL_CONFIG],
+    // Global commands fall back from sub-config modes, as in IOS.
+    ['hostname R1', IF, GLOBAL_CONFIG],
+    ['host R1', LINE, GLOBAL_CONFIG],
+    [
+      'int g0/1',
+      ROUTER,
+      { kind: 'interface-config', interfaces: ['GigabitEthernet0/1' as InterfaceName] },
+    ],
   ])('%j moves %o to %o', (input, from, to) => {
     expect(parse(input, from, demoTree)).toMatchObject({ kind: 'command', mode: to });
+  });
+
+  it('keeps sub-mode commands and errors local to the sub-mode', () => {
+    expect(parse('shutdown', IF, demoTree)).toMatchObject({ kind: 'command', mode: IF });
+    expect(parse('shutdown', GLOBAL_CONFIG, demoTree)).toMatchObject({ kind: 'error' });
+    expect(parse('bogus', IF, demoTree)).toMatchObject({
+      kind: 'error',
+      error: { kind: 'invalid', column: 0 },
+    });
+  });
+
+  it('replays a running-config without exit lines between blocks', () => {
+    const s = session();
+    for (const line of [
+      'en',
+      'conf t',
+      'int g0/0',
+      'ip add 10.0.0.1 255.255.255.0',
+      'int g0/1',
+      'shut',
+      'hostname R7',
+    ]) {
+      s.run(line);
+    }
+    expect(s.prompt).toBe('R7(config)#');
+    expect([...s.shutdown.keys()]).toEqual(['GigabitEthernet0/1']);
   });
 
   it('enters a range of interfaces with a range prompt', () => {
@@ -242,7 +276,7 @@ describe('demo commands: ? help', () => {
     ['', USER_EXEC, ['enable', 'exit', 'show']],
     ['', PRIV_EXEC, ['configure', 'disable', 'enable', 'exit', 'show']],
     ['', GLOBAL_CONFIG, ['do', 'end', 'exit', 'hostname', 'interface', 'no']],
-    ['', IF, ['do', 'end', 'exit', 'interface', 'ip', 'no', 'shutdown']],
+    ['', IF, ['do', 'end', 'exit', 'ip', 'no', 'shutdown']],
     ['configure ', PRIV_EXEC, ['terminal']],
     ['show ', PRIV_EXEC, ['version']],
     ['show version ', PRIV_EXEC, ['<cr>']],
