@@ -2,17 +2,28 @@ import {
   CableIcon,
   ClipboardPasteIcon,
   MonitorIcon,
+  PaletteIcon,
   PencilIcon,
   PowerIcon,
-  StickyNoteIcon,
+  ShapesIcon,
   TerminalIcon,
   Trash2Icon,
+  TypeIcon,
 } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { formatShortcut } from '@/app/shell/shortcuts';
 import type { Command } from '@/features/command/registry';
 import { openDeviceConsole } from '@/features/inspector/requests';
-import type { AnnotationId, DeviceId, LinkId, Point } from '@/model';
+import {
+  ANNOTATION_COLORS,
+  SHAPES,
+  TEXT_SIZES,
+  type Annotation,
+  type AnnotationId,
+  type DeviceId,
+  type LinkId,
+  type Point,
+} from '@/model';
 import { useEditor } from '@/model/react';
 import { editorStore } from '@/model/store';
 import {
@@ -28,16 +39,25 @@ import {
   ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from '@/ui/context-menu';
+import {
+  ANNOTATION_TOOLS,
+  annotationLabel,
+  annotationText,
+  COLOR_LABELS,
+  colorVar,
+  TEXT_SIZE_LABELS,
+  type AnnotationTool,
+} from './annotations';
 import { CABLE_LABELS } from './cables';
 import { cableTool } from './cableTool';
-import { addNote, canvasCommands, placeDevice, QUICK_ADD } from './controller';
-import { canPaste, deleteSelection, editNote, paste, startRename } from './edit';
+import { addAnnotationAt, canvasCommands, placeDevice, QUICK_ADD } from './controller';
+import { canPaste, deleteSelection, editText, paste, startRename } from './edit';
 
 /** What was right-clicked, and where on the canvas. */
 export type MenuTarget = { at: Point } & (
   | { kind: 'device'; device: DeviceId }
   | { kind: 'link'; link: LinkId }
-  | { kind: 'note'; note: AnnotationId }
+  | { kind: 'annotation'; annotation: AnnotationId }
   | { kind: 'selection' }
   | { kind: 'pane' }
 );
@@ -153,17 +173,109 @@ function LinkItems({ link: id }: { link: LinkId }) {
   );
 }
 
-function NoteItems({ note }: { note: AnnotationId }) {
+/** A colour dot for the palette, as the canvas draws it. */
+function ColorDot({ color }: { color: Annotation['color'] }) {
+  return (
+    <span
+      aria-hidden
+      className="size-3 shrink-0 rounded-full ring-1 ring-black/10 ring-inset dark:ring-white/15"
+      style={{ background: colorVar(color) }}
+    />
+  );
+}
+
+/** A radio submenu whose choice replaces the annotation in one undo step. */
+function ChoiceSub<V extends string>({
+  label,
+  icon,
+  value,
+  options,
+  onChoose,
+}: {
+  label: string;
+  icon: ReactNode;
+  value: V;
+  options: readonly { value: V; label: string; icon?: ReactNode }[];
+  onChoose: (value: V) => void;
+}) {
+  return (
+    <ContextMenuSub>
+      <ContextMenuSubTrigger>
+        {icon}
+        {label}
+      </ContextMenuSubTrigger>
+      <ContextMenuSubContent>
+        <ContextMenuRadioGroup
+          value={value}
+          onValueChange={(next) => {
+            const option = options.find((o) => o.value === next);
+            if (option) onChoose(option.value);
+          }}
+        >
+          {options.map((option) => (
+            <ContextMenuRadioItem key={option.value} value={option.value}>
+              {option.icon}
+              {option.label}
+            </ContextMenuRadioItem>
+          ))}
+        </ContextMenuRadioGroup>
+      </ContextMenuSubContent>
+    </ContextMenuSub>
+  );
+}
+
+const COLOR_OPTIONS = ANNOTATION_COLORS.map((color) => ({
+  value: color,
+  label: COLOR_LABELS[color],
+  icon: <ColorDot color={color} />,
+}));
+
+const updateAnnotation = (next: Annotation) => editorStore.getState().updateAnnotation(next);
+
+function AnnotationItems({ annotation: id }: { annotation: AnnotationId }) {
+  const annotation = useEditor((state) => state.topology.annotations[id]);
+  if (!annotation) return null;
+  const label = annotationLabel(annotation);
   return (
     <>
-      <ContextMenuItem onSelect={() => editNote(note)}>
-        <PencilIcon />
-        Edit note
-      </ContextMenuItem>
+      {annotationText(annotation) !== undefined && (
+        <ContextMenuItem onSelect={() => editText(id)}>
+          <PencilIcon />
+          {annotation.kind === 'area' ? 'Rename area' : 'Edit text'}
+        </ContextMenuItem>
+      )}
+      <ChoiceSub
+        label="Colour"
+        icon={<PaletteIcon />}
+        value={annotation.color}
+        options={COLOR_OPTIONS}
+        onChoose={(color) => updateAnnotation({ ...annotation, color })}
+      />
+      {annotation.kind === 'text' && (
+        <ChoiceSub
+          label="Text size"
+          icon={<TypeIcon />}
+          value={annotation.textSize}
+          options={TEXT_SIZES.map((size) => ({ value: size, label: TEXT_SIZE_LABELS[size] }))}
+          onChoose={(textSize) => updateAnnotation({ ...annotation, textSize })}
+        />
+      )}
+      {annotation.kind === 'shape' && (
+        <ChoiceSub
+          label="Shape"
+          icon={<ShapesIcon />}
+          value={annotation.shape}
+          options={SHAPES.map((shape) => ({
+            value: shape,
+            label: shape === 'ellipse' ? 'Ellipse' : 'Rectangle',
+          }))}
+          onChoose={(shape) => updateAnnotation({ ...annotation, shape })}
+        />
+      )}
       <ContextMenuSeparator />
       <ClipboardItems />
       <ContextMenuSeparator />
-      <DeleteItem label="Delete note" />
+      <DeleteItem label={`Delete ${label.toLowerCase()}`} />
     </>
   );
 }
@@ -180,6 +292,18 @@ function SelectionItems() {
   );
 }
 
+function AnnotateItem({ tool, at }: { tool: AnnotationTool; at: Point }) {
+  const { label, icon: Icon, shortcut } = ANNOTATION_TOOLS[tool];
+  const name = tool === 'note' ? 'note' : label.toLowerCase();
+  return (
+    <ContextMenuItem onSelect={() => addAnnotationAt(tool, at)}>
+      <Icon />
+      Add {name} here
+      {shortcut && <ContextMenuShortcut>{formatShortcut(shortcut)}</ContextMenuShortcut>}
+    </ContextMenuItem>
+  );
+}
+
 function PaneItems({ at }: { at: Point }) {
   return (
     <>
@@ -188,11 +312,19 @@ function PaneItems({ at }: { at: Point }) {
         Paste here
         <ContextMenuShortcut>{formatShortcut('paste')}</ContextMenuShortcut>
       </ContextMenuItem>
-      <ContextMenuItem onSelect={() => addNote(at)}>
-        <StickyNoteIcon />
-        Add note here
-        <ContextMenuShortcut>{formatShortcut('addNote')}</ContextMenuShortcut>
-      </ContextMenuItem>
+      {(['note', 'text', 'area'] as const).map((tool) => (
+        <AnnotateItem key={tool} tool={tool} at={at} />
+      ))}
+      <ContextMenuSub>
+        <ContextMenuSubTrigger>
+          <ShapesIcon />
+          Add shape here
+        </ContextMenuSubTrigger>
+        <ContextMenuSubContent>
+          <AnnotateItem tool="rectangle" at={at} />
+          <AnnotateItem tool="ellipse" at={at} />
+        </ContextMenuSubContent>
+      </ContextMenuSub>
       {(Object.keys(QUICK_ADD) as (keyof typeof QUICK_ADD)[]).map((id) => {
         const { model, label, icon: Icon } = QUICK_ADD[id];
         return (
@@ -217,8 +349,8 @@ function MenuItems({ target }: { target: MenuTarget }) {
       return <DeviceItems device={target.device} />;
     case 'link':
       return <LinkItems link={target.link} />;
-    case 'note':
-      return <NoteItems note={target.note} />;
+    case 'annotation':
+      return <AnnotationItems annotation={target.annotation} />;
     case 'selection':
       return <SelectionItems />;
     case 'pane':
@@ -228,7 +360,7 @@ function MenuItems({ target }: { target: MenuTarget }) {
 
 type Props = { target: MenuTarget | null; children: ReactNode };
 
-/** Right-click menus for devices, links, notes, a multi-selection and the empty canvas. */
+/** Right-click menus for devices, links, annotations, a multi-selection and the empty canvas. */
 export function CanvasContextMenu({ target, children }: Props) {
   return (
     <ContextMenu modal={false}>

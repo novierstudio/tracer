@@ -1,9 +1,10 @@
 import { Position, type Edge, type EdgeChange, type Node, type NodeChange } from '@xyflow/react';
 import { findDeviceModel, type DeviceIconName } from '@/devices/catalog';
 import type {
-  Annotation,
   AnnotationId,
+  AnnotationKind,
   AnnotationMove,
+  AnnotationSpec,
   Cable,
   Device,
   DeviceId,
@@ -11,9 +12,15 @@ import type {
   Link,
   LinkId,
   Move,
-  Point,
   Topology,
 } from '@/model';
+import {
+  ANNOTATION_KINDS,
+  annotationLabel,
+  annotationText,
+  drawOrder,
+  LAYER_Z,
+} from './annotations';
 import { CABLE_LABELS, shortPortName } from './cables';
 import { TILE, type Size } from './geometry';
 
@@ -27,16 +34,25 @@ export type DeviceNodeData = {
 };
 export type DeviceFlowNode = Node<DeviceNodeData, 'device'>;
 
-type NoteNodeData = { text: string; editing: boolean };
-export type NoteFlowNode = Node<NoteNodeData, 'note'>;
+export type AnnotationNodeData<K extends AnnotationKind = AnnotationKind> = {
+  annotation: Extract<AnnotationSpec, { kind: K }>;
+  editing: boolean;
+};
+/** Each annotation kind is its own node type, so React Flow picks the component per kind. */
+export type AnnotationFlowNode<K extends AnnotationKind = AnnotationKind> = Node<
+  AnnotationNodeData<K>,
+  K
+>;
 
-export type CanvasNode = DeviceFlowNode | NoteFlowNode;
+export type CanvasNode = DeviceFlowNode | AnnotationFlowNode;
 
-/** A note card's width, and its height with up to three lines. */
-const NOTE_SIZE = { width: 192, height: 76 };
+/** The node for a note or text being written that is not in the lab yet. */
+export const NEW_ANNOTATION_ID = 'annotation-new';
 
-/** The node for a note being written that is not in the lab yet. */
-const NEW_NOTE_ID = 'note-new';
+// Sizes shown before React Flow measures a node, so a new note's or text's field is on screen,
+// and can take focus, the moment N or T is pressed. A note shows three lines.
+const INITIAL_HEIGHT: Record<AnnotationKind, number> = { note: 76, text: 32, area: 0, shape: 0 };
+const INITIAL_TEXT_WIDTH = 160;
 
 export type CableEdgeData = { cable: Cable; ports: [a: string, b: string] };
 export type CableFlowEdge = Edge<CableEdgeData, 'cable'>;
@@ -233,67 +249,119 @@ export function createEdgeMapper() {
 
 // Node ids are store ids, and store ids carry their kind as a prefix.
 export const isDeviceId = (id: string): id is DeviceId => id.startsWith('dev_');
-export const isNoteId = (id: string): id is AnnotationId => id.startsWith('ann_');
+export const isAnnotationId = (id: string): id is AnnotationId => id.startsWith('ann_');
 
-/** Notes as React Flow nodes, positioned by their top-left corner, plus a note being written. */
-export function createNoteMapper() {
-  let cache = new Map<string, NoteFlowNode>();
+/** Width and height a node is drawn at, where the annotation fixes them. */
+function fixedSize(annotation: AnnotationSpec): { width?: number; height?: number } {
+  switch (annotation.kind) {
+    case 'area':
+    case 'shape':
+      return annotation.size;
+    case 'note':
+    case 'text':
+      return annotation.width === undefined ? {} : { width: annotation.width };
+  }
+}
+
+function ariaLabel(annotation: AnnotationSpec): string {
+  const text = annotationText(annotation);
+  return text ? `${annotationLabel(annotation)}: ${text}` : annotationLabel(annotation);
+}
+
+type AnnotationEntry = {
+  annotation: AnnotationSpec;
+  selected: boolean;
+  editing: boolean;
+  node: AnnotationFlowNode;
+};
+
+/**
+ * Annotations as React Flow nodes in draw order, positioned by their top-left corner, plus a note
+ * or text being written. Area boxes sit below links (negative z), the rest above links and, coming
+ * before devices in the node list, under devices.
+ */
+export function createAnnotationMapper() {
+  let cache = new Map<string, AnnotationEntry>();
   return (
     annotations: Topology['annotations'],
     selected: ReadonlySet<AnnotationId>,
     editing: AnnotationId | undefined,
-    draft: Point | undefined,
-  ): NoteFlowNode[] => {
-    const next = new Map<string, NoteFlowNode>();
-    const node = (id: string, note: Pick<Annotation, 'position' | 'text'>, isNew = false) => {
-      const isSelected = selected.has(id as AnnotationId);
-      const isEditing = isNew || editing === id;
+    draft: AnnotationSpec | undefined,
+  ): AnnotationFlowNode[] => {
+    const next = new Map<string, AnnotationEntry>();
+    const node = (id: string, annotation: AnnotationSpec, isNew = false): AnnotationFlowNode => {
+      const entry = {
+        annotation,
+        selected: selected.has(id as AnnotationId),
+        editing: isNew || editing === id,
+      };
       const hit = cache.get(id);
-      const reused =
+      if (
         hit &&
-        hit.position === note.position &&
-        hit.data.text === note.text &&
-        hit.data.editing === isEditing &&
-        hit.selected === isSelected;
-      const made: NoteFlowNode = reused
-        ? hit
-        : {
-            id,
-            type: 'note',
-            position: note.position,
-            origin: [0, 0],
-            // A size up front shows the node before React Flow measures it, so a new note's
-            // field is on screen, and can take focus, the moment N is pressed.
-            initialWidth: NOTE_SIZE.width,
-            initialHeight: NOTE_SIZE.height,
-            data: { text: note.text, editing: isEditing },
-            selected: isSelected,
-            draggable: !isEditing,
-            ariaLabel: `Note: ${note.text}`,
-          };
-      next.set(id, made);
+        hit.annotation === annotation &&
+        hit.selected === entry.selected &&
+        hit.editing === entry.editing
+      ) {
+        next.set(id, hit);
+        return hit.node;
+      }
+      const size = fixedSize(annotation);
+      const made = {
+        id,
+        type: annotation.kind,
+        position: annotation.position,
+        origin: [0, 0],
+        ...size,
+        initialWidth: size.width ?? INITIAL_TEXT_WIDTH,
+        initialHeight: size.height ?? INITIAL_HEIGHT[annotation.kind],
+        zIndex: LAYER_Z[ANNOTATION_KINDS[annotation.kind].layer],
+        data: { annotation, editing: entry.editing },
+        selected: entry.selected,
+        draggable: !entry.editing,
+        ariaLabel: ariaLabel(annotation),
+      } as AnnotationFlowNode;
+      next.set(id, { ...entry, node: made });
       return made;
     };
-    const nodes = Object.values(annotations).map((note) => node(note.id, note));
-    if (draft) nodes.push(node(NEW_NOTE_ID, { position: draft, text: '' }, true));
+    const nodes = drawOrder(Object.values(annotations)).map((a) => node(a.id, a));
+    if (draft) nodes.push(node(NEW_ANNOTATION_ID, draft, true));
     cache = next;
     return nodes;
   };
 }
 
-export type Moves = { devices: Move[]; notes: AnnotationMove[] };
+export type Moves = { devices: Move[]; annotations: AnnotationMove[] };
 
 /** Node moves as store moves, split by what each node shows. */
 export function movesFrom(changes: readonly NodeChange<CanvasNode>[]): Moves {
-  const moves: Moves = { devices: [], notes: [] };
+  const moves: Moves = { devices: [], annotations: [] };
   for (const change of changes) {
     if (change.type !== 'position' || !change.position) continue;
     if (isDeviceId(change.id)) moves.devices.push({ device: change.id, position: change.position });
-    else if (isNoteId(change.id)) {
-      moves.notes.push({ annotation: change.id, position: change.position });
+    else if (isAnnotationId(change.id)) {
+      moves.annotations.push({ annotation: change.id, position: change.position });
     }
   }
   return moves;
+}
+
+export type Resize = { annotation: AnnotationId; width?: number; height?: number };
+
+/** What resize handles changed. Measuring a node also reports dimensions, without setAttributes. */
+export function resizesFrom(changes: readonly NodeChange<CanvasNode>[]): Resize[] {
+  return changes.flatMap((change) => {
+    if (change.type !== 'dimensions' || !change.setAttributes || !change.dimensions) return [];
+    if (!isAnnotationId(change.id)) return [];
+    const { width, height } = change.dimensions;
+    const which = change.setAttributes;
+    return [
+      {
+        annotation: change.id,
+        ...(which !== 'height' && { width }),
+        ...(which !== 'width' && { height }),
+      },
+    ];
+  });
 }
 
 /** The selection after React Flow's select changes, or undefined when they change nothing. */

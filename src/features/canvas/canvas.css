@@ -4,15 +4,18 @@
   --cable-copper: color-mix(in oklab, var(--text-3) 85%, var(--text-1));
   --cable-serial: #c2410c;
   --light-unknown: var(--text-3);
-  --note-fill: color-mix(in oklab, var(--warn) 9%, var(--surface-1));
-  --note-edge: color-mix(in oklab, var(--warn) 30%, var(--surface-1));
+  /* How strongly an annotation's colour shows in a fill and an edge. */
+  --annotation-fill: 9%;
+  --annotation-edge: 32%;
+  --area-fill: 6%;
 }
 
 .dark .tracer-canvas {
   --cable-copper: color-mix(in oklab, var(--text-3) 80%, var(--surface-0));
   --cable-serial: #fb923c;
-  --note-fill: color-mix(in oklab, var(--warn) 9%, var(--surface-1));
-  --note-edge: color-mix(in oklab, var(--warn) 24%, var(--surface-1));
+  --annotation-fill: 10%;
+  --annotation-edge: 28%;
+  --area-fill: 7%;
 }
 
 .tracer-canvas .react-flow {
@@ -334,10 +337,14 @@
   stroke-dasharray: 6 4;
 }
 
-/* Notes: soft sticky cards drawn under devices and links. */
+/*
+ * Annotations. Each node sets --annotation to its palette token. Area boxes sit behind links and
+ * devices; notes, text and shapes over links and under devices.
+ */
 
 .note-card {
-  width: 192px;
+  --note-fill: color-mix(in oklab, var(--annotation) var(--annotation-fill), var(--surface-1));
+  --note-edge: color-mix(in oklab, var(--annotation) var(--annotation-edge), var(--surface-1));
   min-height: 56px;
   padding: 10px 12px;
   border: 1px solid var(--note-edge);
@@ -372,6 +379,238 @@
     0 6px 16px -6px hsl(var(--shadow-color) / 0.35);
 }
 
-.is-cabling .react-flow__node-note {
+/* Text: no box until it is hovered, selected or typed into. */
+
+.text-label {
+  min-width: 24px;
+  padding: 2px 4px;
+  border-radius: 6px;
+  color: color-mix(in oklab, var(--annotation) 70%, var(--text-1));
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  white-space: pre;
+  transition: box-shadow 150ms ease-out;
+}
+
+.text-label[data-wrap] {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.text-label-field {
+  min-width: 4ch;
+  width: 100%;
+  field-sizing: content;
+  font-weight: inherit;
+  letter-spacing: inherit;
+  white-space: inherit;
+  color: inherit;
+}
+
+.react-flow__node-text:hover .text-label {
+  box-shadow: 0 0 0 1px var(--line-strong);
+}
+
+.react-flow__node-text.selected .text-label,
+.text-label[data-editing] {
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+/*
+ * Frames: area boxes and shapes. Only the edge and the label take the pointer. React Flow puts
+ * `pointer-events: all` on each node inline, so this must win over an inline style.
+ */
+
+.tracer-canvas .react-flow__node-area,
+.tracer-canvas .react-flow__node-shape {
+  pointer-events: none !important;
+  border-radius: 12px;
+}
+
+.area-box,
+.shape-box {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.area-box {
+  border: 1.5px solid color-mix(in oklab, var(--annotation) 45%, transparent);
+  border-radius: 12px;
+  background: color-mix(in oklab, var(--annotation) var(--area-fill), transparent);
+  transition: border-color 150ms ease-out;
+}
+
+.frame-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.frame-hit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 12px;
+  pointer-events: stroke;
+  cursor: move;
+}
+
+.is-cabling .frame-hit,
+.is-drawing .frame-hit {
   pointer-events: none;
+}
+
+.shape-line {
+  fill: none;
+  stroke: var(--annotation);
+  stroke-width: 2px;
+}
+
+/*
+ * An area's label stays readable when zoomed out: its type never draws smaller than about 11
+ * screen pixels. --zoom is the view's zoom, which the canvas keeps on its root.
+ */
+.area-label {
+  position: absolute;
+  top: 0;
+  left: 0;
+  max-width: 100%;
+  padding: 6px 10px;
+  color: color-mix(in oklab, var(--annotation) 75%, var(--text-1));
+  font-size: max(12px, calc(11px / var(--zoom, 1)));
+  font-weight: 600;
+  line-height: 1.35;
+  letter-spacing: -0.005em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: all;
+  cursor: move;
+}
+
+.area-label:empty {
+  display: none;
+}
+
+.area-label .annotation-field {
+  min-width: 4ch;
+  border-radius: 4px;
+  font-weight: inherit;
+  color: inherit;
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+.react-flow__node-area:hover .area-box,
+.react-flow__node-area.selected .area-box {
+  border-color: color-mix(in oklab, var(--annotation) 75%, transparent);
+}
+
+.react-flow__node-area.selected .area-box {
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.react-flow__node-shape:hover .shape-line {
+  stroke-width: 2.5px;
+}
+
+.react-flow__node-shape.selected .shape-line {
+  stroke: color-mix(in oklab, var(--annotation) 70%, var(--accent));
+}
+
+/* Resize handles: an accent outline with square grips, sized in screen pixels. */
+
+.tracer-canvas .annotation-resize-line {
+  border-color: var(--accent);
+  pointer-events: all;
+}
+
+.tracer-canvas .react-flow__resize-control.line.annotation-resize-line {
+  border-width: 0;
+}
+
+.tracer-canvas .react-flow__resize-control.line.annotation-resize-line.left,
+.tracer-canvas .react-flow__resize-control.line.annotation-resize-line.right {
+  width: 9px;
+  border-width: 0;
+}
+
+.tracer-canvas .react-flow__resize-control.line.annotation-resize-line.top,
+.tracer-canvas .react-flow__resize-control.line.annotation-resize-line.bottom {
+  height: 9px;
+  border-width: 0;
+}
+
+.tracer-canvas .annotation-resize-side::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 4px;
+  height: 18px;
+  border-radius: 9999px;
+  background: var(--accent);
+  box-shadow: 0 0 0 2px var(--surface-0);
+  translate: -50% -50%;
+}
+
+.tracer-canvas .react-flow__resize-control.handle.annotation-resize-handle {
+  width: 9px;
+  height: 9px;
+  border: 1.5px solid var(--accent);
+  border-radius: 2px;
+  background: var(--surface-1);
+  pointer-events: all;
+}
+
+/* Tools that are not for annotations leave them alone. */
+
+.is-cabling .react-flow__node-note,
+.is-cabling .react-flow__node-text,
+.is-cabling .area-label,
+.is-drawing .react-flow__node-note,
+.is-drawing .react-flow__node-text,
+.is-drawing .area-label {
+  pointer-events: none;
+}
+
+/* The draw tool's layer over the pane, and the box being dragged out. */
+
+.draw-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.draw-preview {
+  position: absolute;
+  border: 1.5px dashed var(--accent);
+  border-radius: 8px;
+  background: color-mix(in oklab, var(--accent) 6%, transparent);
+  pointer-events: none;
+}
+
+.draw-preview[data-tool='ellipse'] {
+  border-radius: 50%;
+}
+
+/* The minimap shows annotations faintly, so devices stay what it is about. */
+
+.tracer-canvas .react-flow__minimap-node.minimap-area {
+  opacity: 0.22;
+}
+
+.tracer-canvas .react-flow__minimap-node.minimap-note,
+.tracer-canvas .react-flow__minimap-node.minimap-text {
+  opacity: 0.45;
+}
+
+.tracer-canvas .react-flow__minimap-node.minimap-shape {
+  fill: none !important;
+  stroke: var(--text-3);
+  stroke-width: 6px;
+  opacity: 0.4;
 }

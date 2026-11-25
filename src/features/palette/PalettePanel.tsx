@@ -18,7 +18,8 @@ import {
 } from '@/devices/catalog';
 import { DeviceIcon } from '@/devices/icons';
 import { formatShortcut } from '@/app/shell/shortcuts';
-import { addNote, placeDevice } from '@/features/canvas/controller';
+import { ANNOTATION_TOOLS, type AnnotationTool } from '@/features/canvas/annotations';
+import { addAnnotationAt, placeDevice, viewCentre } from '@/features/canvas/controller';
 import { EmptyState } from '@/ui/empty-state';
 import { Input } from '@/ui/input';
 
@@ -27,8 +28,8 @@ export type PaletteSection = (typeof PALETTE_SECTIONS)[number];
 
 /** The drop payload is the catalog model id. */
 export const DEVICE_DRAG_TYPE = 'application/x-tracer-device';
-/** A sticky note dragged from the Annotate section. It carries no payload. */
-export const NOTE_DRAG_TYPE = 'application/x-tracer-note';
+/** The drop payload is the annotation tool, such as `area`. */
+export const ANNOTATION_DRAG_TYPE = 'application/x-tracer-annotation';
 
 export const SECTION_INFO: Record<
   PaletteSection,
@@ -53,7 +54,7 @@ export const SECTION_INFO: Record<
     icon: StickyNoteIcon,
     search: 'Search annotations',
     empty: 'No matching annotations',
-    hint: 'Text, areas and shapes for labelling your lab will join notes here.',
+    hint: 'Click to add one mid-view, or drag it to a spot. B and O draw an area box or ellipse by dragging on the canvas.',
   },
 };
 
@@ -134,28 +135,53 @@ function DeviceItem({ entry: { model, summary } }: { entry: Entry }) {
   );
 }
 
-function Annotations() {
+const ANNOTATE_GROUPS: { title: string; tools: AnnotationTool[] }[] = [
+  { title: 'Text', tools: ['note', 'text'] },
+  { title: 'Regions and shapes', tools: ['area', 'rectangle', 'ellipse'] },
+];
+
+function AnnotationItem({ tool }: { tool: AnnotationTool }) {
+  const { label, summary, icon: Icon, shortcut } = ANNOTATION_TOOLS[tool];
+  return (
+    <PaletteItem
+      name={label}
+      summary={shortcut ? `${summary} · ${formatShortcut(shortcut)}` : summary}
+      icon={
+        <span className="flex size-6 shrink-0 items-center justify-center">
+          <Icon className={tool === 'note' ? 'size-5 text-warn' : 'size-5 text-fg-2'} />
+        </span>
+      }
+      drag={{ type: ANNOTATION_DRAG_TYPE, payload: tool }}
+      onAdd={() => {
+        const at = viewCentre();
+        if (at) addAnnotationAt(tool, at);
+      }}
+    />
+  );
+}
+
+function AnnotateGroup({ title, tools }: { title: string; tools: AnnotationTool[] }) {
   const id = useId();
   return (
+    <section className="flex flex-col gap-0.5 px-1.5 pb-3">
+      <h3 id={id} className="px-2 pb-1 text-2xs font-semibold tracking-wide text-fg-3 uppercase">
+        {title}
+      </h3>
+      <ul aria-labelledby={id} className="flex flex-col gap-0.5">
+        {tools.map((tool) => (
+          <AnnotationItem key={tool} tool={tool} />
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function Annotations() {
+  return (
     <div className="min-h-0 flex-1 overflow-y-auto pt-1">
-      <section className="flex flex-col gap-0.5 px-1.5 pb-3">
-        <h3 id={id} className="px-2 pb-1 text-2xs font-semibold tracking-wide text-fg-3 uppercase">
-          Notes
-        </h3>
-        <ul aria-labelledby={id} className="flex flex-col gap-0.5">
-          <PaletteItem
-            name="Sticky note"
-            summary={`Free text on the canvas · ${formatShortcut('addNote')}`}
-            icon={
-              <span className="flex size-6 shrink-0 items-center justify-center">
-                <StickyNoteIcon className="size-5 text-warn" />
-              </span>
-            }
-            drag={{ type: NOTE_DRAG_TYPE, payload: 'note' }}
-            onAdd={() => addNote()}
-          />
-        </ul>
-      </section>
+      {ANNOTATE_GROUPS.map((group) => (
+        <AnnotateGroup key={group.title} {...group} />
+      ))}
       <p className="px-5 text-2xs text-balance text-fg-3">{SECTION_INFO.annotate.hint}</p>
     </div>
   );

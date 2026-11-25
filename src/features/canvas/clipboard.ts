@@ -12,28 +12,35 @@ import type {
   Port,
   Topology,
 } from '@/model';
+import { annotationCentre } from './annotations';
 
 /** Copied elements, kept as they were so a later paste does not depend on the lab still having them. */
-export type Fragment = { devices: Device[]; links: Link[]; notes: Annotation[] };
+export type Fragment = { devices: Device[]; links: Link[]; annotations: Annotation[] };
 
-/** The selected devices and notes, plus every link whose two ends are both copied. */
+/** The selected devices and annotations, plus every link whose two ends are both copied. */
 export function copyFragment(
   topology: Topology,
-  { devices, notes }: { devices: readonly DeviceId[]; notes: readonly AnnotationId[] },
+  {
+    devices,
+    annotations: annotationIds,
+  }: { devices: readonly DeviceId[]; annotations: readonly AnnotationId[] },
 ): Fragment | undefined {
   const copied = devices.flatMap((id) => topology.devices[id] ?? []);
   const ids = new Set(copied.map((device) => device.id));
   const links = Object.values(topology.links).filter(
     (link) => ids.has(link.a.device) && ids.has(link.b.device),
   );
-  const annotations = notes.flatMap((id) => topology.annotations[id] ?? []);
+  const annotations = annotationIds.flatMap((id) => topology.annotations[id] ?? []);
   if (copied.length === 0 && annotations.length === 0) return undefined;
-  return { devices: copied, links, notes: annotations };
+  return { devices: copied, links, annotations };
 }
 
-/** Where the fragment's elements sit, as the middle of the box around them. */
+/** Where the fragment's elements sit, as the middle of the box around their centres. */
 export function fragmentCentre(fragment: Fragment): Point {
-  const points = [...fragment.devices, ...fragment.notes].map((element) => element.position);
+  const points = [
+    ...fragment.devices.map((device) => device.position),
+    ...fragment.annotations.map(annotationCentre),
+  ];
   const xs = points.map((p) => p.x);
   const ys = points.map((p) => p.y);
   return {
@@ -104,10 +111,10 @@ export function pasteElements(
     return { ...link, id, a, b };
   });
 
-  const annotations = fragment.notes.map((note): Annotation => {
+  const annotations = fragment.annotations.map((annotation): Annotation => {
     const id = fresh(ids.annotationId, (c) => c in topology.annotations || newIds.has(c));
     newIds.add(id);
-    return { ...note, id, position: move(note.position) };
+    return { ...annotation, id, position: move(annotation.position) };
   });
 
   return { devices, links, annotations };

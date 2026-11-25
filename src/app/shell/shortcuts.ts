@@ -27,7 +27,10 @@ export type ShortcutId =
   | 'addRouter'
   | 'addSwitch'
   | 'addPc'
-  | 'addNote';
+  | 'addNote'
+  | 'addText'
+  | 'addArea'
+  | 'addEllipse';
 
 // `inTextFields` shortcuts also fire while typing in a text field. `shift` is only checked when set,
 // so `?` matches whether or not the layout needs Shift for it. `also` lists other keys that do the
@@ -48,6 +51,7 @@ type Shortcut = {
 // ⌘C/⌘V/⌘D and Delete come from the UI/UX doc; the doc names no per-panel keys, so [ ] and ` follow
 // common editor conventions, as do ⌘X, F2 and the arrow keys. Fit is 1 or Shift+1 (`!` on US
 // keyboards), and 0 as the doc has it. Clipboard keys are canvas-only, so text elsewhere still copies.
+// T (text), B (box) and O (ellipse) follow drawing tools such as Excalidraw; R is Add router.
 export const SHORTCUTS: Record<ShortcutId, Shortcut> = {
   commandPalette: { key: 'k', mod: true, inTextFields: true, label: 'Command palette' },
   undo: { key: 'z', mod: true, shift: false, label: 'Undo' },
@@ -84,6 +88,9 @@ export const SHORTCUTS: Record<ShortcutId, Shortcut> = {
   addSwitch: { key: 's', label: 'Add switch at pointer' },
   addPc: { key: 'p', label: 'Add PC at pointer' },
   addNote: { key: 'n', label: 'Add note at pointer' },
+  addText: { key: 't', label: 'Add text at pointer' },
+  addArea: { key: 'b', label: 'Draw an area box' },
+  addEllipse: { key: 'o', label: 'Draw an ellipse' },
 };
 
 type KeyInput = Pick<KeyboardEvent, 'key' | 'metaKey' | 'ctrlKey' | 'altKey'> &
