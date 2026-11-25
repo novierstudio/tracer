@@ -28,6 +28,7 @@
     "elkjs": "^0.12.1",
     "fast-xml-parser": "^5.12.1",
     "fflate": "^0.8.3",
+    "html-to-image": "1.11.11",
     "idb": "^8.0.4",
     "immer": "^11.2.10",
     "lucide-react": "^1.78.0",

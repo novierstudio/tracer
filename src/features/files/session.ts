@@ -279,6 +279,11 @@ export function createFileSession({
       }
     },
     openFile,
+    /** Opens a lab from outside a file, such as a share link. The open lab stays in Recent labs. */
+    async openLab(topology: Topology) {
+      await (restoring ?? Promise.resolve());
+      await switchTo(newLabId(), topology, { persist: true });
+    },
     confirmImport,
     cancelImport,
     async openRecent(lab: LabSummary) {

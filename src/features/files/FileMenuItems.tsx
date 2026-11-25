@@ -1,4 +1,12 @@
-import { FilePlusIcon, FolderOpenIcon, HistoryIcon, SaveIcon } from 'lucide-react';
+import {
+  FileCodeIcon,
+  FilePlusIcon,
+  FolderOpenIcon,
+  HistoryIcon,
+  ImageIcon,
+  Link2Icon,
+  SaveIcon,
+} from 'lucide-react';
 import { formatShortcut } from '@/app/shell/shortcuts';
 import {
   DropdownMenuItem,
@@ -9,6 +17,7 @@ import {
 import type { LabSummary } from './labStorage';
 import { useFiles } from './react';
 import { fileSession } from './session';
+import { chooseImage, copyShareLink, exportConfigs } from './sharing';
 
 const time = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' });
 const day = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' });
@@ -42,6 +51,19 @@ export function FileMenuItems() {
         <SaveIcon />
         Save as…
         <DropdownMenuShortcut>{formatShortcut('saveAs')}</DropdownMenuShortcut>
+      </DropdownMenuItem>
+      <DropdownMenuSeparator />
+      <DropdownMenuItem onSelect={() => void copyShareLink()}>
+        <Link2Icon />
+        Copy share link
+      </DropdownMenuItem>
+      <DropdownMenuItem onSelect={() => chooseImage(true)}>
+        <ImageIcon />
+        Export image…
+      </DropdownMenuItem>
+      <DropdownMenuItem onSelect={() => void exportConfigs()}>
+        <FileCodeIcon />
+        Export running-configs
       </DropdownMenuItem>
       {recents.length > 0 && (
         <>

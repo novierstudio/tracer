@@ -310,3 +310,20 @@ describe('rename', () => {
     expect(topology().meta.name).toBe('Core network');
   });
 });
+
+describe('shared labs', () => {
+  it('opens a shared lab as a new lab and keeps the old one in Recent labs', async () => {
+    const { session, edit, topology } = startSession();
+    await session.restored();
+    edit(named(buildLab().topology, 'Mine'));
+
+    const shared = named(buildLab(2).topology, 'Shared');
+    await session.openLab(shared);
+    expect(topology()).toEqual(shared);
+    expect(session.state.getState().recents.map((lab) => lab.name)).toEqual(['Mine']);
+
+    const reopened = startSession();
+    await reopened.session.restored();
+    expect(reopened.topology().meta.name).toBe('Shared');
+  });
+});

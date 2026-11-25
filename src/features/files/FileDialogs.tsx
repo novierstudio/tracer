@@ -8,6 +8,7 @@ import { fileCommands } from './fileCommands';
 import { ImportDialog } from './ImportDialog';
 import { useFiles } from './react';
 import { fileSession } from './session';
+import { ShareDialogs } from './ShareDialogs';
 
 const hasFiles = (event: DragEvent) => event.dataTransfer?.types.includes('Files') ?? false;
 
@@ -130,6 +131,7 @@ export function FileDialogs() {
       <ImportDialog />
       <FileProblem />
       <Notice />
+      <ShareDialogs />
       {dragging && (
         <div className="pointer-events-none fixed inset-0 z-50 grid place-content-center bg-accent/10 p-4">
           <div className="flex items-center gap-2 rounded-lg bg-surface-1 px-4 py-3 text-sm font-medium text-fg-1 shadow-pop">
