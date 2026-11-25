@@ -1,8 +1,11 @@
 // No runtime imports: the simulation worker uses these, and must not pull in zod.
-import type { PortId, SubinterfaceId, Switchport, VlanRange } from './topology';
+import type { BridgePriority, PortId, SubinterfaceId, Switchport, VlanRange } from './topology';
 import type { VlanId } from './values';
 
 export const MAX_VLAN = 4094 as VlanId;
+
+/** A VLAN's spanning tree priority when the config sets none. */
+export const DEFAULT_BRIDGE_PRIORITY = 32768 as BridgePriority;
 
 /** `switchport trunk allowed vlan all`, spelled out. A switchport stores it as no list at all. */
 export const ALL_VLANS: readonly VlanRange[] = [{ first: 1 as VlanId, last: MAX_VLAN }];
