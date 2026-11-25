@@ -1,6 +1,6 @@
 import type { DeviceId, Ipv4Address, LinkId, PortId, Result, Topology } from '@/model';
 import type { SimTime } from './core/time';
-import type { SimEvent } from './events';
+import type { EventId, SimEvent } from './events';
 import type { MacTableEntry } from './l2/switching';
 import type { ArpTableEntry } from './l3/arp';
 import type { PingEvent, PingListener, PingOptions, PingReply, PingSummary } from './l3/ping';
@@ -27,7 +27,15 @@ export type SimEventBatch = {
   now: SimTime;
   mode: SimMode;
   playing: boolean;
+  /**
+   * What was logged since the previous batch. Ids are positions in the run: after a step back,
+   * replayed events reuse their ids, so an event replaces any held event with the same id.
+   */
   events: SimEvent[];
+  /** The newest event's id. Lower than before after a step back: later events no longer happened. */
+  head: EventId;
+  /** Simulation mode only: whether `stepBack` has a moment to return to. */
+  canStepBack: boolean;
   /** Whether each link is up. Every batch carries them all, so one batch is enough to draw them. */
   links: Record<LinkId, boolean>;
 };
@@ -39,10 +47,23 @@ export interface SimAPI {
   /** Starts a new run from this topology: the clock, the queue, the log and the seed all reset. */
   load(topology: Topology): void;
   applyPatch(patch: TopologyPatch): void;
-  /** Switches mode. Either mode starts paused. */
+  /**
+   * Switches mode; the current mode again changes nothing. Simulation pauses the clock and starts
+   * a history at this moment, which step back can return to. Realtime carries on from the moment
+   * on screen at wall-clock speed, and forgets any future that was stepped back from.
+   */
   setMode(mode: SimMode): void;
-  /** Pauses, then runs until the next event that logs something. Returns what it logged. */
+  /**
+   * Pauses, then runs the next instant that logs something: every queued event at that simulated
+   * time, so each packet in flight moves one hop. Returns what it logged.
+   */
   step(): SimEvent[];
+  /**
+   * Simulation mode: pauses and returns to the moment before the last step, by restoring the
+   * nearest snapshot and replaying. Stepping forward again replays the same events with the same
+   * ids. Returns false at the start of the history, and in Realtime mode.
+   */
+  stepBack(): boolean;
   /**
    * Realtime: `speed` simulated ms per wall-clock ms, so 1 tracks the wall clock.
    * Simulation: `speed` logged steps per second.
@@ -53,8 +74,10 @@ export interface SimAPI {
   /**
    * Pings `target` from a router or host in simulated time: `count` echo requests about a second
    * apart, each waiting up to `timeoutMs`. Each request's fate, then a summary, goes to `listener`
-   * as the simulation runs; nothing arrives while it is paused. Throws a RangeError for a count
-   * that is not a whole number >= 1 or a timeout that is not > 0.
+   * as the simulation runs; nothing arrives while it is paused. The listener hears each fate once
+   * even when stepping back replays it, and a ping that a step back un-starts ends with a summary
+   * of what it heard. Throws a RangeError for a count that is not a whole number >= 1 or a timeout
+   * that is not > 0.
    */
   ping(
     device: DeviceId,
