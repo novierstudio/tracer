@@ -1,22 +1,35 @@
 import { describe, expect, it } from 'vitest';
-import { BridgePriority, PathCost, PortId, VlanId, type DeviceId, type Link } from '@/model';
+import {
+  BridgePriority,
+  PathCost,
+  PortId,
+  VlanId,
+  type DeviceId,
+  type Link,
+  type StpTimers,
+} from '@/model';
 import type { PingEvent, SpanningTreeVlan } from '../api';
 import { after, ms, simTime } from '../core/time';
 import { createEngine } from '../engine';
 import type { EventId, SimEvent } from '../events';
 import { createSimService } from '../service';
 import { STACKS } from '../stacks';
-import { ip, labBuilder } from '../testing';
+import { ip, labBuilder, STP_CONVERGED, STP_CONVERGED_IOS } from '../testing';
 
 const VLAN1 = VlanId.parse(1);
-/** Listening then learning: a new port forwards two forward delays after it comes up. */
-const CONVERGED = 30_000;
+/** Listening then learning on the default fast timers: a new port forwards 4 s after it comes up. */
+const CONVERGED = STP_CONVERGED;
+
+const FAST = { hello: 1, maxAge: 7, forwardDelay: 2 };
+const IOS = { hello: 2, maxAge: 20, forwardDelay: 15 };
+
+const timersPatch = (stpTimers: StpTimers) => ({ devices: {}, links: {}, settings: { stpTimers } });
 
 /**
  * Three switches cabled in a triangle on their gigabit ports, PC1 on SW2 Fa0/1 and PC2 on SW3
- * Fa0/1, every switch at factory defaults.
+ * Fa0/1, every switch at factory defaults, on the lab's spanning tree timers.
  */
-function triangle({ portfast = false } = {}) {
+function triangle({ portfast = false, timers }: { portfast?: boolean; timers?: StpTimers } = {}) {
   const lab = labBuilder();
   const sw1 = lab.switch('SW1');
   const sw2 = lab.switch('SW2');
@@ -45,6 +58,8 @@ function triangle({ portfast = false } = {}) {
       },
     };
   }
+
+  if (timers) topology = { ...topology, settings: { stpTimers: timers } };
 
   const engine = createEngine({ seed: 1, stacks: STACKS, linkDelay: ms(1) });
   const sim = createSimService({ engine, frames: { now: () => 0, request: () => {} } });
@@ -150,18 +165,38 @@ describe('spanning tree in a triangle of switches', () => {
     expect(tree(last).rootCost).toBe(4);
   });
 
-  it('listens for one forward delay, then learns for another, then forwards', () => {
-    const { root, ports, runFor, portToward, middle } = triangle();
-    const toMiddle = portToward(root, middle);
+  it.each([
+    { timers: 'fast', forwardDelay: 2_000 },
+    { timers: 'ios', forwardDelay: 15_000 },
+  ] as const)(
+    'on $timers timers, listens for one forward delay, then learns for another, then forwards',
+    ({ timers, forwardDelay }) => {
+      const { root, ports, runFor, portToward, middle } = triangle({ timers });
+      const toMiddle = portToward(root, middle);
 
-    runFor(14_999);
-    expect(ports(root)).toContain(`${toMiddle} designated listening`);
-    runFor(1);
-    expect(ports(root)).toContain(`${toMiddle} designated learning`);
-    runFor(14_999);
-    expect(ports(root)).toContain(`${toMiddle} designated learning`);
-    runFor(1);
-    expect(ports(root)).toContain(`${toMiddle} designated forwarding`);
+      runFor(forwardDelay - 1);
+      expect(ports(root)).toContain(`${toMiddle} designated listening`);
+      runFor(1);
+      expect(ports(root)).toContain(`${toMiddle} designated learning`);
+      runFor(forwardDelay - 1);
+      expect(ports(root)).toContain(`${toMiddle} designated learning`);
+      runFor(1);
+      expect(ports(root)).toContain(`${toMiddle} designated forwarding`);
+    },
+  );
+
+  it('converges with one blocked port by 4 s on the default timers, and by 30 s on IOS timers', () => {
+    const fast = triangle();
+    fast.runFor(CONVERGED);
+    expect(fast.blocked()).toHaveLength(1);
+    expect(fast.ports(fast.root).filter((port) => !port.endsWith('forwarding'))).toEqual([]);
+
+    const ios = triangle({ timers: 'ios' });
+    ios.runFor(CONVERGED);
+    expect(ios.ports(ios.root)).toContain('GigabitEthernet0/1 designated listening');
+    ios.runFor(STP_CONVERGED_IOS - CONVERGED);
+    expect(ios.blocked()).toEqual(fast.blocked());
+    expect(ios.ports(ios.root)).toEqual(fast.ports(fast.root));
   });
 
   it('passes a ping between hosts on different switches, with no broadcast storm', () => {
@@ -221,30 +256,41 @@ describe('spanning tree in a triangle of switches', () => {
     expect(blocked()).toEqual([]);
   });
 
-  it('reconverges after max age when a link it does not touch fails, then floods new paths', () => {
-    const { root, last, middle, tree, ports, blocked, runFor, linkBetween, unplug, portToward } =
-      triangle();
-    runFor(CONVERGED);
-    const standby = portToward(last, middle);
+  it.each([
+    // The last BPDU before the failure came with the root's previous hello, with message age 1.
+    { timers: 'fast', agesOut: 9_002, nextHello: 10_000, forwardDelay: 2 },
+    { timers: 'ios', agesOut: 47_002, nextHello: 48_000, forwardDelay: 15 },
+  ] as const)(
+    'on $timers timers, reconverges after max age when a link it does not touch fails',
+    ({ timers, agesOut, nextHello, forwardDelay }) => {
+      const lab = triangle({ timers });
+      const { engine, root, last, middle, tree, ports, blocked, linkBetween, unplug } = lab;
+      const runUntil = (millis: number) => engine.runUntil(simTime(millis));
+      runUntil(2 * forwardDelay * 1000);
+      const standby = lab.portToward(last, middle);
 
-    unplug(linkBetween(middle, root));
-    // The middle bridge thinks itself root, but the last bridge ignores its worse BPDUs until the
-    // root's information on its blocked port ages out: max age less the message age of 1 it
-    // arrived with, counted from the last BPDU before the failure, at 28 s.
-    runFor(17_000);
-    expect(ports(last)).toContain(`${standby} alternate blocking`);
-    runFor(1_000);
-    expect(ports(last)).toContain(`${standby} designated listening`);
-    // Its next relay of the root's hello tells the middle bridge the way back to the root.
-    runFor(1_000);
-    expect(tree(middle).rootPort?.port).toBe(portToward(middle, last));
+      unplug(linkBetween(middle, root));
+      // The middle bridge thinks itself root, but the last bridge ignores its worse BPDUs until
+      // the root's information on its blocked port ages out: max age less the message age of 1
+      // it arrived with, counted from the last BPDU before the failure.
+      runUntil(agesOut - 1);
+      expect(ports(last)).toContain(`${standby} alternate blocking`);
+      runUntil(agesOut);
+      expect(ports(last)).toContain(`${standby} designated listening`);
+      // Its relay of the root's next hello tells the middle bridge the way back to the root.
+      runUntil(nextHello + 2);
+      expect(tree(middle).rootPort?.port).toBe(lab.portToward(middle, last));
 
-    runFor(CONVERGED);
-    expect(ports(last)).toContain(`${standby} designated forwarding`);
-    expect(blocked()).toEqual([]);
-    // The root heard of the change and tells every bridge to age addresses after forward delay.
-    expect(tree(middle).agingTime).toBe(15);
-  });
+      runUntil(agesOut + 2 * forwardDelay * 1000 - 1);
+      expect(ports(last)).toContain(`${standby} designated learning`);
+      runUntil(agesOut + 2 * forwardDelay * 1000);
+      expect(ports(last)).toContain(`${standby} designated forwarding`);
+      expect(blocked()).toEqual([]);
+      // The root heard of the change and tells every bridge to age addresses after forward delay.
+      runUntil(engine.now + 100);
+      expect(tree(middle).agingTime).toBe(forwardDelay);
+    },
+  );
 
   it('pings across the backup path once the tree reconverges around a failed link', () => {
     const { ping, runFor, linkBetween, unplug, root, last } = triangle();
@@ -327,9 +373,127 @@ describe('BPDUs', () => {
         event.from.port === portToward(last, middle),
     );
     expect(fromBlocked).toEqual([]);
-    // 5 hellos, each out of 5 designated ports: the root's 2, and one toward each other bridge
+    // 10 hellos, each out of 5 designated ports: the root's 2, and one toward each other bridge
     // or PC that the runner-up and the last bridge are designated for.
-    expect(bpdus).toHaveLength(5 * 5);
+    expect(bpdus).toHaveLength(10 * 5);
     expect(engine.now).toBe(simTime(110_000));
+  });
+});
+
+describe('the default fast timers', () => {
+  /** PC1 and PC2 on one switch. */
+  function pcSwitchPc() {
+    const lab = labBuilder();
+    const sw = lab.switch('SW1');
+    const pc1 = lab.host('pc', 'PC1', '10.0.0.1/24');
+    const pc2 = lab.host('pc', 'PC2', '10.0.0.2/24');
+    lab.connect(pc1, 'FastEthernet0', sw, 'FastEthernet0/1');
+    lab.connect(pc2, 'FastEthernet0', sw, 'FastEthernet0/2');
+    const engine = createEngine({ seed: 1, stacks: STACKS, linkDelay: ms(1) });
+    const sim = createSimService({ engine, frames: { now: () => 0, request: () => {} } });
+    sim.load(lab.topology);
+    const ping = () => {
+      const events: PingEvent[] = [];
+      const started = sim.ping(pc1, ip('10.0.0.2'), { count: 1, timeoutMs: 500 }, (event) =>
+        events.push(event),
+      );
+      if (!started.ok) throw new Error(started.error);
+      while (!events.some((event) => event.kind === 'summary')) engine.step();
+      return events.at(-1);
+    };
+    return { engine, ping };
+  }
+
+  it('lets one PC ping another across a switch within 5 s of the lab loading, and not before', () => {
+    const { engine, ping } = pcSwitchPc();
+
+    engine.runUntil(simTime(3_000));
+    expect(ping()).toMatchObject({ kind: 'summary', sent: 1, received: 0 });
+
+    engine.runUntil(simTime(CONVERGED));
+    expect(ping()).toMatchObject({ kind: 'summary', sent: 1, received: 1 });
+    expect(engine.now).toBeLessThan(simTime(5_000));
+  });
+
+  it('keeps every bridge in a line of 7 switches on the root at one end', () => {
+    const lab = labBuilder();
+    const line = Array.from({ length: 7 }, (_, n) => lab.switch(`SW${n + 1}`));
+    for (const [n, id] of line.slice(1).entries()) {
+      lab.connect(line[n]!, 'GigabitEthernet0/2', id, 'GigabitEthernet0/1');
+    }
+    const first = lab.device(line[0]!);
+    if (first.kind !== 'switch') throw new Error('not a switch');
+    const stpPriorities = { [VLAN1]: BridgePriority.parse(4096) };
+    const root = { ...first, config: { ...first.config, stpPriorities } };
+    const topology = { ...lab.topology, devices: { ...lab.topology.devices, [root.id]: root } };
+    const engine = createEngine({ seed: 1, stacks: STACKS, linkDelay: ms(1) });
+    const sim = createSimService({ engine, frames: { now: () => 0, request: () => {} } });
+    sim.load(topology);
+    engine.runUntil(simTime(10_000));
+    const mark = engine.log.lastId;
+
+    engine.runUntil(simTime(70_000));
+
+    const elections = engine.log
+      .since(mark)
+      .filter((event) => event.kind === 'note' && event.text.includes('root'));
+    expect(elections).toEqual([]);
+    const far = sim.spanningTree(line.at(-1)!);
+    expect(far.ok && far.value[0]?.rootCost).toBe(6 * 4);
+  });
+});
+
+describe('changing the timers setting while the lab runs', () => {
+  it("moves every bridge to the IOS timers by the root's next hello, then holds a port for 30 s", () => {
+    const lab = triangle();
+    const { engine, root, middle, last, tree, ports, blocked, runFor, linkBetween, unplug } = lab;
+    runFor(CONVERGED);
+    const before = blocked();
+
+    engine.applyPatch(timersPatch('ios'));
+    expect(tree(root).times).toEqual(IOS);
+    expect(tree(last).times).toEqual(FAST);
+    expect(tree(last).bridgeTimes).toEqual(IOS);
+    runFor(FAST.hello * 1000);
+    for (const id of [root, middle, last]) expect(tree(id).times).toEqual(IOS);
+    expect(blocked()).toEqual(before);
+
+    const standby = lab.portToward(last, middle);
+    unplug(linkBetween(last, root));
+    expect(ports(last)).toContain(`${standby} root listening`);
+    runFor(STP_CONVERGED_IOS - 1);
+    expect(ports(last)).toContain(`${standby} root learning`);
+    runFor(1);
+    expect(ports(last)).toContain(`${standby} root forwarding`);
+  });
+
+  it('lets timers already running finish, then runs the next state on the new forward delay', () => {
+    const { engine, root, ports, runFor, portToward, middle } = triangle({ timers: 'ios' });
+    const toMiddle = portToward(root, middle);
+    runFor(5_000);
+
+    engine.applyPatch(timersPatch('fast'));
+    runFor(9_999);
+    expect(ports(root)).toContain(`${toMiddle} designated listening`);
+    runFor(1);
+    expect(ports(root)).toContain(`${toMiddle} designated learning`);
+    runFor(FAST.forwardDelay * 1000);
+    expect(ports(root)).toContain(`${toMiddle} designated forwarding`);
+  });
+
+  it('undoes the change when Simulation mode steps back past it, and redoes it stepping forward', () => {
+    const { sim, root, tree } = triangle();
+    sim.setMode('simulation');
+    sim.step();
+
+    sim.applyPatch(timersPatch('ios'));
+    expect(tree(root).bridgeTimes).toEqual(IOS);
+    sim.step();
+
+    while (sim.stepBack());
+    expect(tree(root).bridgeTimes).toEqual(FAST);
+    expect(tree(root).times).toEqual(FAST);
+    sim.step();
+    expect(tree(root).bridgeTimes).toEqual(IOS);
   });
 });

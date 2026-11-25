@@ -6,6 +6,7 @@ import {
   moveDevices,
   removeDevices,
   renameDevice,
+  updateLabSettings,
   type Topology,
 } from '@/model';
 import { buildLab, end, expectOk } from '@/model/testing';
@@ -55,6 +56,22 @@ describe('diffTopology', () => {
     expect(diffTopology(topology, removed)).toEqual({
       devices: { [pc.id]: null },
       links: { [link.id]: null },
+    });
+  });
+
+  it('carries the lab settings when they change', () => {
+    const { topology } = linked();
+    const ios = updateLabSettings(topology, { stpTimers: 'ios' });
+
+    expect(diffTopology(topology, ios)).toEqual({
+      devices: {},
+      links: {},
+      settings: { stpTimers: 'ios' },
+    });
+    expect(diffTopology(ios, updateLabSettings(ios, { stpTimers: 'fast' }))).toEqual({
+      devices: {},
+      links: {},
+      settings: { stpTimers: 'fast' },
     });
   });
 });

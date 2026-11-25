@@ -71,7 +71,7 @@ function instanceBlock(tree: SpanningTreeVlan): string[] {
     '',
     `  Bridge ID  Priority    ${bridge.priority}  (priority ${bridge.priority - vlan} sys-id-ext ${vlan})`,
     `${INDENT}Address     ${ciscoMac(bridge.mac)}`,
-    timesLine(tree.times),
+    timesLine(tree.bridgeTimes),
     `${INDENT}Aging Time  ${tree.agingTime} sec`,
     '',
     row(['Interface', 'Role', 'Sts', 'Cost', 'Prio.Nbr', 'Type']),

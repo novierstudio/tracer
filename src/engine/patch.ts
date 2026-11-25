@@ -1,12 +1,22 @@
-import type { Device, DeviceId, Link, LinkId, Topology } from '@/model';
+import {
+  labSettings,
+  type Device,
+  type DeviceId,
+  type LabSettings,
+  type Link,
+  type LinkId,
+  type Topology,
+} from '@/model';
 
 /**
- * The new value of every device and link that changed, or null for one that was removed.
- * Applying a patch sets state rather than replaying edits, so applying it twice changes nothing.
+ * The new value of every device and link that changed, or null for one that was removed, and the
+ * lab's settings when they changed. Applying a patch sets state rather than replaying edits, so
+ * applying it twice changes nothing.
  */
 export type TopologyPatch = {
   devices: Record<DeviceId, Device | null>;
   links: Record<LinkId, Link | null>;
+  settings?: LabSettings;
 };
 
 const UI_ONLY_DEVICE_FIELDS: ReadonlySet<keyof Device> = new Set(['position']);
@@ -50,6 +60,10 @@ export function diffTopology(before: Topology, after: Topology): TopologyPatch |
       patch.links[id] = null;
       changed = true;
     }
+  }
+  if (before.settings !== after.settings) {
+    patch.settings = labSettings(after);
+    changed = true;
   }
   return changed ? patch : undefined;
 }

@@ -1,4 +1,14 @@
-import type { Device, DeviceId, Endpoint, Link, LinkId, Topology } from '@/model';
+import {
+  DEFAULT_LAB_SETTINGS,
+  labSettings,
+  type Device,
+  type DeviceId,
+  type Endpoint,
+  type LabSettings,
+  type Link,
+  type LinkId,
+  type Topology,
+} from '@/model';
 import { err, ok, type Result } from '@/model/result';
 import { cloneState } from './core/clone';
 import { createEventLog, type EventLog } from './core/log';
@@ -60,6 +70,7 @@ export type EngineSnapshot = {
   readonly head: EventId;
   readonly random: number;
   readonly generations: number;
+  readonly settings: LabSettings;
   readonly devices: ReadonlyMap<DeviceId, Device>;
   readonly links: readonly Readonly<LinkState>[];
   readonly running: ReadonlyMap<DeviceId, readonly { module: SimModule; state: unknown }[]>;
@@ -117,6 +128,7 @@ export function createEngine({
   let randomState = seed >>> 0;
   let now = START;
   let generations = 0;
+  let settings = DEFAULT_LAB_SETTINGS;
 
   function random() {
     const draw = drawRandom(randomState);
@@ -166,6 +178,9 @@ export function createEngine({
           const device = devices.get(id);
           if (!device) throw new Error(`Device ${id} is not in the simulation`);
           return device;
+        },
+        get settings() {
+          return settings;
         },
         portUp: (port) => portLinks.get(endpointKey({ device: id, port }))?.up ?? false,
         send: (port, frame) => send({ device: id, port }, frame),
@@ -221,6 +236,9 @@ export function createEngine({
 
   function applyPatch(patch: TopologyPatch) {
     const touched = Object.keys(patch.devices) as DeviceId[];
+    const settingsChanged =
+      patch.settings !== undefined && patch.settings.stpTimers !== settings.stpTimers;
+    if (patch.settings) settings = patch.settings;
     for (const id of touched) {
       const next = patch.devices[id];
       if (next) devices.set(id, next);
@@ -259,6 +277,11 @@ export function createEngine({
       if (!slots) start(device);
       else for (const slot of slots) slot.module.onConfigChange?.(slot.ctx);
     }
+    if (!settingsChanged) return;
+    for (const [id, slots] of running) {
+      if (touched.includes(id)) continue;
+      for (const slot of slots) slot.module.onConfigChange?.(slot.ctx);
+    }
   }
 
   function load(topology: Topology) {
@@ -272,6 +295,7 @@ export function createEngine({
     randomState = seed >>> 0;
     now = START;
     generations = 0;
+    settings = labSettings(topology);
     applyPatch({ devices: topology.devices, links: topology.links });
   }
 
@@ -358,6 +382,7 @@ export function createEngine({
       head: log.lastId,
       random: randomState,
       generations,
+      settings,
       devices: new Map(devices),
       links: [...links.values()].map((state) => ({ ...state })),
       running: saved,
@@ -411,6 +436,7 @@ export function createEngine({
     now = saved.now;
     randomState = saved.random;
     generations = saved.generations;
+    settings = saved.settings;
     log.truncate(saved.head);
   }
 

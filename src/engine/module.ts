@@ -1,4 +1,4 @@
-import type { Device, DeviceKind, PortId } from '@/model';
+import type { Device, DeviceKind, LabSettings, PortId } from '@/model';
 import type { SimDuration, SimTime } from './core/time';
 import type { Frame } from './frame';
 
@@ -7,6 +7,8 @@ export interface DeviceContext {
   readonly now: SimTime;
   /** The device as the simulation last received it. Read only. */
   readonly device: Device;
+  /** The lab-wide settings the simulation last received. */
+  readonly settings: LabSettings;
   portUp(port: PortId): boolean;
   /** Sends a frame out of a port. A port with no cable sends nothing. */
   send(port: PortId, frame: Frame): void;
@@ -39,7 +41,10 @@ export interface SimModule<S = unknown> {
   onFrame?(ctx: ModuleContext<S>, port: PortId, frame: Frame): void;
   onTimer?(ctx: ModuleContext<S>, key: string): void;
   onLinkChange?(ctx: ModuleContext<S>, port: PortId, up: boolean): void;
-  /** The device's config or ports may have changed. Re-derive what depends on them. */
+  /**
+   * The device's config or ports, or the lab's settings, may have changed. Re-derive what depends
+   * on them.
+   */
   onConfigChange?(ctx: ModuleContext<S>): void;
   /**
    * The device is powering off or leaving the simulation, and this instance is about to be

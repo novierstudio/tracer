@@ -9,17 +9,17 @@ import { ipModule } from './l3/ip';
 import { startPing } from './l3/ping';
 import { createSimService } from './service';
 import { STACKS } from './stacks';
-import { ip, routedLab } from './testing';
+import { ip, routedLab, STP_CONVERGED } from './testing';
 
 const PC1_IP = ip('192.168.1.10');
 const PC2_IP = ip('192.168.2.10');
 
 /**
- * Spanning tree forwards from 30 s and its roots send a hello every 2 s, so between 31 s and the
- * hello at 32 s the network is quiet but for what a test starts.
+ * Spanning tree forwards from 4 s and its roots send a hello every second, so between 4.5 s and
+ * the hello at 5 s the network is quiet but for what a test starts.
  */
-const QUIET = simTime(31_000);
-const NEXT_HELLO = simTime(32_000);
+const QUIET = simTime(STP_CONVERGED + 500);
+const NEXT_HELLO = simTime(STP_CONVERGED + 1_000);
 
 /** A service on the routed lab, already in Simulation mode, with a manual frame clock. */
 function routed() {

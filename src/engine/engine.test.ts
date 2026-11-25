@@ -596,8 +596,8 @@ describe('determinism', () => {
       (event) => !(event.frame.kind === 'ethernet' && event.frame.payload.kind === 'bpdu'),
     );
     expect(data).toHaveLength(40);
-    // Each switch is its own root and sends a hello out of both its ports every 2 s.
-    const hellos = (STP_CONVERGED + 10_000) / 2_000;
+    // Each switch is its own root and sends a hello out of both its ports every second.
+    const hellos = (STP_CONVERGED + 10_000) / 1_000;
     expect(frames(first.trace).length - data.length).toBe(hellos * 2 * 2);
     expect(second).toEqual(first);
     for (const clock of clocks) expect(clock).not.toHaveBeenCalled();
