@@ -5,6 +5,7 @@ import { useEditor } from '@/model/react';
 import { Button } from '@/ui/button';
 import { Dialog, DialogClose, DialogContent } from '@/ui/dialog';
 import { fileCommands } from './fileCommands';
+import { ImportDialog } from './ImportDialog';
 import { useFiles } from './react';
 import { fileSession } from './session';
 
@@ -77,10 +78,12 @@ function FileProblem() {
   return (
     <Dialog open={!!problem} onOpenChange={(next) => !next && fileSession.dismissProblem()}>
       {problem && (
-        <DialogContent title={problem.title} role="alertdialog">
-          <pre className="max-h-64 overflow-auto rounded-md bg-surface-2 p-3 font-mono text-xs whitespace-pre-wrap text-fg-1">
-            {problem.message}
-          </pre>
+        <DialogContent title={problem.title} description={problem.message} role="alertdialog">
+          {problem.detail && (
+            <pre className="max-h-64 overflow-auto rounded-md bg-surface-2 p-3 font-mono text-xs whitespace-pre-wrap text-fg-1">
+              {problem.detail}
+            </pre>
+          )}
           <div className="flex justify-end">
             <DialogClose asChild>
               <Button variant="primary">OK</Button>
@@ -124,13 +127,14 @@ export function FileDialogs() {
   return (
     <>
       <ConfirmNewLab />
+      <ImportDialog />
       <FileProblem />
       <Notice />
       {dragging && (
         <div className="pointer-events-none fixed inset-0 z-50 grid place-content-center bg-accent/10 p-4">
           <div className="flex items-center gap-2 rounded-lg bg-surface-1 px-4 py-3 text-sm font-medium text-fg-1 shadow-pop">
             <FileUpIcon className="size-4 text-accent-text" />
-            Drop a .tracer.json file to open it
+            Drop a Tracer lab or a Packet Tracer file to open it
           </div>
         </div>
       )}

@@ -17,7 +17,7 @@ export function fileCommands(session: FileSession, recents: readonly LabSummary[
       id: 'file.open',
       title: 'Open lab…',
       group: 'File',
-      keywords: ['load', 'import', 'file', 'tracer.json'],
+      keywords: ['load', 'import', 'file', 'tracer.json', 'packet tracer', 'pkt', 'pka'],
       icon: FolderOpenIcon,
       shortcut: 'open',
       run: () => void session.open(),
