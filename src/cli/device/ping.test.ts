@@ -33,17 +33,23 @@ const summary = (received: number, rtt?: [number, number, number]): PingEvent =>
   ...(rtt && { rtt: { minMs: rtt[0], avgMs: rtt[1], maxMs: rtt[2] } }),
 });
 
+const HANDLE = 7 as ProbeHandle;
+
 /** A simulation whose ping hands its listener to the test, which plays events through it. */
 function scripted() {
   let listener: PingListener | undefined;
+  const cancelled: ProbeHandle[] = [];
   const source: StreamSource = {
     ping: async (_target, _options, next) => {
       listener = next;
-      return { ok: true, value: 1 as ProbeHandle };
+      return { ok: true, value: HANDLE };
     },
+    traceroute: () => Promise.reject(new Error('not a traceroute')),
+    cancel: async (handle) => void cancelled.push(handle),
   };
   return {
     source: async () => source,
+    cancelled,
     play: (...events: PingEvent[]) => events.forEach((event) => listener!(event)),
   };
 }
@@ -92,7 +98,7 @@ describe('ping output', () => {
     expect(await ping.done).toBe(`${HEAD}UUUUU\nSuccess rate is 0 percent (0/5)\n`);
   });
 
-  it('stops at an abort with the rate so far, and drops later events', async () => {
+  it('stops at an abort with the rate so far, cancels the ping, and drops later events', async () => {
     const sim = scripted();
     const ping = run(PING, sim.source);
     await settle();
@@ -102,8 +108,9 @@ describe('ping output', () => {
     expect(text).toBe(
       `${HEAD}!.\nSuccess rate is 50 percent (1/2), round-trip min/avg/max = 2/2/2 ms\n`,
     );
+    expect(sim.cancelled).toEqual([HANDLE]);
 
-    sim.play(reply(3, 1), summary(2, [1, 1, 2]));
+    sim.play(summary(2, [2, 2, 2]));
     expect(ping.text()).toBe(text);
   });
 
@@ -115,13 +122,46 @@ describe('ping output', () => {
     expect(await ping.done).toBe(`${HEAD}\nSuccess rate is 0 percent (0/1)\n`);
   });
 
+  it('cancels a ping aborted while the simulation was still starting it', async () => {
+    let started!: () => void;
+    const cancelled: ProbeHandle[] = [];
+    const source: StreamSource = {
+      ping: () => new Promise((resolve) => (started = () => resolve({ ok: true, value: HANDLE }))),
+      traceroute: () => Promise.reject(new Error('not a traceroute')),
+      cancel: async (handle) => void cancelled.push(handle),
+    };
+    const ping = run(PING, async () => source);
+    await settle();
+    ping.output.abort();
+    await ping.done;
+    expect(cancelled).toEqual([]);
+
+    started();
+    await settle();
+    expect(cancelled).toEqual([HANDLE]);
+  });
+
+  it('does not cancel a ping that finished', async () => {
+    const sim = scripted();
+    const ping = run(PING, sim.source);
+    await settle();
+    sim.play(...[1, 2, 3, 4, 5].map(unreachable), summary(0));
+    await ping.done;
+    ping.output.abort();
+    expect(sim.cancelled).toEqual([]);
+  });
+
   it('prints the offline output when the simulation cannot be reached', async () => {
     const ping = run(PING, () => Promise.reject(new Error('no worker')));
     expect(await ping.done).toBe('% offline\n');
   });
 
   it('says why when the device cannot ping', async () => {
-    const source: StreamSource = { ping: async () => ({ ok: false, error: 'powered-off' }) };
+    const source: StreamSource = {
+      ping: async () => ({ ok: false, error: 'powered-off' }),
+      traceroute: () => Promise.reject(new Error('not a traceroute')),
+      cancel: async () => {},
+    };
     const ping = run(PING, async () => source);
     expect(await ping.done).toBe(`${HEAD}% The device is powered off.\n`);
   });

@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { Terminal } from '@xterm/headless';
 import { describe, expect, it, vi } from 'vitest';
-import { after, ms } from '@/engine/core/time';
+import { after, ms, simTime } from '@/engine/core/time';
 import { createEngine } from '@/engine/engine';
 import { diffTopology } from '@/engine/patch';
 import { createSimService } from '@/engine/service';
@@ -58,6 +58,8 @@ function lab() {
     spanningTree: async (device) => sim.spanningTree(device),
     now: () => engine.now,
     ping: async (...args) => sim.ping(...args),
+    traceroute: async (...args) => sim.traceroute(...args),
+    cancel: async (handle) => sim.cancel(handle),
   };
   const consoles = createConsoleRegistry(store, async () => queries);
   /** Runs until spanning tree forwards: a port a config change moved into a VLAN starts over. */
@@ -83,7 +85,9 @@ function lab() {
   };
   return {
     consoles,
+    engine,
     r1: consoles.get(r1)!,
+    r1Id: r1,
     sw1: consoles.get(sw1)!,
     pc1,
     converge,
@@ -189,6 +193,54 @@ describe('a console reading live state', () => {
       'Sending 2, 100-byte ICMP Echos to 192.168.30.10, timeout is 1 seconds:',
       '..',
       'Success rate is 0 percent (0/2)',
+      'R1#',
+    ]);
+  });
+
+  it('traces the route from the router, a line per hop as the simulation settles it', async () => {
+    const { r1, sw1, converge, runUntilPrompt } = lab();
+    await type(r1, R1_CONFIG);
+    await type(sw1, SW1_CONFIG);
+    converge();
+
+    r1.input('traceroute 192.168.20.10\r', SIZE);
+    await runUntilPrompt(r1, '\r\nR1#');
+
+    const shown = await rows(r1);
+    expect(shown.slice(shown.indexOf('R1#traceroute 192.168.20.10'))).toEqual([
+      'R1#traceroute 192.168.20.10',
+      'Type escape sequence to abort.',
+      'Tracing the route to 192.168.20.10',
+      '',
+      expect.stringMatching(/^ {2}1 192\.168\.20\.10 \d+ msec \d+ msec \d+ msec$/),
+      'R1#',
+    ]);
+  });
+
+  it('stops sending when Ctrl+Shift+6 aborts a ping', async () => {
+    const { engine, r1, r1Id, sw1, converge } = lab();
+    await type(r1, R1_CONFIG);
+    await type(sw1, SW1_CONFIG);
+    converge();
+
+    r1.input('ping 192.168.20.10 repeat 100\r', SIZE);
+    // Spanning tree's timers never leave the queue empty, so let the console run after each event.
+    for (let i = 0; i < 10_000 && !r1.transcript.includes('!!!'); i++) {
+      engine.step();
+      await new Promise(setImmediate);
+    }
+    r1.input('\x1e', SIZE);
+    // The simulation stands still while the abort reaches it, as a worker's would for a moment.
+    await vi.waitFor(async () => expect((await rows(r1)).at(-1)).toBe('R1#'));
+    const mark = engine.log.lastId;
+    engine.runUntil(simTime(engine.now + 10_000));
+
+    const sent = engine.log
+      .since(mark)
+      .filter((event) => event.kind === 'frame' && event.from.device === r1Id);
+    expect(sent).toEqual([]);
+    expect((await rows(r1)).slice(-2)).toEqual([
+      expect.stringMatching(/^Success rate is 100 percent \(3\/3\)/),
       'R1#',
     ]);
   });

@@ -49,6 +49,10 @@ export type SimLink = SimQueries & {
   /** The simulated clock as of the latest batch, in milliseconds since the run started. */
   readonly now: () => number;
   readonly ping: (...args: Parameters<SimAPI['ping']>) => Promise<ReturnType<SimAPI['ping']>>;
+  readonly traceroute: (
+    ...args: Parameters<SimAPI['traceroute']>
+  ) => Promise<ReturnType<SimAPI['traceroute']>>;
+  readonly cancel: Remote<SimAPI['cancel']>;
 };
 
 /** Where to reach the simulation. It rejects when there is none, as in a test without a worker. */
@@ -71,7 +75,11 @@ export function engineSource(sim: SimLink, device: DeviceId): EngineSource {
 
 /** Streams opened on the simulation for one device. */
 function streamSource(sim: SimLink, device: DeviceId): StreamSource {
-  return { ping: (target, options, listener) => sim.ping(device, target, options, listener) };
+  return {
+    ping: (target, options, listener) => sim.ping(device, target, options, listener),
+    traceroute: (target, options, listener) => sim.traceroute(device, target, options, listener),
+    cancel: (handle) => sim.cancel(handle),
+  };
 }
 
 /** The query's output from live state, or `fallback` when the simulation cannot answer. */

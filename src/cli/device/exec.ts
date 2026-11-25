@@ -67,6 +67,11 @@ function pingCommand(options: readonly Segment[]) {
   });
 }
 
+const TRACE_OFFLINE = ['% The simulation is not running, so there is nothing to trace through.'];
+
+/** IOS probes each hop 3 times, waits 3 seconds for each probe, and gives up after 30 hops. */
+export const TRACE_OPTIONS = { maxHops: 30, probesPerHop: 3, timeoutMs: 3000 };
+
 /** EXEC commands that read the session or the simulation rather than the config. */
 export const execCommands = [
   pingCommand([]),
@@ -74,6 +79,18 @@ export const execCommands = [
   pingCommand(timeout),
   pingCommand([...repeat, ...timeout]),
   pingCommand([...timeout, ...repeat]),
+  command({
+    modes: EXEC,
+    path: [
+      keyword('traceroute', 'Trace route to destination'),
+      ipv4('target', 'Trace route to destination address'),
+    ],
+    run: (args, ctx) => {
+      const { target } = args as { target: Ipv4Address };
+      ctx.stream({ kind: 'traceroute', target, options: TRACE_OPTIONS });
+      return TRACE_OFFLINE;
+    },
+  }),
   command({
     modes: EXEC,
     path: [show, keyword('history', 'Information about Terminal history')],
