@@ -1,6 +1,8 @@
 import { CableIcon, Trash2Icon } from 'lucide-react';
-import type { Endpoint, Link, Topology } from '@/model';
+import { setLinkCable, type Cable, type Endpoint, type Link, type Topology } from '@/model';
+import { editorStore } from '@/model/store';
 import { Button } from '@/ui/button';
+import { Segmented } from '@/ui/segmented';
 import { deleteItems, selectDevice } from './actions';
 import { formatCidr } from './ipv4';
 import { DeviceTile, Mono, STATE_LABELS, Section, StateDot } from './parts';
@@ -34,6 +36,7 @@ export function LinkInspector({ link, topology }: { link: Link; topology: Topolo
           </p>
         </div>
       </header>
+      <CableSection link={link} topology={topology} />
       <Section title="Endpoints" className="border-t border-line">
         <ul className="flex flex-col gap-2">
           {ends.map(({ label, end, role }) => (
@@ -48,6 +51,48 @@ export function LinkInspector({ link, topology }: { link: Link; topology: Topolo
         </Button>
       </div>
     </div>
+  );
+}
+
+const CABLE_CHOICES: Record<Cable, string> = {
+  straight: 'Straight-through',
+  crossover: 'Crossover',
+  serial: 'Serial',
+};
+
+/** The cables both ports take, as the model judges them, and the DCE end of a serial cable. */
+function CableSection({ link, topology }: { link: Link; topology: Topology }) {
+  const fits = (Object.keys(CABLE_CHOICES) as Cable[]).filter(
+    (cable) => setLinkCable(topology, { link: link.id, cable }).ok,
+  );
+  const hostname = (end: Endpoint) => topology.devices[end.device]?.config.hostname ?? '?';
+  const { setLinkCable: change } = editorStore.getState();
+  return (
+    <Section title="Cable" className="border-t border-line">
+      {fits.length > 1 && (
+        <Segmented
+          label="Cable type"
+          value={link.cable}
+          onValueChange={(cable) => change({ link: link.id, cable })}
+          options={fits.map((cable) => ({ value: cable, label: CABLE_CHOICES[cable] }))}
+          className="self-start"
+        />
+      )}
+      {link.cable === 'serial' && (
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-xs text-fg-3">DCE end (sets the clock)</span>
+          <Segmented
+            label="DCE end"
+            value={link.dce}
+            onValueChange={(dce) => change({ link: link.id, cable: 'serial', dce })}
+            options={[
+              { value: 'a', label: hostname(link.a) },
+              { value: 'b', label: hostname(link.b) },
+            ]}
+          />
+        </div>
+      )}
+    </Section>
   );
 }
 

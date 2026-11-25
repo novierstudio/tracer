@@ -1,6 +1,8 @@
 import { MonitorIcon, TerminalSquareIcon, Trash2Icon } from 'lucide-react';
+import { Switch } from 'radix-ui';
 import { useId, useState, type ReactNode } from 'react';
 import type { Device, Topology } from '@/model';
+import { editorStore } from '@/model/store';
 import { Button } from '@/ui/button';
 import { cn } from '@/ui/cn';
 import { EmptyState } from '@/ui/empty-state';
@@ -97,7 +99,7 @@ function DeviceHeader({ device }: { device: Device }) {
             <span aria-hidden="true" className="text-fg-3">
               ·
             </span>
-            <PowerState powered={device.powered} />
+            <PowerSwitch device={device} />
           </p>
         </div>
         <Tooltip label="Delete device">
@@ -124,17 +126,21 @@ function DeviceHeader({ device }: { device: Device }) {
   );
 }
 
-/** Read-only until the store has a power action. */
-function PowerState({ powered }: { powered: boolean }) {
+function PowerSwitch({ device }: { device: Device }) {
   return (
-    <span className="inline-flex shrink-0 items-center gap-1">
-      <span
-        aria-hidden="true"
-        className={cn('size-1.5 rounded-full', powered ? 'bg-ok' : 'bg-fg-3')}
-      />
-      <span className="sr-only">Power</span>
-      {powered ? 'On' : 'Off'}
-    </span>
+    <label className="inline-flex shrink-0 items-center gap-1.5">
+      <Switch.Root
+        aria-label="Power"
+        checked={device.powered}
+        onCheckedChange={(powered) =>
+          editorStore.getState().setPowered({ device: device.id, powered })
+        }
+        className="relative inline-flex h-4 w-7 shrink-0 cursor-default items-center rounded-full bg-surface-3 transition-colors duration-150 data-[state=checked]:bg-ok/80"
+      >
+        <Switch.Thumb className="block size-3 translate-x-0.5 rounded-full bg-surface-1 shadow-xs transition-transform duration-150 data-[state=checked]:translate-x-3.5" />
+      </Switch.Root>
+      <span aria-hidden="true">{device.powered ? 'On' : 'Off'}</span>
+    </label>
   );
 }
 
