@@ -1,12 +1,12 @@
-import { MonitorIcon, Trash2Icon } from 'lucide-react';
+import { Trash2Icon } from 'lucide-react';
 import { Switch } from 'radix-ui';
 import { useId, useState, type ReactNode } from 'react';
+import { HostDesktop } from '@/features/desktop/HostDesktop';
 import { DeviceTerminal } from '@/features/terminal/Terminal';
 import type { Device, Topology } from '@/model';
 import { editorStore } from '@/model/store';
 import { Button } from '@/ui/button';
 import { cn } from '@/ui/cn';
-import { EmptyState } from '@/ui/empty-state';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/ui/tabs';
 import { Tooltip } from '@/ui/tooltip';
 import { deleteItems } from './actions';
@@ -67,11 +67,8 @@ export function DeviceInspector({ device, topology, tab, onTabChange, focusConso
           <ConfigTab device={device} rows={rows} />
         </TabsContent>
         {host ? (
-          <TabsContent value="console" className="pt-10">
-            <EmptyState icon={MonitorIcon} title="Desktop comes with the engine">
-              Command Prompt and the web browser will open here. Set the address in the Config tab
-              for now.
-            </EmptyState>
+          <TabsContent value="console" className="h-full">
+            <HostDesktop device={device} focusPrompt={focusConsole} />
           </TabsContent>
         ) : (
           <TabsContent value="console" className="h-full pt-2 pr-1 pb-2 pl-3">
