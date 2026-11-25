@@ -8,7 +8,12 @@ type DevWindow = {
       getState(): {
         load(topology: unknown): void;
         select(selection: { devices: string[]; links: string[] }): void;
-        topology: { devices: Record<string, { config: { hostname: string } } | undefined> };
+        topology: {
+          devices: Record<
+            string,
+            { config: { hostname: string }; position: { x: number; y: number } } | undefined
+          >;
+        };
       };
     };
     parseTopology(input: unknown): { ok: true; value: unknown } | { ok: false; error: unknown };
@@ -139,6 +144,15 @@ export const hostnameInStore = (page: Page, device: string) =>
     const { topology } = (window as unknown as DevWindow).tracer.editorStore.getState();
     return topology.devices[id]?.config.hostname;
   }, device);
+
+/** Device positions from the store, by hostname. */
+export const devicePositions = (page: Page) =>
+  page.evaluate(() => {
+    const { topology } = (window as unknown as DevWindow).tracer.editorStore.getState();
+    return Object.fromEntries(
+      Object.values(topology.devices).flatMap((d) => (d ? [[d.config.hostname, d.position]] : [])),
+    ) as Record<string, { x: number; y: number }>;
+  });
 
 /** One xterm on the page, found inside `scope`. */
 export function terminalIn(page: Page, scope: Locator) {

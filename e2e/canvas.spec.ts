@@ -44,8 +44,9 @@ test('devices dragged from the palette land where they are dropped, with unique 
 
   const box = (await canvas(page).boundingBox())!;
   const router = (await device(page, 'Router0').boundingBox())!;
-  expect(router.x + router.width / 2 - box.x).toBeCloseTo(220, -1);
-  expect(router.y + router.height / 2 - box.y).toBeCloseTo(180, -1);
+  // Within one grid step: the tile snaps so its edges sit on the 16px grid.
+  expect(Math.abs(router.x + router.width / 2 - box.x - 220)).toBeLessThanOrEqual(16);
+  expect(Math.abs(router.y + router.height / 2 - box.y - 180)).toBeLessThanOrEqual(16);
 
   await page
     .getByRole('complementary', { name: 'Device palette' })
