@@ -1,4 +1,27 @@
-import type { DeviceKind } from '@/model';
+import {
+  addDevice,
+  addLink,
+  createDevice,
+  createLink,
+  createIdSource,
+  emptyTopology,
+  Hostname,
+  InterfaceId,
+  Ipv4Address,
+  Ipv4Cidr,
+  PortId,
+  VirtualInterfaceId,
+  VlanId,
+  type Device,
+  type DeviceId,
+  type DeviceKind,
+  type LinkSpec,
+  type RoutedInterface,
+  type StaticRoute,
+  type SwitchInterface,
+  type Topology,
+} from '@/model';
+import { expectOk } from '@/model/testing';
 import { ms, type SimDuration } from './core/time';
 import type { SimModule, Stacks } from './module';
 
@@ -39,5 +62,150 @@ export function helloModule({
       if (period !== undefined) ctx.setTimer('hello', ms(period + ctx.random() * jitter));
     },
     ...noteHooks,
+  };
+}
+
+export const cidr = (text: string): Ipv4Cidr => {
+  const [address, prefixLength] = text.split('/');
+  return Ipv4Cidr.parse({ address, prefixLength: Number(prefixLength) });
+};
+
+export const ip = (text: string) => Ipv4Address.parse(text);
+
+/** `via` is a next-hop address or an exit interface name. */
+export function staticRoute(prefix: string, via: string): StaticRoute {
+  const address = Ipv4Address.safeParse(via);
+  return {
+    prefix: cidr(prefix),
+    nextHop: address.success
+      ? { kind: 'address', address: address.data }
+      : { kind: 'interface', interface: InterfaceId.parse(via) },
+  };
+}
+
+export const access = (vlan: number): SwitchInterface['switchport'] => ({
+  mode: 'access',
+  vlan: VlanId.parse(vlan),
+});
+
+export const trunk = (nativeVlan = 1): SwitchInterface['switchport'] => ({
+  mode: 'trunk',
+  nativeVlan: VlanId.parse(nativeVlan),
+});
+
+const ports = (kind: 'fastEthernet' | 'gigabitEthernet' | 'serial', names: string[]) =>
+  names.map((name) => ({ kind, id: PortId.parse(name) }));
+
+const SWITCH_PORTS = [
+  ...ports(
+    'fastEthernet',
+    Array.from({ length: 8 }, (_, n) => `FastEthernet0/${n + 1}`),
+  ),
+  ...ports('gigabitEthernet', ['GigabitEthernet0/1', 'GigabitEthernet0/2']),
+];
+
+const ROUTER_PORTS = [
+  ...ports('gigabitEthernet', ['GigabitEthernet0/0', 'GigabitEthernet0/1', 'GigabitEthernet0/2']),
+  ...ports('serial', ['Serial0/0/0', 'Serial0/0/1']),
+];
+
+/**
+ * Builds a lab in code, one device or cable at a time, through the model's own commands. Devices
+ * are created powered on with the model's factory config, then given the addressing a test needs.
+ */
+export function labBuilder(seed = 1) {
+  const ids = createIdSource(seed);
+  let topology = emptyTopology({ name: 'Lab', now: new Date('2026-01-01T00:00:00.000Z') });
+  const base = { position: { x: 0, y: 0 } };
+
+  const add = (device: Device) => {
+    topology = expectOk(addDevice(topology, device));
+    return device.id;
+  };
+
+  return {
+    get topology(): Topology {
+      return topology;
+    },
+    device: (id: DeviceId): Device => topology.devices[id]!,
+
+    host(kind: 'pc' | 'server', name: string, address?: string, gateway?: string): DeviceId {
+      const device = createDevice(
+        {
+          ...base,
+          kind,
+          model: kind,
+          hostname: Hostname.parse(name),
+          ports: ports('fastEthernet', ['FastEthernet0']),
+        },
+        { ids, topology },
+      );
+      if (device.kind !== 'pc' && device.kind !== 'server') throw new Error('not a host');
+      device.config.ipv4 = {
+        mode: 'static',
+        address: address === undefined ? undefined : cidr(address),
+        gateway: gateway === undefined ? undefined : ip(gateway),
+      };
+      return add(device);
+    },
+
+    switch(
+      name: string,
+      switchports: Record<string, SwitchInterface['switchport']> = {},
+    ): DeviceId {
+      const device = createDevice(
+        {
+          ...base,
+          kind: 'switch',
+          model: 'switch',
+          hostname: Hostname.parse(name),
+          ports: SWITCH_PORTS,
+        },
+        { ids, topology },
+      );
+      if (device.kind !== 'switch') throw new Error('not a switch');
+      for (const [name, switchport] of Object.entries(switchports)) {
+        device.config.interfaces[PortId.parse(name)] = { shutdown: false, switchport };
+      }
+      return add(device);
+    },
+
+    /** Interfaces named in `addresses` come up with that address. The rest stay shut down. */
+    router(
+      name: string,
+      addresses: Record<string, string>,
+      staticRoutes: StaticRoute[] = [],
+    ): DeviceId {
+      const device = createDevice(
+        {
+          ...base,
+          kind: 'router',
+          model: 'router',
+          hostname: Hostname.parse(name),
+          ports: ROUTER_PORTS,
+        },
+        { ids, topology },
+      );
+      if (device.kind !== 'router') throw new Error('not a router');
+      for (const [name, address] of Object.entries(addresses)) {
+        const routed: RoutedInterface = { shutdown: false, ipv4: cidr(address) };
+        if (name.startsWith('Loopback'))
+          device.config.virtualInterfaces[VirtualInterfaceId.parse(name)] = routed;
+        else device.config.interfaces[PortId.parse(name)] = routed;
+      }
+      device.config.staticRoutes = staticRoutes;
+      return add(device);
+    },
+
+    connect(a: DeviceId, aPort: string, b: DeviceId, bPort: string): void {
+      const ends = {
+        a: { device: a, port: PortId.parse(aPort) },
+        b: { device: b, port: PortId.parse(bPort) },
+      };
+      const spec: LinkSpec = aPort.startsWith('Serial')
+        ? { cable: 'serial', ...ends, dce: 'a' }
+        : { cable: 'straight', ...ends };
+      topology = expectOk(addLink(topology, createLink(spec, { ids, topology })));
+    },
   };
 }

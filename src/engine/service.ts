@@ -2,6 +2,7 @@ import type { SimAPI, SimEventBatch, SimMode } from './api';
 import { after, ms, type SimTime } from './core/time';
 import type { Engine } from './engine';
 import type { EventId, SimEvent } from './events';
+import { macTable, switchingModule } from './l2/switching';
 
 /** The wall clock and frame timer that drive playback. The worker passes the real ones. */
 export type FrameClock = {
@@ -117,6 +118,8 @@ export function createSimService({
       requestFrame();
     },
     runCommand: () => ({ kind: 'not-implemented' }),
+    macTable: (device) =>
+      engine.withModule(device, switchingModule, (ctx) => macTable(ctx.state, ctx.now)),
     subscribe(next) {
       listener = next;
       sent = undefined;
