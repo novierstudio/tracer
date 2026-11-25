@@ -1,10 +1,11 @@
-import type { Device, DeviceId, Endpoint, Link, LinkId, PortId, Topology } from '@/model';
+import type { Device, DeviceId, Endpoint, Link, LinkId, Topology } from '@/model';
 import { createEventLog, type EventLog } from './core/log';
 import { createEventQueue, type QueueEntry } from './core/queue';
 import { createRandom } from './core/random';
 import { after, ms, START, type SimDuration, type SimTime } from './core/time';
 import type { SimEvent } from './events';
 import type { Frame } from './frame';
+import { endUp } from './l1';
 import type { ModuleContext, SimModule, Stacks } from './module';
 import type { TopologyPatch } from './patch';
 
@@ -55,21 +56,6 @@ const sameEndpoint = (left: Endpoint, right: Endpoint) =>
 const sameWiring = (left: Link, right: Link) =>
   left.cable === right.cable && sameEndpoint(left.a, right.a) && sameEndpoint(left.b, right.b);
 
-function adminUp(device: Device, port: PortId): boolean {
-  switch (device.kind) {
-    case 'router':
-    case 'switch':
-      return device.config.interfaces[port]?.shutdown === false;
-    case 'pc':
-    case 'server':
-      return true;
-    default: {
-      const exhaustive: never = device;
-      return exhaustive;
-    }
-  }
-}
-
 export function createEngine({
   seed,
   stacks,
@@ -85,11 +71,6 @@ export function createEngine({
   let random = createRandom(seed);
   let now = START;
   let generations = 0;
-
-  function endUp({ device: id, port }: Endpoint): boolean {
-    const device = devices.get(id);
-    return device !== undefined && device.powered && adminUp(device, port);
-  }
 
   function send(from: Endpoint, frame: Frame) {
     const state = portLinks.get(endpointKey(from));
@@ -204,7 +185,9 @@ export function createEngine({
     for (const id of touched) if (running.has(id) && !devices.get(id)?.powered) stop(id);
 
     for (const state of links.values()) {
-      const up = endUp(state.link.a) && endUp(state.link.b);
+      const { a, b, cable } = state.link;
+      const up =
+        endUp(devices.get(a.device), a.port, cable) && endUp(devices.get(b.device), b.port, cable);
       if (up === state.up) continue;
       state.up = up;
       if (up) state.generation = ++generations;
