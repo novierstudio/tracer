@@ -253,9 +253,10 @@ function drawChip(
   if (size !== 1) ctx.scale(size, size);
   ctx.fillStyle = colours.fill;
   ctx.strokeStyle = palette.outline;
-  ctx.lineWidth = 2;
+  ctx.lineWidth = 3;
   ctx.lineJoin = 'round';
-  // The arrowhead goes first, so the pill covers its base and only its point shows ahead.
+  // The pill and its arrowhead, one path with the same winding so they fill as one shape. The
+  // outline goes under the fill, so only its outer half shows and the seam between them hides.
   const edge = Math.min(
     width / 2 / Math.max(Math.abs(ux), 1e-6),
     height / 2 / Math.max(Math.abs(uy), 1e-6),
@@ -263,28 +264,23 @@ function drawChip(
   const tip = edge + ARROW_LENGTH * scale;
   const back = edge - 3 * scale;
   const half = ARROW_HALF_WIDTH * scale;
-  const arrow = () => {
-    ctx.beginPath();
+  const body = () => {
+    roundedRect(ctx, 0, 0, width, height);
     ctx.moveTo(ux * tip, uy * tip);
     ctx.lineTo(ux * back - uy * half, uy * back + ux * half);
     ctx.lineTo(ux * back + uy * half, uy * back - ux * half);
     ctx.closePath();
   };
-  arrow();
+  body();
   ctx.stroke();
   ctx.fill();
-  roundedRect(ctx, 0, 0, width, height);
-  ctx.fill();
-  ctx.stroke();
   ctx.fillStyle = colours.text;
   ctx.fillText(PROTOCOLS[chip.protocol].label, 0, 0.5 * scale);
   const wash = dimmed ? alpha * WASH : 0;
   if (wash > 0) {
     ctx.globalAlpha = wash;
     ctx.fillStyle = palette.outline;
-    arrow();
-    ctx.fill();
-    roundedRect(ctx, 0, 0, width + 2, height + 2);
+    body();
     ctx.fill();
   }
   const vlan = vlanOf(chip.event);
