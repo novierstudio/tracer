@@ -6,3 +6,10 @@
 .react-flow[data-pdu-tool] .react-flow__node:hover {
   filter: drop-shadow(0 0 0.375rem color-mix(in srgb, var(--accent) 55%, transparent));
 }
+
+/* In Simulation mode a chip under the pointer selects its event when clicked. */
+.react-flow[data-chip-hover] .react-flow__pane,
+.react-flow[data-chip-hover] .react-flow__edge,
+.react-flow[data-chip-hover] .react-flow__node {
+  cursor: pointer;
+}
