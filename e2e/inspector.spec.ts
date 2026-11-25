@@ -6,6 +6,7 @@ test.use({ viewport: { width: 1440, height: 900 } });
 type DevWindow = {
   __TRACER_DEV__?: boolean;
   tracer: {
+    loadLab(input: unknown): void;
     editorStore: {
       getState(): {
         load(topology: unknown): void;
@@ -79,9 +80,9 @@ async function openWithFixture(page: Page) {
   });
   await page.goto('./');
   await page.evaluate((topology) => {
-    const store = (window as unknown as DevWindow).tracer.editorStore;
-    store.getState().load(topology);
-    store.getState().select({ devices: ['dev_R1'], links: [] });
+    const { tracer } = window as unknown as DevWindow;
+    tracer.loadLab(topology);
+    tracer.editorStore.getState().select({ devices: ['dev_R1'], links: [] });
   }, FIXTURE);
 }
 
