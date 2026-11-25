@@ -119,12 +119,15 @@ type SimWindow = {
   };
 };
 
-/** How long a switch port takes to forward after it comes up: listening, then learning, 15 s each. */
-export const STP_CONVERGENCE_S = 30;
+/**
+ * How long a switch port takes to forward after it comes up on the default fast spanning tree
+ * timers: listening, then learning, 2 s each. The real IOS timers take 30 s.
+ */
+export const STP_CONVERGENCE_S = 4;
 
 /**
  * Runs the realtime clock 100 times faster until `seconds` of simulated time have passed, then
- * back at 1x. Spanning tree holds a new switch port for 30 simulated seconds before it forwards.
+ * back at 1x. Spanning tree holds a new switch port for 4 simulated seconds before it forwards.
  */
 export async function fastForward(page: Page, seconds = STP_CONVERGENCE_S + 1) {
   await page.waitForFunction(() => (window as unknown as SimWindow).tracerSim !== undefined);

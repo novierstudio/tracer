@@ -1,9 +1,8 @@
 import { expect, test, type Page } from '@playwright/test';
 import { fastForward, select, switch24, terminalIn } from './lab';
+import { ROUTED_LAB, type DevWindow } from './routed';
 
 test.use({ viewport: { width: 1440, height: 900 } });
-
-type DevWindow = { __TRACER_DEV__?: boolean; tracer: { loadLab(input: unknown): void } };
 
 const link = (id: string, a: [string, string], b: [string, string]) => ({
   id,
@@ -92,4 +91,70 @@ test('a loop of switches blocks one port: its light turns amber and show spannin
         .join('')
         .replace(/\s+/g, ''),
     );
+});
+
+test('a lab pings within seconds of loading, and Lab settings switches it to the real IOS timers', async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    (window as unknown as DevWindow).__TRACER_DEV__ = true;
+  });
+  await page.goto('./');
+  await expect(page.getByRole('contentinfo').getByRole('status')).toHaveText('Engine ready');
+
+  // No fast-forward: the clock runs at 1x, and PC1 pings PC2 until a reply comes back.
+  const elapsed = await page.evaluate(
+    (topology) =>
+      new Promise<number>((resolve) => {
+        const { tracer, tracerSim } = window as unknown as DevWindow;
+        tracer.loadLab(topology);
+        const start = performance.now();
+        const ping = () =>
+          void tracerSim
+            .ping('dev_PC1', '192.168.2.10', { count: 1, timeoutMs: 500 }, (event) => {
+              if (event.kind === 'reply') resolve(performance.now() - start);
+              else if (event.kind === 'summary' && event.received === 0) ping();
+            })
+            .then((started) => {
+              // The worker gets the lab a moment after the editor does.
+              if (!started.ok) setTimeout(ping, 100);
+            });
+        ping();
+      }),
+    ROUTED_LAB,
+  );
+  // Each switch port listens for 2 s and learns for 2 s before it forwards.
+  expect(elapsed).toBeGreaterThan(3_000);
+  expect(elapsed).toBeLessThan(8_000);
+
+  await select(page, 'dev_SW1');
+  const inspector = page.getByRole('complementary', { name: 'Inspector' });
+  await inspector.getByRole('tab', { name: 'CLI' }).click();
+  const cli = terminalIn(page, inspector);
+  await cli.input.focus();
+  await expect.poll(cli.lastRow).toBe('SW1>');
+  await cli.run('enable', 'SW1#');
+  const shown = async () => (await cli.rows()).join('').replace(/\s+/g, '');
+  const showSpanningTree = async () => {
+    await cli.input.focus();
+    await page.keyboard.type('show spanning-tree');
+    await page.keyboard.press('Enter');
+  };
+  await showSpanningTree();
+  await expect.poll(shown).toContain('HelloTime1secMaxAge7secForwardDelay2sec');
+
+  await page.getByRole('button', { name: 'Tracer menu' }).click();
+  await page.getByRole('menuitem', { name: 'Lab settings…' }).click();
+  const settings = page.getByRole('dialog', { name: 'Lab settings' });
+  await expect(settings.getByRole('radio', { name: 'Fast (default)' })).toHaveAttribute(
+    'aria-checked',
+    'true',
+  );
+  await settings.getByRole('radio', { name: 'Real IOS (30 s)' }).click();
+  await expect(settings).toContainText('a new port forwards after 30 s');
+  await page.keyboard.press('Escape');
+  await expect(settings).toBeHidden();
+
+  await showSpanningTree();
+  await expect.poll(shown).toContain('HelloTime2secMaxAge20secForwardDelay15sec');
 });
