@@ -4,7 +4,7 @@ import type { ShortcutId } from '@/app/shell/shortcuts';
 import { readJson, safeStorage } from '@/app/storage';
 
 // The palette shows groups in this order. A feature that needs a new group adds it here.
-export const COMMAND_GROUPS = ['File', 'View', 'Mode', 'Theme', 'Help', 'Developer'] as const;
+export const COMMAND_GROUPS = ['File', 'Edit', 'View', 'Mode', 'Theme', 'Help', 'Developer'] as const;
 export type CommandGroup = (typeof COMMAND_GROUPS)[number];
 
 export type Command = {
