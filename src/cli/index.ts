@@ -15,11 +15,15 @@ export {
 export { CLOCK_RATES } from './device/commands';
 export {
   answerQuery,
+  openStream,
   type EngineAnswers,
   type EngineQuery,
   type EngineQueryKind,
   type EngineSource,
+  type EngineStream,
+  type OutputStream,
   type PortStates,
+  type StreamSource,
 } from './device/query';
 export { runningConfig, UNSUPPORTED_MARKER } from './device/show';
 export { formatError, formatHelp } from './format';
