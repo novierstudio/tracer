@@ -14,6 +14,7 @@ import {
 import { useState } from 'react';
 import { FileMenuItems } from '@/features/files/FileMenuItems';
 import { fileSession } from '@/features/files/session';
+import { ShareButton } from '@/features/files/ShareDialogs';
 import { ShowTrafficToggle } from '@/features/simulation/ShowTrafficToggle';
 import { Button } from '@/ui/button';
 import {
@@ -208,6 +209,7 @@ export function TopBar({ mode, onModeChange, panels, onOpenHelp, onOpenCommands 
             <SearchIcon />
           </Button>
         </Tooltip>
+        <ShareButton />
         <PanelButton toggle={panels.palette} className="max-sm:hidden" />
         <PanelButton toggle={panels.bottom} />
         <PanelButton toggle={panels.inspector} />
