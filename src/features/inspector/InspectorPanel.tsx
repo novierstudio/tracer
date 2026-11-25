@@ -1,5 +1,6 @@
 import { MousePointer2Icon } from 'lucide-react';
 import { useState } from 'react';
+import type { DeviceId } from '@/model';
 import { useEditor } from '@/model/react';
 import { EmptyState } from '@/ui/empty-state';
 import { DeviceInspector, type DeviceTab } from './DeviceInspector';
@@ -13,6 +14,8 @@ export function InspectorPanel() {
   const selection = useEditor((state) => state.selection);
   // Kept across selections, so stepping through devices stays on the same tab.
   const [tab, setTab] = useState<DeviceTab>('overview');
+  // The CLI takes focus when someone picks its tab, not when the selection moves to a device.
+  const [focusFor, setFocusFor] = useState<DeviceId>();
   const view = inspectorView(topology, selection);
 
   return (
@@ -21,7 +24,16 @@ export function InspectorPanel() {
         <h2 className="text-xs font-semibold text-fg-1">Inspector</h2>
       </div>
       {view.kind === 'device' && (
-        <DeviceInspector device={view.device} topology={topology} tab={tab} onTabChange={setTab} />
+        <DeviceInspector
+          device={view.device}
+          topology={topology}
+          tab={tab}
+          onTabChange={(next) => {
+            setTab(next);
+            setFocusFor(next === 'console' ? view.device.id : undefined);
+          }}
+          focusConsole={focusFor === view.device.id}
+        />
       )}
       {view.kind === 'link' && <LinkInspector link={view.link} topology={topology} />}
       {view.kind === 'multi' && (
