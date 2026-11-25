@@ -15,6 +15,7 @@ import { ms, simTime } from './core/time';
 import { createEngine, type Engine, type EngineOptions } from './engine';
 import type { EventId, SimEvent } from './events';
 import type { PingEvent } from './l3/ping';
+import type { TraceEvent } from './l3/traceroute';
 import type { SimModule, Stacks } from './module';
 import type { TopologyPatch } from './patch';
 import { createSimService } from './service';
@@ -598,6 +599,38 @@ describe('determinism', () => {
     // Each switch is its own root and sends a hello out of both its ports every 2 s.
     const hellos = (STP_CONVERGED + 10_000) / 2_000;
     expect(frames(first.trace).length - data.length).toBe(hellos * 2 * 2);
+    expect(second).toEqual(first);
+    for (const clock of clocks) expect(clock).not.toHaveBeenCalled();
+  });
+
+  it('replays a traceroute, a cancelled endless ping and an ARP clear the same way', () => {
+    const clocks = [vi.spyOn(Math, 'random'), vi.spyOn(Date, 'now'), vi.spyOn(performance, 'now')];
+    const probeRun = () => {
+      const { lab, pc1, pc2 } = routedLab();
+      const engine = createEngine({ seed: 1, stacks: STACKS, linkDelay: ms(1) });
+      const sim = createSimService({ engine, frames: { now: () => 0, request: () => {} } });
+      sim.load(lab.topology);
+      engine.runUntil(STP_CONVERGED);
+      const events: (PingEvent | TraceEvent)[] = [];
+      const listener = (event: PingEvent | TraceEvent) => events.push(event);
+      const traceOptions = { maxHops: 30, probesPerHop: 3, timeoutMs: 1000 };
+      sim.traceroute(pc1, ip('192.168.2.10'), traceOptions, listener);
+      const endless = expectOk(
+        sim.ping(pc2, ip('192.168.1.10'), { count: Infinity, timeoutMs: 1000 }, listener),
+      );
+      engine.runUntil(simTime(STP_CONVERGED + 3_500));
+      sim.cancel(endless);
+      expectOk(sim.clearArp(pc1));
+      sim.traceroute(pc1, ip('192.168.2.10'), traceOptions, listener);
+      engine.runUntil(simTime(STP_CONVERGED + 10_000));
+      return { trace: trace(engine), events };
+    };
+
+    const first = probeRun();
+    const second = probeRun();
+
+    expect(first.events.filter((event) => event.kind === 'done')).toHaveLength(2);
+    expect(first.events).toContainEqual(expect.objectContaining({ kind: 'summary', sent: 4 }));
     expect(second).toEqual(first);
     for (const clock of clocks) expect(clock).not.toHaveBeenCalled();
   });

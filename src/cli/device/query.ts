@@ -4,6 +4,7 @@ import type {
   MacTableEntry,
   PingListener,
   PingOptions,
+  ProbeHandle,
   Route,
   SpanningTreeVlan,
 } from '../../engine/api';
@@ -101,7 +102,7 @@ export interface StreamSource {
     target: Ipv4Address,
     options: PingOptions,
     listener: PingListener,
-  ): Promise<Result<void, DeviceUnavailable>>;
+  ): Promise<Result<ProbeHandle, DeviceUnavailable>>;
 }
 
 /** Output that arrives in pieces. Pieces are text that breaks lines with `\n`. */

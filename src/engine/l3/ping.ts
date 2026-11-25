@@ -1,8 +1,8 @@
 import type { Ipv4Address } from '@/model';
-import { ms, type SimDuration, type SimTime } from '../core/time';
-import type { IcmpEcho, IcmpMessage, Ipv4Packet, UnreachableCode } from '../pdu';
+import { ms } from '../core/time';
+import type { UnreachableCode } from '../pdu';
 import { timerKey, type IpContext } from './context';
-import { originate } from './output';
+import { sendEcho, type EchoAnswer, type EchoProbe } from './echo';
 
 /** Windows sends the next echo request about a second after the last one. */
 export const PING_INTERVAL = ms(1000);
@@ -10,6 +10,7 @@ export const PING_INTERVAL = ms(1000);
 /** The data size Windows sends, which a reply reports back. */
 export const PING_BYTES = 32;
 
+/** `count` is a whole number of requests, or Infinity to ping until cancelled, as `ping -t` does. */
 export type PingOptions = { readonly count: number; readonly timeoutMs: number };
 
 /** What became of one echo request. */
@@ -47,71 +48,77 @@ export type PingEvent = PingReply | PingSummary;
 
 export type PingListener = (event: PingEvent) => void;
 
-type PingPhase =
-  | { readonly kind: 'awaiting-reply'; readonly seq: number; readonly sentAt: SimTime }
-  /** Request `seq` is settled and the next one waits for the interval. */
-  | { readonly kind: 'pausing'; readonly seq: number };
-
-export type PingSession = {
-  readonly id: number;
-  readonly target: Ipv4Address;
+export type PingSession = EchoProbe & {
+  readonly kind: 'ping';
   readonly count: number;
-  readonly timeout: SimDuration;
   readonly listener: PingListener;
-  phase: PingPhase;
   /** Round-trip times of the replies so far. */
   readonly times: number[];
 };
 
-function sendEcho(ctx: IpContext, session: PingSession) {
-  const seq = session.phase.seq + 1;
-  session.phase = { kind: 'awaiting-reply', seq, sentAt: ctx.now };
-  ctx.setTimer(timerKey({ kind: 'ping', id: session.id }), session.timeout);
-  originate(ctx, session.target, { kind: 'icmp', type: 'echo-request', id: session.id, seq });
-}
-
-function finish(ctx: IpContext, session: PingSession) {
-  ctx.state.pings.delete(session.id);
-  ctx.clearTimer(timerKey({ kind: 'ping', id: session.id }));
-  const { times } = session;
+/** The summary of `sent` requests whose replies took `times`. */
+export function pingSummary(
+  target: Ipv4Address,
+  sent: number,
+  times: readonly number[],
+): PingSummary {
   const total = times.reduce((sum, time) => sum + time, 0);
-  session.listener({
+  return {
     kind: 'summary',
-    target: session.target,
-    sent: session.phase.seq,
+    target,
+    sent,
     received: times.length,
     ...(times.length > 0 && {
       rtt: { minMs: Math.min(...times), avgMs: total / times.length, maxMs: Math.max(...times) },
     }),
-  });
+  };
+}
+
+/** Ends the ping with a summary of what it got so far. A request in flight counts as sent. */
+export function finishPing(ctx: IpContext, session: PingSession) {
+  ctx.state.probes.delete(session.id);
+  ctx.clearTimer(timerKey({ kind: 'probe', id: session.id }));
+  session.listener(pingSummary(session.target, session.phase.seq, session.times));
+}
+
+function toReply(seq: number, answer: EchoAnswer): PingReply {
+  switch (answer.kind) {
+    case 'reply':
+      return { ...answer, seq, bytes: PING_BYTES };
+    case 'unreachable':
+      return { kind: 'unreachable', seq, from: answer.from, code: answer.code };
+    case 'ttl-expired':
+      return { kind: 'ttl-expired', seq, from: answer.from };
+    case 'timeout':
+      return { kind: 'timeout', seq };
+  }
 }
 
 /** The request in flight is answered or timed out: report it, then pause or finish. */
-function settle(
-  ctx: IpContext,
-  session: PingSession,
-  phase: Extract<PingPhase, { kind: 'awaiting-reply' }>,
-  reply: PingReply,
-) {
-  session.listener(reply);
+export function onPingAnswer(ctx: IpContext, session: PingSession, answer: EchoAnswer) {
+  const { phase } = session;
+  if (phase.kind !== 'awaiting-reply') return;
+  if (answer.kind === 'reply') session.times.push(answer.timeMs);
+  session.listener(toReply(phase.seq, answer));
   if (phase.seq >= session.count) {
-    finish(ctx, session);
+    finishPing(ctx, session);
     return;
   }
   session.phase = { kind: 'pausing', seq: phase.seq };
   const wait = Math.max(0, phase.sentAt + PING_INTERVAL - ctx.now);
-  ctx.setTimer(timerKey({ kind: 'ping', id: session.id }), ms(wait));
+  ctx.setTimer(timerKey({ kind: 'probe', id: session.id }), ms(wait));
 }
 
-/** Starts a ping from this device. Its events go to `listener` as simulated time passes. */
+/** Starts a ping from this device and returns its id. Its events go to `listener` as time passes. */
 export function startPing(
   ctx: IpContext,
   target: Ipv4Address,
   { count, timeoutMs }: PingOptions,
   listener: PingListener,
-) {
+): number {
   const session: PingSession = {
-    id: ctx.state.nextPingId++,
+    kind: 'ping',
+    id: ctx.state.nextProbeId++,
     target,
     count,
     timeout: ms(timeoutMs),
@@ -119,67 +126,13 @@ export function startPing(
     phase: { kind: 'pausing', seq: 0 },
     times: [],
   };
-  ctx.state.pings.set(session.id, session);
+  ctx.state.probes.set(session.id, session);
   sendEcho(ctx, session);
+  return session.id;
 }
 
-export function onPingTimer(ctx: IpContext, id: number) {
-  const session = ctx.state.pings.get(id);
-  if (!session) return;
-  const { phase } = session;
-  if (phase.kind === 'pausing') sendEcho(ctx, session);
-  else settle(ctx, session, phase, { kind: 'timeout', seq: phase.seq });
-}
-
-/** The echo request an ICMP message answers: a reply echoes it, an error quotes it. */
-function answeredEcho(message: IcmpMessage): IcmpEcho | undefined {
-  switch (message.type) {
-    case 'echo-reply':
-      return message;
-    case 'echo-request':
-      return undefined;
-    case 'destination-unreachable':
-    case 'time-exceeded': {
-      const quoted = message.original.payload;
-      return quoted.kind === 'icmp' && quoted.type === 'echo-request' ? quoted : undefined;
-    }
-  }
-}
-
-/** An ICMP message arrived for this device. If it answers the request a ping awaits, settle it. */
-export function onPingAnswer(ctx: IpContext, packet: Ipv4Packet, message: IcmpMessage) {
-  const echo = answeredEcho(message);
-  const session = echo && ctx.state.pings.get(echo.id);
-  if (!session || session.phase.kind !== 'awaiting-reply' || session.phase.seq !== echo.seq) return;
-  const { phase } = session;
-  const { seq } = phase;
-  const from = packet.src;
-  switch (message.type) {
-    case 'echo-reply': {
-      const timeMs = ctx.now - phase.sentAt;
-      session.times.push(timeMs);
-      settle(ctx, session, phase, {
-        kind: 'reply',
-        seq,
-        from,
-        bytes: PING_BYTES,
-        timeMs,
-        ttl: packet.ttl,
-      });
-      return;
-    }
-    case 'destination-unreachable':
-      settle(ctx, session, phase, { kind: 'unreachable', seq, from, code: message.code });
-      return;
-    case 'time-exceeded':
-      settle(ctx, session, phase, { kind: 'ttl-expired', seq, from });
-      return;
-    case 'echo-request':
-      return;
-  }
-}
-
-/** The device is going away: every ping it runs ends with a summary of what it got so far. */
-export function endPings(ctx: IpContext) {
-  for (const session of [...ctx.state.pings.values()]) finish(ctx, session);
+/** The ping's timer: the pause before the next request ended, or the request in flight timed out. */
+export function onPingTimer(ctx: IpContext, session: PingSession) {
+  if (session.phase.kind === 'pausing') sendEcho(ctx, session);
+  else onPingAnswer(ctx, session, { kind: 'timeout' });
 }

@@ -5,6 +5,7 @@ import type { Ipv4Packet } from '../pdu';
 import { ipInterfaces, type IpInterface } from './interfaces';
 import type { PingSession } from './ping';
 import { routingTable, type Route } from './routes';
+import type { TraceSession } from './traceroute';
 
 export type ArpEntry = {
   readonly mac: MacAddress;
@@ -26,27 +27,31 @@ export type Resolution = {
 export type IpState = {
   readonly arp: Map<Ipv4Address, ArpEntry>;
   readonly resolving: Map<Ipv4Address, Resolution>;
-  readonly pings: Map<number, PingSession>;
+  /** Pings and traceroutes in flight, by the identifier their echo requests carry. */
+  readonly probes: Map<number, Probe>;
   /** Packets the device sent to one of its own addresses, delivered on the next tick. */
   readonly loopback: Ipv4Packet[];
   nextPacketId: number;
-  nextPingId: number;
+  nextProbeId: number;
 };
+
+/** Something that sends echo requests and waits on their answers. */
+export type Probe = PingSession | TraceSession;
 
 export type IpContext = ModuleContext<IpState>;
 
 /** The timers an IP stack sets, one key per pending thing. */
 export type IpTimer =
   | { readonly kind: 'arp'; readonly address: Ipv4Address }
-  | { readonly kind: 'ping'; readonly id: number }
+  | { readonly kind: 'probe'; readonly id: number }
   | { readonly kind: 'loopback' };
 
 export function timerKey(timer: IpTimer): string {
   switch (timer.kind) {
     case 'arp':
       return `arp ${timer.address}`;
-    case 'ping':
-      return `ping ${timer.id}`;
+    case 'probe':
+      return `probe ${timer.id}`;
     case 'loopback':
       return 'loopback';
   }
@@ -57,7 +62,7 @@ export function parseTimer(key: string): IpTimer | undefined {
   switch (kind) {
     case 'arp':
       return { kind, address: value as Ipv4Address };
-    case 'ping':
+    case 'probe':
       return { kind, id: Number(value) };
     case 'loopback':
       return { kind };

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { DeviceId, Ipv4Address } from '@/model';
-import type { PingEvent, SimAPI, SimEventBatch } from './api';
+import type { PingEvent, SimAPI, SimEventBatch, TraceEvent } from './api';
 import { ms, simTime } from './core/time';
 import { createEngine } from './engine';
 import type { EventId, FrameEvent, SimEvent } from './events';
@@ -158,6 +158,35 @@ describe('stepping in Simulation mode', () => {
     expect(replayed.slice(-original.length)).toEqual(original);
     expect(original.flatMap(hops)).toContain('PC2 > SW2 arp');
     expect(back.map((event) => event.kind)).toEqual(['reply', 'summary']);
+  });
+
+  it('replays a traceroute and a cancelled ping, each heard once', () => {
+    const { sim, stepAll, pc1, pc2 } = routed();
+    const traced: TraceEvent[] = [];
+    const options = { maxHops: 30, probesPerHop: 3, timeoutMs: 1000 };
+    sim.traceroute(pc1, PC2_IP, options, (event) => traced.push(event));
+    const pinged: PingEvent[] = [];
+    const endless = sim.ping(pc2, PC1_IP, { count: Infinity, timeoutMs: 1000 }, (event) =>
+      pinged.push(event),
+    );
+    for (let index = 0; index < 20; index++) sim.step();
+    if (endless.ok) sim.cancel(endless.value);
+    const original = stepAll();
+
+    while (sim.stepBack());
+    const replayed = stepAll();
+
+    expect(replayed.slice(-original.length)).toEqual(original);
+    expect(traced.map((event) => (event.kind === 'done' ? 'done' : event.hop))).toEqual([
+      1,
+      1,
+      1,
+      2,
+      2,
+      2,
+      'done',
+    ]);
+    expect(pinged.map((event) => event.kind)).toEqual(['reply', 'summary']);
   });
 
   it('cuts the future when something new happens after stepping back', () => {
