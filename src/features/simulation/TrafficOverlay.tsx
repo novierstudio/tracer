@@ -11,6 +11,7 @@ import { simulation, traffic } from './controller';
 import {
   drawChips,
   drawPulse,
+  drawRings,
   drawSourceRing,
   readPalette,
   restingPoint,
@@ -26,7 +27,16 @@ declare global {
   interface Window {
     /** The chips on screen, for e2e tests. Set with the other dev handles. */
     tracerTraffic?: {
-      chips(): { event: EventId; link: string; protocol: string; motion: string }[];
+      chips(): {
+        event: EventId;
+        link: string;
+        protocol: string;
+        motion: string;
+        drop: string | undefined;
+        /** Where it is on the page, in client pixels. */
+        x: number;
+        y: number;
+      }[];
     };
   }
 }
@@ -184,7 +194,7 @@ export function TrafficOverlay() {
     const ctx = element?.getContext('2d');
     if (!element || !ctx) return;
     // React Flow's root carries the theme class the tokens re-scope on.
-    const themed = element.closest('.react-flow') ?? element;
+    const themed = element.closest<HTMLElement>('.react-flow') ?? element;
     const device = (id: DeviceId) => devicePlace(flowStore, id);
 
     let palette = readPalette(themed);
@@ -205,13 +215,18 @@ export function TrafficOverlay() {
     let drawnLast: Drawn[] = [];
     if (import.meta.env.DEV || window.__TRACER_DEV__) {
       window.tracerTraffic = {
-        chips: () =>
-          drawnLast.map(({ chip }) => ({
+        chips: () => {
+          const box = element.getBoundingClientRect();
+          return drawnLast.map(({ chip, x, y }) => ({
             event: chip.event.id,
             link: chip.event.link,
             protocol: chip.protocol,
             motion: chip.motion,
-          })),
+            drop: chip.drop,
+            x: box.left + x,
+            y: box.top + y,
+          }));
+        },
       };
     }
 
@@ -221,15 +236,18 @@ export function TrafficOverlay() {
       frame = requestAnimationFrame(paint);
       const state = simulationStore.getState();
       const wallNow = performance.now();
-      const places: ChipPlace[] = state.showTraffic
-        ? traffic.frame(wallNow, { reducedMotion: reducedMotion() })
-        : [];
+      const still = reducedMotion();
+      const { chips: places, rings } = state.showTraffic
+        ? traffic.frame(wallNow, { reducedMotion: still })
+        : { chips: [], rings: [] };
       const selected =
         state.mode === 'simulation' && state.selected !== undefined
           ? findFrame(state.frames, state.selected)
           : undefined;
+      const focus =
+        selected && !state.hidden.includes(protocolOf(selected.frame)) ? selected : undefined;
       const source = state.pdu.step === 'destination' ? device(state.pdu.source) : undefined;
-      if (places.length === 0 && !selected && !source) {
+      if (places.length === 0 && rings.length === 0 && !focus && !source) {
         if (painted) ctx.clearRect(0, 0, element.width, element.height);
         painted = false;
         drawnLast = [];
@@ -246,24 +264,32 @@ export function TrafficOverlay() {
         palette,
         hidden: state.hidden,
         wallNow,
+        selected: focus?.id,
+        reducedMotion: still,
       };
       if (source) drawSourceRing(scene, source.centre);
+      drawRings(scene, rings);
       const drawn = drawChips(scene, places);
-      if (selected && !state.hidden.includes(protocolOf(selected.frame))) {
+      if (focus) {
         const ghost: ChipPlace = {
           chip: {
             id: 0,
-            event: selected,
-            protocol: protocolOf(selected.frame),
+            event: focus,
+            protocol: protocolOf(focus.frame),
             start: wallNow,
             duration: 1,
             motion: 'rest',
+            drop: undefined,
+            chained: false,
           },
           along: 1,
           moving: false,
+          dropped: false,
+          scale: 1,
+          alpha: 1,
         };
         const target =
-          drawn.find(({ chip }) => chip.event.id === selected.id) ?? drawChips(scene, [ghost])[0];
+          drawn.find(({ chip }) => chip.event.id === focus.id) ?? drawChips(scene, [ghost])[0];
         if (target) drawPulse(scene, target);
       }
       painted = true;
