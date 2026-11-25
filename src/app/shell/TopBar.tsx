@@ -27,6 +27,8 @@ import {
 } from '@/ui/dropdown-menu';
 import { Kbd } from '@/ui/kbd';
 import { Segmented } from '@/ui/segmented';
+import { editorStore } from '@/model/store';
+import { useHistory } from '@/model/react';
 import { Tooltip } from '@/ui/tooltip';
 import iconUrl from '../../../assets/icon.svg';
 import { ThemeMenu } from '../ThemeMenu';
@@ -142,6 +144,26 @@ function PanelButton({ toggle, className }: { toggle: PanelToggle; className?: s
   );
 }
 
+export function HistoryButtons() {
+  const canUndo = useHistory((history) => history.pastStates.length > 0);
+  const canRedo = useHistory((history) => history.futureStates.length > 0);
+  const { undo, redo } = editorStore.getState();
+  return (
+    <div className="flex items-center max-md:hidden">
+      <Tooltip label="Undo" shortcut={formatShortcut('undo')}>
+        <Button variant="ghost" size="icon-sm" aria-label="Undo" disabled={!canUndo} onClick={undo}>
+          <Undo2Icon />
+        </Button>
+      </Tooltip>
+      <Tooltip label="Redo" shortcut={formatShortcut('redo')}>
+        <Button variant="ghost" size="icon-sm" aria-label="Redo" disabled={!canRedo} onClick={redo}>
+          <Redo2Icon />
+        </Button>
+      </Tooltip>
+    </div>
+  );
+}
+
 export function TopBar({ mode, onModeChange, panels, onOpenHelp, onOpenCommands }: TopBarProps) {
   return (
     <header className="flex h-12 shrink-0 items-center gap-2 border-b border-line bg-surface-1 px-2">
@@ -151,14 +173,7 @@ export function TopBar({ mode, onModeChange, panels, onOpenHelp, onOpenCommands 
           /
         </span>
         <FileName />
-        <div className="flex items-center max-md:hidden">
-          <Button variant="ghost" size="icon-sm" aria-label="Undo" disabled>
-            <Undo2Icon />
-          </Button>
-          <Button variant="ghost" size="icon-sm" aria-label="Redo" disabled>
-            <Redo2Icon />
-          </Button>
-        </div>
+        <HistoryButtons />
       </div>
 
       <Tooltip label="Switch mode" shortcut={formatShortcut('toggleMode')}>

@@ -36,3 +36,11 @@ it('leaves browser and OS combinations alone', () => {
   expect(press('f', { alt: true })).toBeUndefined();
   expect(press('x')).toBeUndefined();
 });
+
+it('undoes with Cmd or Ctrl plus Z and redoes with Shift added', () => {
+  expect(press('z', { meta: true })).toBe('undo');
+  expect(
+    matchShortcut({ key: 'Z', metaKey: false, ctrlKey: true, altKey: false, shiftKey: true }),
+  ).toBe('redo');
+  expect(press('z')).toBeUndefined();
+});
