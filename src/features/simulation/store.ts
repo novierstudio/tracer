@@ -115,3 +115,24 @@ export function currentFrames({ frames, now }: Pick<SimulationState, 'frames' | 
   }
   return current;
 }
+
+/** Frames are sorted by id, so the selected one is a binary search away. */
+export function findFrame(frames: readonly FrameEvent[], id: EventId): FrameEvent | undefined {
+  let low = 0;
+  let high = frames.length - 1;
+  while (low <= high) {
+    const middle = (low + high) >> 1;
+    const frame = frames[middle]!;
+    if (frame.id === id) return frame;
+    if (frame.id < id) low = middle + 1;
+    else high = middle - 1;
+  }
+  return undefined;
+}
+
+/** The selected frame, while it is still in the list. */
+export const selectedFrame = ({
+  frames,
+  selected,
+}: Pick<SimulationState, 'frames' | 'selected'>) =>
+  selected === undefined ? undefined : findFrame(frames, selected);
