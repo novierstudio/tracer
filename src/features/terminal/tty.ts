@@ -1,4 +1,4 @@
-import { feed, initialState, reduce, type LineState } from './discipline';
+import { decode, feed, initialState, reduce, type Input, type LineState } from './discipline';
 import type { TerminalSession } from './session';
 
 /** Characters of output kept for replay, about the 5000 rows xterm keeps as scrollback. */
@@ -31,6 +31,30 @@ export function createTty(session: TerminalSession, greeting: readonly string[] 
   let line = initialState(80, 24);
   let transcript = greeting.map((text) => `${text}\r\n`).join('') + session.prompt;
   const views = new Set<(out: string) => void>();
+  /** Input that arrived while a line waits on its output. It runs once the output is shown. */
+  let held: Input[] | undefined;
+
+  const write = (out: string) => {
+    if (!out) return;
+    transcript = trimTranscript(transcript + out);
+    for (const view of views) view(out);
+  };
+
+  const run = (inputs: string | readonly Input[]) => {
+    const step = feed(line, inputs, session);
+    line = step.state;
+    write(step.out);
+    if (!step.pending) return;
+    held = [...step.rest];
+    void step.pending
+      .catch(() => [])
+      .then((lines) => {
+        const queued = held ?? [];
+        held = undefined;
+        run([{ kind: 'output', lines }, ...queued]);
+      });
+  };
+
   return {
     session,
     get transcript() {
@@ -43,11 +67,8 @@ export function createTty(session: TerminalSession, greeting: readonly string[] 
       if (cols !== line.cols || rows !== line.rows) {
         line = reduce(line, { kind: 'resize', cols, rows }, session).state;
       }
-      const step = feed(line, data, session);
-      line = step.state;
-      if (!step.out) return;
-      transcript = trimTranscript(transcript + step.out);
-      for (const write of views) write(step.out);
+      if (held) held.push(...decode(data));
+      else run(data);
     },
     subscribe(write) {
       views.add(write);
