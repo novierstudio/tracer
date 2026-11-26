@@ -11,7 +11,7 @@ export const CATEGORY_LABELS: Record<DeviceCategory, string> = {
   servers: 'Servers',
 };
 
-export type DeviceIconName = 'router' | 'switch' | 'pc' | 'laptop' | 'server';
+export type DeviceIconName = 'router' | 'switch' | 'multilayer-switch' | 'pc' | 'laptop' | 'server';
 
 export type DeviceModel = {
   readonly id: string;
@@ -22,6 +22,8 @@ export type DeviceModel = {
   readonly icon: DeviceIconName;
   /** Interfaces in module/slot order, as `show ip interface brief` lists them. */
   readonly ports: readonly PortSpec[];
+  /** A multilayer switch: it takes `ip routing`, routed ports and static routes. */
+  readonly multilayer?: true;
 };
 
 const PORT_PREFIX: Record<PortKind, string> = {
@@ -80,6 +82,16 @@ export const DEVICE_MODELS = [
     ports: [...ports('fastEthernet', '0/', 1, 48), ...ports('gigabitEthernet', '0/', 1, 2)],
   },
   {
+    id: 'switch-l3-24',
+    name: 'Multilayer Switch 24',
+    category: 'switches',
+    kind: 'switch',
+    hostnamePrefix: 'Switch',
+    icon: 'multilayer-switch',
+    ports: [...ports('fastEthernet', '0/', 1, 24), ...ports('gigabitEthernet', '0/', 1, 2)],
+    multilayer: true,
+  },
+  {
     id: 'pc',
     name: 'Desktop PC',
     category: 'end-devices',
@@ -120,6 +132,9 @@ export function deviceModel(id: DeviceModelId): DeviceModel {
 export function findDeviceModel(id: string): DeviceModel | undefined {
   return BY_ID.get(id);
 }
+
+/** Whether a device of model `id` can route, as only multilayer switches and routers can. */
+export const isMultilayerSwitch = (id: string): boolean => findDeviceModel(id)?.multilayer === true;
 
 const PORT_ABBREVIATION: Record<PortKind, string> = {
   fastEthernet: 'Fa',

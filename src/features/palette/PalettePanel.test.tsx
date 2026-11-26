@@ -19,6 +19,7 @@ describe('PalettePanel devices', () => {
     expect(items('Switches')).toEqual([
       'Access Switch 2424× Fa, 2× Gi',
       'Access Switch 4848× Fa, 2× Gi',
+      'Multilayer Switch 2424× Fa, 2× Gi',
     ]);
     expect(items('End devices')).toEqual(['Desktop PC1× Fa', 'Laptop1× Gi']);
     expect(items('Servers')).toEqual(['Server1× Gi']);

@@ -1,5 +1,6 @@
 import {
   carriesVlan,
+  isSwitched,
   formatSubnetMask,
   type DhcpPool,
   type DhcpServerConfig,
@@ -19,7 +20,7 @@ import {
   type Subinterface,
   type SubinterfaceId,
   type SwitchConfig,
-  type SwitchInterface,
+  type SwitchedInterface,
   type VlanId,
   type VlanRange,
 } from '../../model';
@@ -36,12 +37,14 @@ export type InterfaceEntry =
       readonly id: InterfaceId;
       readonly port: Port | undefined;
       readonly config: RoutedInterface;
+      /** A multilayer switch's port taken out of switching with `no switchport`. */
+      readonly noSwitchport?: true;
     }
   | {
       readonly kind: 'switched';
       readonly id: InterfaceId;
       readonly port: Port;
-      readonly config: SwitchInterface;
+      readonly config: SwitchedInterface;
     }
   | {
       readonly kind: 'subinterface';
@@ -86,7 +89,11 @@ export function interfaceEntries(device: IosDevice): InterfaceEntry[] {
         : [];
     }
     const config = device.config.interfaces[port.id];
-    return config ? [{ kind: 'switched', id: port.id, port, config }] : [];
+    if (!config) return [];
+    // A multilayer switch's routed port lists as a router's port does.
+    return isSwitched(config)
+      ? [{ kind: 'switched', id: port.id, port, config }]
+      : [{ kind: 'routed', id: port.id, port, config, noSwitchport: true }];
   });
   return [
     ...virtual.filter((entry) => typeOf(entry.id) === 'Loopback'),
@@ -106,6 +113,7 @@ function passwordText(device: IosDevice, password: string): string {
 function interfaceBlock(entry: InterfaceEntry): string[] {
   const { config } = entry;
   const lines = [`interface ${entry.id}`];
+  if (entry.kind === 'routed' && entry.noSwitchport) lines.push(' no switchport');
   if (config.description !== undefined) lines.push(` description ${config.description}`);
   if (entry.kind === 'switched') {
     const { switchport } = entry.config;
@@ -371,7 +379,8 @@ const DOWN: Status = ['down', 'down'];
 function sviStatus(device: IosDevice, vlan: VlanId, ports: PortStates): Status {
   if (device.kind !== 'switch' || !(vlan in device.config.vlans)) return DOWN;
   const carried = Object.entries(device.config.interfaces).some(
-    ([id, port]) => ports[id as Port['id']] === true && carriesVlan(port.switchport, vlan),
+    ([id, port]) =>
+      ports[id as Port['id']] === true && isSwitched(port) && carriesVlan(port.switchport, vlan),
   );
   return ['up', carried ? 'up' : 'down'];
 }

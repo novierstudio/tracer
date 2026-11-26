@@ -21,7 +21,7 @@ import {
   type PrefixLength,
   type RoutedInterface,
   type StaticRoute,
-  type SwitchInterface,
+  type SwitchedInterface,
   type VlanRange,
 } from '../../model';
 import { exitMode, GLOBAL_CONFIG, PRIV_EXEC, USER_EXEC, type LineRef, type ModeOf } from '../modes';
@@ -951,7 +951,7 @@ const VLAN_NAME_MAX = 32;
 function eachSwitchport(
   ctx: SwitchContext,
   mode: ModeOf<'interface-config'>,
-  edit: (port: Draft<SwitchInterface>) => void,
+  edit: (port: Draft<SwitchedInterface>) => void,
 ) {
   return eachInterface(ctx, mode, (target) =>
     target.kind === 'switched' ? void edit(target.config) : INVALID_INPUT,
@@ -960,19 +960,19 @@ function eachSwitchport(
 
 const orUnset = (vlan: VlanId | undefined) => (vlan === DEFAULT_VLAN ? undefined : vlan);
 
-function setAccessVlan(port: Draft<SwitchInterface>, vlan: VlanId) {
+function setAccessVlan(port: Draft<SwitchedInterface>, vlan: VlanId) {
   if (port.switchport.mode === 'access') port.switchport.vlan = vlan;
   else if (vlan === DEFAULT_VLAN) delete port.switchport.accessVlan;
   else port.switchport.accessVlan = vlan;
 }
 
-function setNativeVlan(port: Draft<SwitchInterface>, vlan: VlanId) {
+function setNativeVlan(port: Draft<SwitchedInterface>, vlan: VlanId) {
   if (port.switchport.mode === 'trunk') port.switchport.nativeVlan = vlan;
   else if (vlan === DEFAULT_VLAN) delete port.switchport.nativeVlan;
   else port.switchport.nativeVlan = vlan;
 }
 
-function setSwitchportMode(port: Draft<SwitchInterface>, mode: 'access' | 'trunk') {
+function setSwitchportMode(port: Draft<SwitchedInterface>, mode: 'access' | 'trunk') {
   const current = port.switchport;
   if (current.mode === mode) return;
   const { allowedVlans } = current;
@@ -1003,7 +1003,7 @@ const coversAll = (list: readonly VlanRange[]) =>
 
 /** Sets a trunk's allowed list from its current one. A list of every VLAN is the default, stored as none. */
 function setAllowedVlans(
-  port: Draft<SwitchInterface>,
+  port: Draft<SwitchedInterface>,
   next: (current: readonly VlanRange[]) => readonly VlanRange[],
 ) {
   const list = next(port.switchport.allowedVlans ?? ALL_VLANS);

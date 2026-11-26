@@ -141,13 +141,24 @@ export type PathCost = z.infer<typeof PathCost>;
 
 export const SwitchInterface = z.object({
   ...interfaceFields,
-  switchport: Switchport,
+  /**
+   * Absent on a multilayer switch's routed port (`no switchport`): it leaves switching and
+   * spanning tree, and takes an address as a router's port does.
+   */
+  switchport: Switchport.optional(),
   /** `spanning-tree portfast`. An access port with it forwards as soon as its link comes up. */
   portfast: z.literal(true).optional(),
   /** `spanning-tree cost`. Absent means the cost of the port's speed. */
   stpCost: PathCost.optional(),
+  /** A routed port's address. */
+  ipv4: Ipv4Cidr.optional(),
+  /** A routed port's `ip helper-address` lines. */
+  helperAddresses,
 });
 export type SwitchInterface = z.infer<typeof SwitchInterface>;
+
+/** A switch port that switches: every port but a multilayer switch's routed ports. */
+export type SwitchedInterface = SwitchInterface & { readonly switchport: Switchport };
 
 /** `spanning-tree vlan <id> priority`: lower wins the root election. A multiple of 4096 up to 61440. */
 export const BridgePriority = z
@@ -362,6 +373,13 @@ export const SwitchConfig = z.object({
   defaultGateway: Ipv4Address.optional(),
   /** Bridge priority by VLAN. A VLAN without one has DEFAULT_BRIDGE_PRIORITY. */
   stpPriorities: z.record(VlanId, BridgePriority).optional(),
+  /**
+   * `ip routing`, on a multilayer switch only: it routes between its VLAN interfaces and routed
+   * ports, and `ip default-gateway` no longer applies.
+   */
+  ipRouting: z.literal(true).optional(),
+  /** `ip route`, on a multilayer switch only. They take effect with `ip routing`. */
+  staticRoutes: z.array(StaticRoute).optional(),
 });
 export type SwitchConfig = z.infer<typeof SwitchConfig>;
 

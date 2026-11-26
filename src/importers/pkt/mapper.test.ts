@@ -523,15 +523,13 @@ describe('mapPktXml', () => {
     ]);
   });
 
-  it('imports a multilayer switch as a switch and reports the approximation', () => {
+  it('imports a multilayer switch as one that routes, with nothing approximated', () => {
     const result = imported(
       networkXml([fastSwitch('MLS', { type: 'MultiLayerSwitch', model: '3560-24PS' })]),
     );
     const device = byHostname(result.topology, 'MLS');
-    expect(device.kind).toBe('switch');
-    expect(entriesOf(result, 'device-approximated')).toEqual([
-      { kind: 'device-approximated', device: device.id, ptType: 'MultiLayerSwitch', as: 'switch' },
-    ]);
+    expect(device).toMatchObject({ kind: 'switch', model: 'switch-l3-24' });
+    expect(entriesOf(result, 'device-approximated')).toEqual([]);
   });
 
   it('reads switch VLANs, leaving out the ones IOS creates itself', () => {
