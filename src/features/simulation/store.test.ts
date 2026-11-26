@@ -2,7 +2,16 @@ import { describe, expect, it } from 'vitest';
 import type { EventId } from '@/engine/events';
 import { describeFrame, protocolOf, visibleFrames } from './protocols';
 import { currentFrames, receiveBatch, simulationStore, type SimulationState } from './store';
-import { arpRequest, batch, echoRequest, hop } from './testing';
+import {
+  arpRequest,
+  batch,
+  echoRequest,
+  hop,
+  ripPacket,
+  ripRequest,
+  ripV1Response,
+  ripV2Response,
+} from './testing';
 
 const initial = simulationStore.getInitialState();
 const fold = (state: SimulationState, next: ReturnType<typeof batch>) => ({
@@ -60,5 +69,18 @@ describe('protocol filters', () => {
     expect(describeFrame(arp(1))).toBe('Who has 192.168.1.1? Tell 192.168.1.10');
     expect(describeFrame(icmp(1))).toBe('Echo request 192.168.1.10 → 192.168.2.10, seq 1, TTL 128');
     expect(describeFrame({ ...icmp(1), outcome: 'link-down' })).toMatch(/^Lost, link down: Echo/);
+  });
+
+  it('classifies RIP and says what each RIP message carries', () => {
+    const rip = (payload: Parameters<typeof ripPacket>[0]) =>
+      hop({ id: 1, from: 'R1', to: 'R2', sentAt: 1, payload: ripPacket(payload) });
+    expect(protocolOf(rip(ripV2Response).frame)).toBe('rip');
+    expect(describeFrame(rip(ripV2Response))).toBe(
+      'RIPv2 response, 3 routes 10.0.12.1 → 224.0.0.9',
+    );
+    expect(describeFrame(rip(ripV1Response))).toBe(
+      'RIPv1 response, 1 route 10.0.12.1 → 255.255.255.255',
+    );
+    expect(describeFrame(rip(ripRequest(1)))).toBe('RIPv1 request for the whole table');
   });
 });

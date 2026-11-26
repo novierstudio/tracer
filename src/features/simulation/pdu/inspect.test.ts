@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import type { FrameEvent } from '@/engine/events';
+import type { SimTime } from '@/engine/core/time';
+import type { EventId, FrameEvent } from '@/engine/events';
+import { multicastMac, RIP_GROUP, type EthernetFrame } from '@/engine/pdu';
 import { routedLab } from '@/engine/testing';
-import { pingFrames } from '../testing';
+import { PortId, type LinkId, type MacAddress } from '@/model';
+import { pingFrames, ripPacket, ripV2Response } from '../testing';
 import { inspect, type PduView } from './inspect';
 
 const value = (view: PduView, id: string) =>
@@ -46,5 +49,56 @@ describe('inspect', () => {
     const inspection = inspect(last, lab.topology);
     expect(inspection.sentence).toBe('The echo reply reached PC1: the ping succeeded.');
     expect(inspection.views.map((view) => view.direction)).toEqual(['in']);
+  });
+});
+
+describe('inspect a RIP update', () => {
+  const { lab, r1, sw2 } = routedLab();
+  const router = lab.device(r1);
+  if (router.kind !== 'router') throw new Error('R1 is not a router');
+  const rip = {
+    version: 2 as const,
+    networks: [],
+    autoSummary: true,
+    passiveInterfaces: [],
+    defaultOriginate: false,
+  };
+  const topology = {
+    ...lab.topology,
+    devices: { ...lab.topology.devices, [r1]: { ...router, config: { ...router.config, rip } } },
+  };
+  const update = (src: string): EthernetFrame => ({
+    kind: 'ethernet',
+    src: src as MacAddress,
+    dst: multicastMac(RIP_GROUP),
+    payload: ripPacket(ripV2Response),
+  });
+  const event: FrameEvent = {
+    kind: 'frame',
+    id: 1 as EventId,
+    time: 1 as SimTime,
+    sentAt: 0 as SimTime,
+    link: 'lnk' as LinkId,
+    from: { device: sw2, port: PortId.parse('GigabitEthernet0/1') },
+    to: { device: r1, port: PortId.parse('GigabitEthernet0/1') },
+    frame: update('02:00:00:00:00:21'),
+    outcome: 'delivered',
+    sent: [{ port: PortId.parse('GigabitEthernet0/0'), frame: update('02:00:00:00:00:31') }],
+  };
+
+  it('shows the update down to RIP, and the triggered update R1 sent', () => {
+    const inspection = inspect(event, topology);
+    expect(inspection.sentence).toBe(
+      'R1 read the RIPv2 update and sent a triggered update out Gi0/0.',
+    );
+    expect(inspection.views.map((view) => view.label)).toEqual(['At R1', 'Out Gi0/0']);
+    expect(inspection.views[0]!.layers.map((layer) => layer.name)).toEqual([
+      'Physical',
+      'Ethernet II',
+      'IPv4',
+      'UDP',
+      'RIPv2',
+    ]);
+    expect(value(inspection.views[0]!, 'rip.3.metric')).toBe('16 (unreachable)');
   });
 });

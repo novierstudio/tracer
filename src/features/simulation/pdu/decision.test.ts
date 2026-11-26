@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { EventId, FrameEvent } from '@/engine/events';
-import type { EthernetFrame, Ipv4Packet } from '@/engine/pdu';
+import {
+  BROADCAST_MAC,
+  multicastMac,
+  RIP_GROUP,
+  type EthernetFrame,
+  type Ipv4Packet,
+} from '@/engine/pdu';
 import { access, ip, labBuilder, routedLab, trunk } from '@/engine/testing';
 import { ms, simTime } from '@/engine/core/time';
 import { createEngine } from '@/engine/engine';
@@ -14,7 +20,7 @@ import {
   type MacAddress,
   type Topology,
 } from '@/model';
-import { pingFrames } from '../testing';
+import { pingFrames, ripPacket, ripRequest, ripV1Response, ripV2Response } from '../testing';
 import { decide, describeDecision, dropLabel } from './decision';
 
 const isBpdu = ({ frame }: FrameEvent) =>
@@ -269,6 +275,95 @@ describe('the decision sentence for DHCP', () => {
     expect(dropLabel(decision)).toBe('No offer');
     expect(describeDecision(decision!, 'R1')).toBe(
       'R1 sent no offer: it has no DHCP pool for this network, or no free address left in it.',
+    );
+  });
+});
+
+describe('a RIP message', () => {
+  const { lab, pc2, r1 } = routedLab();
+  const plain = lab.device(r1);
+  if (plain.kind !== 'router') throw new Error('R1 is not a router');
+  const withRip = (version?: 1 | 2): Device => ({
+    ...plain,
+    config: {
+      ...plain.config,
+      rip: {
+        version,
+        networks: [],
+        autoSummary: true,
+        passiveInterfaces: [],
+        defaultOriginate: false,
+      },
+    },
+  });
+  const v2Update: EthernetFrame = {
+    kind: 'ethernet',
+    src: mac(1),
+    dst: multicastMac(RIP_GROUP),
+    payload: ripPacket(ripV2Response),
+  };
+  const v1Update: EthernetFrame = {
+    kind: 'ethernet',
+    src: mac(1),
+    dst: BROADCAST_MAC,
+    payload: ripPacket(ripV1Response),
+  };
+  const told = (device: Device, name: string, frame: EthernetFrame, sent: FrameEvent['sent']) => {
+    const port = device.kind === 'pc' ? 'FastEthernet0' : 'GigabitEthernet0/1';
+    const decision = decide(arrival(device.id, port, frame, sent), device)!;
+    return describeDecision(decision, name);
+  };
+  const ripOut = (port: string, frame: EthernetFrame) => ({ port: PortId.parse(port), frame });
+
+  it('is read by a router running RIP, multicast or broadcast', () => {
+    expect(told(withRip(2), 'R2', v2Update, [])).toBe('R2 read the RIPv2 update.');
+    expect(told(withRip(), 'R2', v1Update, [])).toBe('R2 read the RIPv1 update.');
+    expect(told(withRip(), 'R2', v2Update, [])).toBe('R2 read the RIPv2 update.');
+  });
+
+  it('says where a router sent its triggered update, or answered a request with its table', () => {
+    expect(
+      told(withRip(2), 'R2', v2Update, [
+        ripOut('GigabitEthernet0/0', { ...v2Update, src: mac(3) }),
+        ripOut('Serial0/0/0', { ...v2Update, src: mac(3) }),
+      ]),
+    ).toBe('R2 read the RIPv2 update and sent a triggered update out Gi0/0 and Se0/0/0.');
+    const request = { ...v2Update, payload: ripPacket(ripRequest(2)) };
+    expect(
+      told(withRip(2), 'R2', request, [ripOut('GigabitEthernet0/1', { ...v2Update, src: mac(3) })]),
+    ).toBe('R2 read the RIPv2 request and answered with its table out Gi0/1.');
+    expect(told(withRip(2), 'R2', request, [])).toBe(
+      'R2 read the RIPv2 request for its whole table.',
+    );
+  });
+
+  it('is ignored by a router set to the other version', () => {
+    expect(told(withRip(2), 'R2', v1Update, [])).toBe(
+      'R2 ignored it: it is RIPv1, and R2 is set to RIP version 2 only.',
+    );
+    expect(told(withRip(1), 'R2', v2Update, [])).toBe(
+      'R2 ignored it: it is RIPv2, and R2 is set to RIP version 1 only.',
+    );
+  });
+
+  it('is ignored by a PC or a router without RIP, which say they do not run RIP', () => {
+    const pc = lab.device(pc2);
+    expect(told(pc, 'PC2', v2Update, [])).toBe(
+      'PC2 ignored it: it is a RIP message, and PC2 does not run RIP.',
+    );
+    expect(told(pc, 'PC2', v1Update, [])).toBe(
+      'PC2 ignored it: it is a RIP message, and PC2 does not run RIP.',
+    );
+    const decision = decide(arrival(r1, 'GigabitEthernet0/1', v2Update, []), plain)!;
+    expect(describeDecision(decision, 'R1')).toBe(
+      'R1 ignored it: it is a RIP message, and R1 does not run RIP.',
+    );
+    expect(dropLabel(decision)).toBeUndefined();
+  });
+
+  it('sent to another MAC is still ignored as another device’s frame', () => {
+    expect(told(withRip(2), 'R2', { ...v2Update, dst: mac(9) }, [])).toBe(
+      "R2 ignored it: it is addressed to 02:00:00:00:00:09, not to R2's MAC.",
     );
   });
 });

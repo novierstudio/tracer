@@ -2,11 +2,27 @@ import type { SimEventBatch } from '@/engine/api';
 import { ms, type SimTime } from '@/engine/core/time';
 import { createEngine } from '@/engine/engine';
 import type { EventId, FrameEvent } from '@/engine/events';
-import type { ArpPacket, EthernetFrame, Ipv4Packet } from '@/engine/pdu';
+import {
+  LIMITED_BROADCAST,
+  RIP_GROUP,
+  UDP_PORT,
+  type ArpPacket,
+  type EthernetFrame,
+  type Ipv4Packet,
+  type RipMessage,
+} from '@/engine/pdu';
 import { createSimService } from '@/engine/service';
 import { STACKS } from '@/engine/stacks';
 import { ip as parseIp, STP_CONVERGED } from '@/engine/testing';
-import type { DeviceId, Ipv4Address, LinkId, MacAddress, PortId, Topology } from '@/model';
+import type {
+  DeviceId,
+  Ipv4Address,
+  LinkId,
+  MacAddress,
+  PortId,
+  PrefixLength,
+  Topology,
+} from '@/model';
 
 const mac = (n: number) => `02:00:00:00:00:${n.toString(16).padStart(2, '0')}` as MacAddress;
 const ip = (text: string) => text as Ipv4Address;
@@ -28,6 +44,45 @@ export const echoRequest: Ipv4Packet = {
   id: 1,
   payload: { kind: 'icmp', type: 'echo-request', id: 1, seq: 1 },
 };
+
+/** A RIP message in a UDP datagram from 10.0.12.1, to RIPv2's group or, for v1, broadcast. */
+export function ripPacket(message: RipMessage): Ipv4Packet {
+  return {
+    kind: 'ipv4',
+    src: ip('10.0.12.1'),
+    dst: message.version === 2 ? RIP_GROUP : LIMITED_BROADCAST,
+    ttl: message.version === 2 ? 2 : 1,
+    id: 4,
+    payload: { kind: 'udp', srcPort: UDP_PORT.rip, dstPort: UDP_PORT.rip, payload: message },
+  };
+}
+
+const prefix = (length: number) => length as PrefixLength;
+
+/** Three routes: one a hop away, one two hops, and one poisoned. */
+export const ripV2Response: RipMessage = {
+  kind: 'rip',
+  command: 'response',
+  version: 2,
+  entries: [
+    { network: ip('192.168.1.0'), prefixLength: prefix(24), metric: 1 },
+    { network: ip('10.0.23.0'), prefixLength: prefix(30), metric: 2 },
+    { network: ip('172.16.0.0'), prefixLength: prefix(16), metric: 16 },
+  ],
+};
+
+export const ripV1Response: RipMessage = {
+  kind: 'rip',
+  command: 'response',
+  version: 1,
+  entries: [{ network: ip('192.168.1.0'), metric: 1 }],
+};
+
+export const ripRequest = (version: 1 | 2): RipMessage => ({
+  kind: 'rip',
+  command: 'request',
+  version,
+});
 
 type Hop = {
   id: number;
