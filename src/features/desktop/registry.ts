@@ -1,5 +1,7 @@
 import { linkAt, type DeviceId } from '@/model';
 import { editorStore, type EditorStore } from '@/model/store';
+import { appEngine, vtySessions } from '@/features/terminal/registry';
+import { deviceStack, type RemoteStack } from '@/features/terminal/remote';
 import type { HostBackend } from './backend';
 import { engineBackend } from './engineBackend';
 import { addressPort, isHostDevice } from './format';
@@ -12,9 +14,11 @@ export interface HostPromptRegistry {
   get(device: DeviceId): HostTty | undefined;
 }
 
+/** `remote` makes the stack each Telnet or SSH login runs in. */
 export function createHostPromptRegistry(
   store: EditorStore,
   backend: HostBackend,
+  remote?: () => RemoteStack,
 ): HostPromptRegistry {
   const ttys = new Map<DeviceId, HostTty>();
   store.subscribe(({ topology }) => {
@@ -37,7 +41,7 @@ export function createHostPromptRegistry(
       const open = ttys.get(id);
       if (open) return open;
       if (!isHostDevice(store.getState().topology.devices[id])) return undefined;
-      const tty = createHostTty(hostShell({ host: host(id), backend }));
+      const tty = createHostTty(hostShell({ host: host(id), backend, ...(remote && { remote }) }));
       ttys.set(id, tty);
       return tty;
     },
@@ -47,4 +51,6 @@ export function createHostPromptRegistry(
 /** The app's one host backend, shared by every Command Prompt and Web Browser. */
 export const hostBackend = engineBackend(editorStore);
 
-export const hostPrompts = createHostPromptRegistry(editorStore, hostBackend);
+export const hostPrompts = createHostPromptRegistry(editorStore, hostBackend, () =>
+  deviceStack({ store: editorStore, engine: appEngine, vty: vtySessions }),
+);
