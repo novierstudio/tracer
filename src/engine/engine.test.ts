@@ -626,8 +626,8 @@ describe('determinism', () => {
     // Each switch is its own root and sends a hello out of both its ports every 2 s.
     const hellos = (STP_CONVERGED + 10_000) / 2_000;
     expect(control('bpdu')).toBe(hellos * 2 * 2);
-    // Both ports of each switch and of R1 send CDP at 0, 5 and 10 s on the fast timers.
-    expect(control('cdp')).toBe(6 * 3);
+    // Both ports of each switch and of R1 send CDP as their links come up, and not again for 30 s.
+    expect(control('cdp')).toBe(6);
     expect(second).toEqual(first);
     for (const clock of clocks) expect(clock).not.toHaveBeenCalled();
   });

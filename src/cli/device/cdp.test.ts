@@ -498,7 +498,7 @@ describe('the show commands on a running lab', () => {
     const engine = createEngine({ seed: 1, stacks: STACKS, linkDelay: ms(1) });
     const sim = createSimService({ engine, frames: { now: () => 0, request: () => {} } });
     sim.load(topology);
-    engine.runUntil(after(engine.now, ms(16_000)));
+    engine.runUntil(after(engine.now, ms(31_000)));
     const show = (id: DeviceId, line: string) => {
       const c = consoleOn(topology.devices[id] as IosDevice);
       c.run('enable');
@@ -510,7 +510,7 @@ describe('the show commands on a running lab', () => {
   it('shows each end of the cable to the other', () => {
     const { r1, sw1, show } = lab();
 
-    // The last advertisement arrived at 15.001 s, so its 180 s have barely begun at 16 s.
+    // The last advertisement arrived at 30.001 s, so its 180 s have barely begun at 31 s.
     expect(show(r1, 'show cdp neighbors').slice(3)).toEqual([
       'SW1          Gig 0/0          180            S       switch      Gig 0/1',
     ]);

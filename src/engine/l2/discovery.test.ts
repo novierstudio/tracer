@@ -167,9 +167,9 @@ describe('CDP', () => {
     lab.runFor(600_000);
 
     expect(lab.cdp(lab.r1)).toHaveLength(3);
-    // Fast timers send every 5 s, so the entry never falls below 175 s.
+    // Fast timers send every 30 s, so the entry never falls below 150 s.
     for (const neighbor of lab.status(lab.r1).cdp.neighbors) {
-      expect(neighbor.holdtime).toBeGreaterThanOrEqual(175);
+      expect(neighbor.holdtime).toBeGreaterThanOrEqual(150);
     }
   });
 

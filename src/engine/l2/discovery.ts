@@ -36,8 +36,11 @@ export type DiscoveryState = {
 
 type Ctx = ModuleContext<DiscoveryState>;
 
-/** Under the lab's fast routing timers, both protocols advertise every 5 s. */
-const FAST_PERIOD = ms(5_000);
+/**
+ * Under the lab's fast routing timers, both protocols advertise every 30 s: neighbours appear as
+ * soon as a link comes up either way, and a lab in Simulation mode keeps its quiet stretches.
+ */
+const FAST_PERIOD = ms(30_000);
 
 const seconds = (value: number): SimDuration => ms(value * 1000);
 
