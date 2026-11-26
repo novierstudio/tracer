@@ -52,13 +52,10 @@ export interface EngineAnswers {
   /** `clear ip nat translation *`: how many translations it cleared. Asking clears them. */
   readonly natCleared: number;
   readonly ipv6: Ipv6Status;
-<<<<<<< HEAD
   /** The Telnet and SSH sessions open on the device's vty lines, for `show users`. */
   readonly sessions: readonly VtySession[];
-=======
   /** CDP, LLDP, EtherChannel and port security as they run now. */
   readonly layer2: Layer2Status;
->>>>>>> 077026b (feat(model): add the data for CDP, LLDP, EtherChannel and port security)
 }
 
 export type EngineQueryKind = keyof EngineAnswers;
