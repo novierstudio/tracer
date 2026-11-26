@@ -33,3 +33,25 @@ export function endUp(device: Device | undefined, port: PortId, cable: Cable): b
   const kind = device.ports.find((candidate) => candidate.id === port)?.kind;
   return kind !== undefined && CABLE_FITS[cable].includes(kind) && adminUp(device, port);
 }
+
+/**
+ * What a router or switch prints on its console as a port's link changes, as Packet Tracer does:
+ * `%LINK-5-CHANGED`, then the line protocol. A port taken down by err-disable logs as IOS does,
+ * line protocol first. Hosts print nothing.
+ */
+export function linkSyslog(
+  device: Device | undefined,
+  port: PortId,
+  up: boolean,
+  errDisabled: boolean,
+): string[] {
+  if (device?.kind !== 'router' && device?.kind !== 'switch') return [];
+  const state = up ? 'up' : 'down';
+  const protocol = `%LINEPROTO-5-UPDOWN: Line protocol on Interface ${port}, changed state to ${state}`;
+  if (!up && errDisabled) {
+    return [protocol, `%LINK-3-UPDOWN: Interface ${port}, changed state to down`];
+  }
+  const shut = !up && device.config.interfaces[port]?.shutdown === true;
+  const link = `%LINK-5-CHANGED: Interface ${port}, changed state to ${shut ? 'administratively down' : state}`;
+  return [link, protocol];
+}

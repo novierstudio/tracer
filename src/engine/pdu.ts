@@ -29,14 +29,20 @@ export type EthernetFrame = {
   readonly payload: EthernetPayload;
 };
 
-export type EthernetPayload = ArpPacket | Ipv4Packet | Ipv6Packet | Bpdu;
+export type EthernetPayload =
+  ArpPacket | Ipv4Packet | Ipv6Packet | Bpdu | CdpPacket | LldpPacket | LacpPdu | PagpPdu;
 
-/** A BPDU has no EtherType: it rides in an 802.3 frame with an LLC and SNAP header instead. */
+/** The payloads that ride in an 802.3 frame with an LLC and SNAP header instead of an EtherType. */
+export type SnapPayload = Bpdu | CdpPacket | PagpPdu;
+
 export const ETHER_TYPE = {
   arp: 0x0806,
   ipv4: 0x0800,
   ipv6: 0x86dd,
-} as const satisfies Record<Exclude<EthernetPayload['kind'], 'bpdu'>, number>;
+  lldp: 0x88cc,
+  /** Slow Protocols, which LACP is subtype 1 of. */
+  lacp: 0x8809,
+} as const satisfies Record<Exclude<EthernetPayload['kind'], SnapPayload['kind']>, number>;
 
 export const DOT1Q_TPID = 0x8100;
 
@@ -286,8 +292,88 @@ export type ConfigBpdu = {
 /** A topology change notification, sent out of the root port toward the root. */
 export type TcnBpdu = { readonly kind: 'bpdu'; readonly type: 'tcn' };
 
+/** Cisco's multicast for CDP and PAgP, which a switch takes for itself and never forwards. */
+export const CDP_MAC = '01:00:0c:cc:cc:cc' as MacAddress;
+
+/** The Slow Protocols multicast LACP goes to. Bridges never forward it. */
+export const SLOW_PROTOCOLS_MAC = '01:80:c2:00:00:02' as MacAddress;
+
+/** The nearest-bridge multicast LLDP goes to. Bridges never forward it. */
+export const LLDP_MAC = '01:80:c2:00:00:0e' as MacAddress;
+
+/** What a CDP or LLDP neighbour says it is. */
+export type DeviceCapability = 'router' | 'switch' | 'igmp' | 'host';
+
+/**
+ * A CDPv2 advertisement: who the sender is, and from which port. A neighbour keeps it for
+ * `holdtime` seconds, so the sender repeats it more often than that.
+ */
+export type CdpPacket = {
+  readonly kind: 'cdp';
+  readonly version: 2;
+  readonly holdtime: number;
+  readonly deviceId: string;
+  /** The sending interface's address, else the device's first, as IOS picks it. */
+  readonly addresses: readonly Ipv4Address[];
+  /** The sending port's full name, such as `FastEthernet0/1`. */
+  readonly portId: string;
+  readonly capabilities: readonly DeviceCapability[];
+  readonly platform: string;
+  readonly software: string;
+  /** A switchport's access or native VLAN. */
+  readonly nativeVlan?: VlanId;
+  readonly duplex: 'full' | 'half';
+};
+
+/** An LLDP advertisement. A neighbour keeps it for `ttl` seconds. */
+export type LldpPacket = {
+  readonly kind: 'lldp';
+  readonly chassisId: MacAddress;
+  /** The sending port's full name. */
+  readonly portId: string;
+  readonly ttl: number;
+  readonly systemName: string;
+  readonly systemDescription: string;
+  /** What the sender can do, and what it has enabled: IOS enables what it can. */
+  readonly capabilities: readonly DeviceCapability[];
+  readonly managementAddress?: Ipv4Address;
+  /** The sending port's VLAN ID (802.1 TLV): a switchport's access or native VLAN, else 1. */
+  readonly vlan?: VlanId;
+};
+
+/** One end of an LACP conversation: the system and port, and the key its channel group gives. */
+export type LacpActor = {
+  readonly system: MacAddress;
+  /** IOS's admin key: the channel group number. */
+  readonly key: number;
+  readonly port: number;
+  /** Active ports start the conversation; passive ones only answer. */
+  readonly active: boolean;
+};
+
+/** An LACPDU: the sender, and the partner it has heard on this link, if any. */
+export type LacpPdu = {
+  readonly kind: 'lacp';
+  readonly actor: LacpActor;
+  readonly partner?: Omit<LacpActor, 'active'>;
+};
+
+/** A PAgP packet: the sender's device and port, its group, and the partner it has heard. */
+export type PagpPdu = {
+  readonly kind: 'pagp';
+  readonly device: MacAddress;
+  readonly port: number;
+  readonly group: number;
+  /** Desirable ports start the conversation; auto ones only answer. */
+  readonly desirable: boolean;
+  readonly partner?: { readonly device: MacAddress; readonly port: number };
+};
+
 /** A frame on a serial link. Cisco HDLC needs no addresses: the link has one peer. */
-export type HdlcFrame = { readonly kind: 'hdlc'; readonly payload: Ipv4Packet | Ipv6Packet };
+export type HdlcFrame = {
+  readonly kind: 'hdlc';
+  readonly payload: Ipv4Packet | Ipv6Packet | CdpPacket;
+};
 
 /** Every OSPF router on a link listens to this group: hellos go here. */
 export const ALL_SPF_ROUTERS = '224.0.0.5' as Ipv4Address;

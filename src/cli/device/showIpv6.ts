@@ -22,7 +22,7 @@ import {
 } from '../../model/ipv6';
 import type { IosDevice } from './context';
 import type { PortStates } from './query';
-import { ciscoMac, interfaceEntries, interfaceStatus, type InterfaceEntry } from './show';
+import { ciscoMac, interfaceEntries, interfaceStatus, isLayer2, type InterfaceEntry } from './show';
 import { NO_ENGINE } from './showRouting';
 
 /** What the interface commands read: the simulation's answer, or what the config alone says. */
@@ -40,7 +40,7 @@ function joinedGroups(routing: boolean, addresses: readonly Ipv6Address[]): Ipv6
 /** Each interface with IPv6 enabled, its addresses derived from the config and the MACs. */
 function configInterfaces(device: IosDevice, routing: boolean): Ipv6InterfaceStatus[] {
   return interfaceEntries(device).flatMap((entry) => {
-    const config = entry.kind === 'switched' ? undefined : entry.config.ipv6;
+    const config = isLayer2(entry) ? undefined : entry.config.ipv6;
     const mac = eui64Mac(device.ports, entry.port?.id);
     if (!config || !ipv6Enabled(config) || !mac) return [];
     const linkLocal = interfaceLinkLocal(config, mac);
@@ -227,6 +227,7 @@ export function showIpv6Route(status: Ipv6Status | undefined): readonly string[]
 
 const NEIGHBOR_SHORT: Readonly<Record<InterfaceType, string>> = {
   Loopback: 'Lo',
+  'Port-channel': 'Po',
   FastEthernet: 'Fa',
   GigabitEthernet: 'Gig',
   Serial: 'Se',

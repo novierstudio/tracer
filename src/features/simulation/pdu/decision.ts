@@ -22,7 +22,14 @@ import {
 import { isNdp, type Ipv6Packet, type RouterAdvertisement } from '@/engine/pdu6';
 import type { TcpSegment } from '@/engine/tcp';
 import { shortPortName } from '@/features/canvas/cables';
-import type { Device, Ipv4Address, MacAddress, PortId, VlanId } from '@/model';
+import {
+  channelProtocol,
+  type Device,
+  type Ipv4Address,
+  type MacAddress,
+  type PortId,
+  type VlanId,
+} from '@/model';
 import {
   ALL_NODES,
   ALL_ROUTERS,
@@ -40,6 +47,8 @@ import {
   type Ipv6Address,
 } from '@/model/ipv6';
 import { eigrpType, type EigrpType } from './layers';
+import { isLinkControl, PROTOCOLS, type LinkControl } from '../protocols';
+import type { ControlPdu } from './control';
 
 /**
  * What the receiving device did with a frame, read from the frames it sent while it handled
@@ -49,6 +58,16 @@ export type Decision =
   | { kind: 'lost' }
   | { kind: 'link-test' }
   | { kind: 'spanning-tree'; out: readonly PortId[] }
+  /** A device running CDP or LLDP on the port read an advertisement and keeps its sender as a neighbour. */
+  | {
+      kind: 'neighbor';
+      protocol: 'cdp' | 'lldp';
+      neighbor: string;
+      holdtime: number;
+      port: PortId;
+    }
+  /** A port in a channel group of LACP or PAgP's mode read a packet of that protocol. */
+  | { kind: 'channel'; protocol: 'lacp' | 'pagp'; group: number; port: PortId }
   | { kind: 'routed'; out: PortId; ttl: readonly [number, number] }
   /** IPv6 has a hop limit where IPv4 has a TTL. */
   | { kind: 'routed'; out: PortId; hopLimit: readonly [number, number] }
@@ -148,6 +167,9 @@ export type IgnoreReason =
   /** A router advertisement reached a device that does not autoconfigure. */
   | { kind: 'no-autoconfig' }
   | { kind: 'bpdu' }
+  | { kind: 'host-control'; protocol: ControlPdu['kind'] }
+  /** CDP or LLDP is off on the port, or the port is in no channel group of the protocol. */
+  | { kind: 'control-off'; protocol: ControlPdu['kind']; port: PortId }
   | { kind: 'dhcp-for-other'; client: MacAddress }
   | { kind: 'dhcp-not-server'; message: DhcpMessage['type'] }
   | { kind: 'no-rip' }
@@ -325,7 +347,7 @@ const isForwardOf = (packet: Ipv4Packet, next: Ipv4Packet) =>
  */
 function reachesIpStack(device: Extract<Device, { kind: 'switch' }>, event: FrameEvent): boolean {
   const { frame } = event;
-  if (frame.kind !== 'ethernet' || frame.payload.kind === 'bpdu') return false;
+  if (frame.kind !== 'ethernet') return false;
   const arp = arpOf(frame);
   return (
     !device.config.interfaces[event.to.port]?.switchport ||
@@ -341,7 +363,6 @@ function decideSwitch(
 ): Decision {
   const { frame } = event;
   if (frame.kind !== 'ethernet') return { kind: 'silent' };
-  if (frame.payload.kind === 'bpdu') return { kind: 'spanning-tree', out: sent.map((s) => s.port) };
   const switchport = device.config.interfaces[event.to.port]?.switchport;
   const vlan = switchport ? ingressVlan(switchport, frame) : undefined;
   if (sent.length === 0) {
@@ -804,6 +825,62 @@ function decideIpv6(
   return { kind: 'ignored', reason: { kind: 'other-ip', dst: packet.dst } };
 }
 
+/**
+ * Spanning tree, discovery and EtherChannel stop at the next device: it reads the frame or
+ * ignores it, and never passes it on.
+ */
+function decideLinkControl(
+  device: Device,
+  port: PortId,
+  payload: LinkControl,
+  sent: readonly SentFrame[],
+): Decision {
+  if (payload.kind === 'bpdu') {
+    return device.kind === 'switch'
+      ? { kind: 'spanning-tree', out: sent.map((s) => s.port) }
+      : { kind: 'ignored', reason: { kind: 'bpdu' } };
+  }
+  if (device.kind === 'pc' || device.kind === 'server') {
+    return { kind: 'ignored', reason: { kind: 'host-control', protocol: payload.kind } };
+  }
+  const { config } = device;
+  const iface = config.interfaces[port];
+  const off: Decision = {
+    kind: 'ignored',
+    reason: { kind: 'control-off', protocol: payload.kind, port },
+  };
+  switch (payload.kind) {
+    case 'cdp':
+      return config.cdpRun === false || iface?.cdpEnable === false
+        ? off
+        : {
+            kind: 'neighbor',
+            protocol: 'cdp',
+            neighbor: payload.deviceId,
+            holdtime: payload.holdtime,
+            port,
+          };
+    case 'lldp':
+      return config.lldpRun && iface?.lldpReceive !== false
+        ? {
+            kind: 'neighbor',
+            protocol: 'lldp',
+            neighbor: payload.systemName,
+            holdtime: payload.ttl,
+            port,
+          }
+        : off;
+    case 'lacp':
+    case 'pagp': {
+      const group =
+        device.kind === 'switch' ? device.config.interfaces[port]?.channelGroup : undefined;
+      return group && channelProtocol(group.mode) === payload.kind
+        ? { kind: 'channel', protocol: payload.kind, group: group.group, port }
+        : off;
+    }
+  }
+}
+
 /** What `device`, the frame's receiver, did with it. Undefined when the device is gone. */
 export function decide(event: FrameEvent, device: Device | undefined): Decision | undefined {
   if (event.outcome === 'link-down') return { kind: 'lost' };
@@ -811,11 +888,12 @@ export function decide(event: FrameEvent, device: Device | undefined): Decision 
   if (frame.kind === 'hello') return { kind: 'link-test' };
   if (!device) return undefined;
   const sent = event.sent ?? [];
+  // CDP crosses serial links too, inside Cisco HDLC.
+  if (isLinkControl(frame.payload)) {
+    return decideLinkControl(device, event.to.port, frame.payload, sent);
+  }
   if (device.kind === 'switch' && !reachesIpStack(device, event)) {
     return decideSwitch(device, event, sent);
-  }
-  if (frame.kind === 'ethernet' && frame.payload.kind === 'bpdu') {
-    return { kind: 'ignored', reason: { kind: 'bpdu' } };
   }
   const packet6 = ipv6Of(frame);
   if (packet6) return decideIpv6(device, frame, event.to.port, packet6, sent);
@@ -1039,6 +1117,15 @@ function describeIgnore(name: string, reason: IgnoreReason) {
       return `${name} ignored it: it is not set to autoconfigure IPv6, so it takes no address from router advertisements.`;
     case 'bpdu':
       return `${name} ignored it: only switches run spanning tree.`;
+    case 'host-control':
+      return `${name} ignored it: hosts do not run ${PROTOCOLS[reason.protocol].label}.`;
+    case 'control-off': {
+      const protocol = PROTOCOLS[reason.protocol].label;
+      const port = shortPortName(reason.port);
+      return reason.protocol === 'cdp' || reason.protocol === 'lldp'
+        ? `${name} ignored it: ${name} does not run ${protocol} on ${port}.`
+        : `${name} ignored it: ${port} is in no ${protocol} channel group.`;
+    }
     case 'dhcp-for-other':
       return `${name} ignored it: it is for DHCP client ${reason.client}, not ${name}.`;
     case 'dhcp-not-server':
@@ -1147,6 +1234,10 @@ export function describeDecision(decision: Decision, name: string): string {
       return decision.out.length > 0
         ? `${name} fed the BPDU to spanning tree and sent its own BPDU out ${list(decision.out)}.`
         : `${name} fed the BPDU to spanning tree, which uses it to elect the root and choose the ports that forward.`;
+    case 'neighbor':
+      return `${name} read the ${PROTOCOLS[decision.protocol].label} advertisement on ${shortPortName(decision.port)} and keeps ${decision.neighbor} as a neighbour for ${decision.holdtime} s.`;
+    case 'channel':
+      return `${name} read the ${PROTOCOLS[decision.protocol].label} packet on ${shortPortName(decision.port)} and uses it to bundle the port into Port-channel${decision.group}.`;
     case 'routed': {
       const [counter, [before, after]] =
         'hopLimit' in decision ? ['hop limit', decision.hopLimit] : ['TTL', decision.ttl];

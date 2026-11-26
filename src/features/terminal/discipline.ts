@@ -179,6 +179,14 @@ function lines(output: readonly string[]): string {
   return output.map((l) => `${l}\r\n`).join('');
 }
 
+/**
+ * Prints lines that arrive on their own, such as a syslog message, below the line being typed,
+ * then draws the prompt and the line again.
+ */
+export function interject(session: TerminalSession, state: LineState, output: readonly string[]) {
+  return leave(session, state) + lines(output) + draw(session, state);
+}
+
 /** Prints output a page at a time, then the prompt and whatever line is left in `state`. */
 function show(session: TerminalSession, state: LineState, output: readonly string[]): Step {
   const page = Math.max(1, state.rows - 1);

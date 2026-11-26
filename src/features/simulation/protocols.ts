@@ -3,17 +3,25 @@ import type { Frame } from '@/engine/frame';
 import type {
   ArpPacket,
   Bpdu,
+  CdpPacket,
   DhcpMessage,
   EigrpPacket,
+  EthernetPayload,
   IcmpMessage,
   Ipv4Packet,
+  LacpPdu,
+  LldpPacket,
   OspfPacket,
+  PagpPdu,
   RipMessage,
   UdpDatagram,
 } from '@/engine/pdu';
 import { isNdp, type Ipv6Packet } from '@/engine/pdu6';
 import type { TcpSegment } from '@/engine/tcp';
+import { shortPortName } from '@/features/canvas/cables';
+import type { PortId } from '@/model';
 import { formatIpv6Cidr, UNSPECIFIED_IPV6 } from '@/model/ipv6';
+import type { ControlPdu } from './pdu/control';
 import { describeDns, describePayload, describeTcp } from './pdu/web';
 
 /** The protocol a frame shows as: the innermost one the engine models. */
@@ -32,6 +40,10 @@ export type ProtocolId =
   | 'ospf'
   | 'eigrp'
   | 'stp'
+  | 'cdp'
+  | 'lldp'
+  | 'lacp'
+  | 'pagp'
   | 'hello';
 
 /** Each protocol's short label and colour token. The label means colour is never the only cue. */
@@ -51,6 +63,11 @@ export const PROTOCOLS: Record<ProtocolId, { label: string; token: `--proto-${st
   ospf: { label: 'OSPF', token: '--proto-routing' },
   eigrp: { label: 'EIGRP', token: '--proto-routing' },
   stp: { label: 'STP', token: '--proto-stp' },
+  // Discovery and EtherChannel talk only to the next device, as spanning tree does, so share its colour.
+  cdp: { label: 'CDP', token: '--proto-stp' },
+  lldp: { label: 'LLDP', token: '--proto-stp' },
+  lacp: { label: 'LACP', token: '--proto-stp' },
+  pagp: { label: 'PAgP', token: '--proto-stp' },
   hello: { label: 'Hello', token: '--proto-stp' },
 };
 
@@ -81,6 +98,7 @@ export function protocolOf(frame: Frame): ProtocolId {
     case 'hello':
       return 'hello';
     case 'hdlc':
+      if (frame.payload.kind === 'cdp') return 'cdp';
       return frame.payload.kind === 'ipv6'
         ? ipv6Protocol(frame.payload)
         : ipProtocol(frame.payload);
@@ -94,9 +112,28 @@ export function protocolOf(frame: Frame): ProtocolId {
           return ipProtocol(frame.payload);
         case 'ipv6':
           return ipv6Protocol(frame.payload);
+        case 'cdp':
+        case 'lldp':
+        case 'lacp':
+        case 'pagp':
+          return frame.payload.kind;
       }
   }
 }
+
+/** The payloads one device sends its neighbour on each port, which no device passes on. */
+export type LinkControl = Bpdu | ControlPdu;
+
+const LINK_CONTROL: ReadonlySet<EthernetPayload['kind']> = new Set<LinkControl['kind']>([
+  'bpdu',
+  'cdp',
+  'lldp',
+  'lacp',
+  'pagp',
+]);
+
+export const isLinkControl = (payload: EthernetPayload): payload is LinkControl =>
+  LINK_CONTROL.has(payload.kind);
 
 /** Frames whose protocol is not hidden, in their original order. */
 export function visibleFrames(
@@ -138,6 +175,47 @@ function describeBpdu(bpdu: Bpdu): string {
   const { root, bridge, port } = bpdu;
   const text = `Root ${root.priority} ${root.mac}, cost ${bpdu.rootPathCost}, from ${bridge.priority} ${bridge.mac} port ${port.priority}.${port.number}`;
   return flags.length > 0 ? `${text} · ${flags.join(', ')}` : text;
+}
+
+const portName = (id: string) => shortPortName(id as PortId);
+
+const describeCdp = (cdp: CdpPacket) =>
+  `CDP from ${cdp.deviceId} ${portName(cdp.portId)} (holdtime ${cdp.holdtime})`;
+
+const describeLldp = (lldp: LldpPacket) =>
+  `LLDP from ${lldp.systemName} ${portName(lldp.portId)} (TTL ${lldp.ttl})`;
+
+function describeLacp({ actor, partner }: LacpPdu): string {
+  const heard = partner ? `partner ${partner.system} port ${partner.port}` : 'no partner yet';
+  return `LACP from ${actor.system} port ${actor.port}: ${actor.active ? 'active' : 'passive'}, ${heard}`;
+}
+
+function describePagp(pagp: PagpPdu): string {
+  const heard = pagp.partner
+    ? `partner ${pagp.partner.device} port ${pagp.partner.port}`
+    : 'no partner yet';
+  return `PAgP from ${pagp.device} port ${pagp.port}: ${pagp.desirable ? 'desirable' : 'auto'}, group ${pagp.group}, ${heard}`;
+}
+
+function describeEthernetPayload(payload: EthernetPayload): string {
+  switch (payload.kind) {
+    case 'arp':
+      return describeArp(payload);
+    case 'bpdu':
+      return describeBpdu(payload);
+    case 'ipv4':
+      return describePacket(payload);
+    case 'ipv6':
+      return describeIpv6(payload);
+    case 'cdp':
+      return describeCdp(payload);
+    case 'lldp':
+      return describeLldp(payload);
+    case 'lacp':
+      return describeLacp(payload);
+    case 'pagp':
+      return describePagp(payload);
+  }
 }
 
 function describeDhcp(message: DhcpMessage): string {
@@ -261,18 +339,14 @@ export function describeFrame({ frame, outcome }: Pick<FrameEvent, 'frame' | 'ou
       break;
     case 'hdlc':
       text =
-        frame.payload.kind === 'ipv6' ? describeIpv6(frame.payload) : describePacket(frame.payload);
+        frame.payload.kind === 'cdp'
+          ? describeEthernetPayload(frame.payload)
+          : frame.payload.kind === 'ipv6'
+            ? describeIpv6(frame.payload)
+            : describePacket(frame.payload);
       break;
     case 'ethernet': {
-      const { payload } = frame;
-      const body =
-        payload.kind === 'arp'
-          ? describeArp(payload)
-          : payload.kind === 'bpdu'
-            ? describeBpdu(payload)
-            : payload.kind === 'ipv6'
-              ? describeIpv6(payload)
-              : describePacket(payload);
+      const body = describeEthernetPayload(frame.payload);
       text = frame.tag ? `${body} · VLAN ${frame.tag.vlan}` : body;
       break;
     }

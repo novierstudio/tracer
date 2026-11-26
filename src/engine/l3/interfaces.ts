@@ -232,8 +232,13 @@ export function sendOnLan(
   }
   const { device } = ctx;
   if (device.kind !== 'switch') return;
+  const bundles = new Set<string>();
   for (const out of vlanPorts(device, medium.vlan)) {
     if ((port !== undefined && out.port !== port) || !ctx.forwards(out.port, medium.vlan)) continue;
+    // A flood leaves an EtherChannel by one of its members.
+    const bundle = ctx.bundleOf(out.port);
+    if (bundle !== undefined && bundles.has(bundle)) continue;
+    if (bundle !== undefined) bundles.add(bundle);
     ctx.send(out.port, egressFrame(out.switchport, medium.vlan, frame));
   }
 }

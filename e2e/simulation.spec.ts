@@ -128,9 +128,12 @@ test('in realtime, a ping across the router shows ARP and ICMP chips on the link
   await expect
     .poll(
       async () => {
-        // Spanning tree hellos cross the switch links on their own every 2 s.
+        // Spanning tree hellos cross the switch links on their own every 2 s, and CDP
+        // advertisements as each link comes up.
         for (const chip of await chips(page)) {
-          if (chip.protocol !== 'stp') seen.add(`${chip.protocol} ${chip.link}`);
+          if (chip.protocol !== 'stp' && chip.protocol !== 'cdp') {
+            seen.add(`${chip.protocol} ${chip.link}`);
+          }
         }
         return [...seen];
       },
@@ -171,12 +174,14 @@ test('in Simulation mode, a cross-router ping steps forward hop by hop, list and
 
   for (const [index, [from, to, type, link]] of HOPS.entries()) {
     await page.getByRole('button', { name: 'Step forward' }).click();
-    await expect.poll(() => moment(page)).toEqual({
-      events: index + 1,
-      hop: [from, to, type],
-      current: true,
-      chips: [expect.objectContaining({ link, protocol: type.toLowerCase(), motion: 'arrive' })],
-    });
+    await expect
+      .poll(() => moment(page))
+      .toEqual({
+        events: index + 1,
+        hop: [from, to, type],
+        current: true,
+        chips: [expect.objectContaining({ link, protocol: type.toLowerCase(), motion: 'arrive' })],
+      });
   }
 });
 

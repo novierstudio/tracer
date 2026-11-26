@@ -8,7 +8,7 @@ import { drawRandom } from './core/random';
 import { after, ms, START, type SimDuration, type SimTime } from './core/time';
 import type { EventId, SentFrame, SimEvent } from './events';
 import type { Frame } from './frame';
-import { endUp } from './l1';
+import { endUp, linkSyslog } from './l1';
 import type { DeviceUnavailable, ModuleContext, SimModule, Stacks } from './module';
 import type { TopologyPatch } from './patch';
 
@@ -120,6 +120,8 @@ export function createEngine({
   let now = START;
   let generations = 0;
   let settings = DEFAULT_LAB_SETTINGS;
+  // Set while a lab loads, when links coming up are not news.
+  let loading = false;
   // What the device handling an arriving frame sends, while it handles it.
   let handling: SentFrame[] | undefined;
 
@@ -180,6 +182,13 @@ export function createEngine({
         forwards: (port, vlan) =>
           slot.ctx.portUp(port) &&
           !(running.get(id) ?? []).some((other) => other.module.holdsVlan?.(other.ctx, port, vlan)),
+        bundleOf: (port) => {
+          for (const other of running.get(id) ?? []) {
+            const bundle = other.module.bundleOf?.(other.ctx, port);
+            if (bundle !== undefined) return bundle;
+          }
+          return undefined;
+        },
         send: (port, frame) => send({ device: id, port }, frame),
         setTimer: (key, delay) => {
           const pending = slot.timers.get(key);
@@ -195,6 +204,10 @@ export function createEngine({
         random,
         note: (text) =>
           log.append({ kind: 'note', time: now, device: id, module: module.id, text }),
+        syslog: (text) => log.append({ kind: 'syslog', time: now, device: id, text }),
+        learnSticky: (port, mac) =>
+          log.append({ kind: 'sticky-mac', time: now, device: id, port, mac }),
+        relink: () => relink((link) => link.a.device === id || link.b.device === id),
         learnedRoutes: () =>
           (running.get(id) ?? []).flatMap((other) => other.module.routes?.(other.ctx) ?? []),
       },
@@ -218,11 +231,47 @@ export function createEngine({
 
   function linkChanged(link: Link, up: boolean) {
     log.append({ kind: 'link', time: now, link: link.id, up });
+    // Devices booting with a lab print nothing: their consoles open on a running network.
+    if (!loading) {
+      for (const end of [link.a, link.b]) {
+        for (const text of linkSyslog(devices.get(end.device), end.port, up, disabled(end))) {
+          log.append({ kind: 'syslog', time: now, device: end.device, text });
+        }
+      }
+    }
     for (const end of [link.a, link.b]) {
       for (const slot of running.get(end.device) ?? []) {
         slot.module.onLinkChange?.(slot.ctx, end.port, up);
       }
     }
+  }
+
+  /** Whether a module on the device has taken the port down, as by err-disabling it. */
+  function disabled({ device, port }: Endpoint) {
+    return (running.get(device) ?? []).some((slot) => slot.module.disablesPort?.(slot.ctx, port));
+  }
+
+  /** Brings the chosen links up or down as their ends allow, and returns those that changed. */
+  function linkTransitions(chosen: (link: Link) => boolean): [Link, boolean][] {
+    const transitions: [Link, boolean][] = [];
+    for (const state of links.values()) {
+      if (!chosen(state.link)) continue;
+      const { a, b, cable } = state.link;
+      const up =
+        endUp(devices.get(a.device), a.port, cable) &&
+        endUp(devices.get(b.device), b.port, cable) &&
+        !disabled(a) &&
+        !disabled(b);
+      if (up === state.up) continue;
+      state.up = up;
+      if (up) state.generation = ++generations;
+      transitions.push([state.link, up]);
+    }
+    return transitions;
+  }
+
+  function relink(chosen: (link: Link) => boolean) {
+    for (const [link, up] of linkTransitions(chosen)) linkChanged(link, up);
   }
 
   function indexPorts() {
@@ -262,15 +311,7 @@ export function createEngine({
 
     for (const id of touched) if (running.has(id) && !devices.get(id)?.powered) stop(id);
 
-    for (const state of links.values()) {
-      const { a, b, cable } = state.link;
-      const up =
-        endUp(devices.get(a.device), a.port, cable) && endUp(devices.get(b.device), b.port, cable);
-      if (up === state.up) continue;
-      state.up = up;
-      if (up) state.generation = ++generations;
-      transitions.push([state.link, up]);
-    }
+    transitions.push(...linkTransitions(() => true));
     for (const [link, up] of transitions) linkChanged(link, up);
 
     for (const id of touched) {
@@ -299,7 +340,12 @@ export function createEngine({
     now = START;
     generations = 0;
     settings = labSettings(topology);
-    applyPatch({ devices: topology.devices, links: topology.links });
+    loading = true;
+    try {
+      applyPatch({ devices: topology.devices, links: topology.links });
+    } finally {
+      loading = false;
+    }
   }
 
   function process(item: Scheduled) {

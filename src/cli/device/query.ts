@@ -4,6 +4,7 @@ import type {
   DeviceUnavailable,
   DhcpBindingEntry,
   Ipv6Status,
+  Layer2Status,
   MacTableEntry,
   NatTranslationEntry,
   PingListener,
@@ -53,6 +54,8 @@ export interface EngineAnswers {
   readonly ipv6: Ipv6Status;
   /** The Telnet and SSH sessions open on the device's vty lines, for `show users`. */
   readonly sessions: readonly VtySession[];
+  /** CDP, LLDP, EtherChannel and port security as they run now. */
+  readonly layer2: Layer2Status;
 }
 
 export type EngineQueryKind = keyof EngineAnswers;

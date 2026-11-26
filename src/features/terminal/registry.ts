@@ -40,6 +40,23 @@ export function createConsoleRegistry(
   };
 }
 
+/**
+ * Prints each router or switch's syslog messages on its console. A step back replays events with
+ * the ids, times and text they had, so a message already printed is not printed again.
+ */
+export function trackSyslog(client: Pick<SimClient, 'onBatch'>, registry: ConsoleRegistry) {
+  const printed = new Set<string>();
+  return client.onBatch((batch) => {
+    for (const event of batch.events) {
+      if (event.kind !== 'syslog') continue;
+      const key = `${event.id} ${event.time} ${event.device} ${event.text}`;
+      if (printed.has(key)) continue;
+      printed.add(key);
+      registry.get(event.device)?.log([event.text]);
+    }
+  });
+}
+
 /** The client's calls a console makes, and the simulated clock as its batches report it. */
 function linkTo({ sim, onBatch, ping, traceroute, openTerminal }: SimClient): SimLink {
   let now = 0;
@@ -57,6 +74,7 @@ function linkTo({ sim, onBatch, ping, traceroute, openTerminal }: SimClient): Si
     natTranslations: (device) => sim.natTranslations(device),
     clearNatTranslations: (device) => sim.clearNatTranslations(device),
     ipv6Status: (device) => sim.ipv6Status(device),
+    layer2Status: (device) => sim.layer2Status(device),
     now: () => now,
     ping,
     traceroute,

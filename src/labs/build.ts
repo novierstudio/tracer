@@ -121,9 +121,15 @@ function labBuilder(id: string) {
       });
     },
 
-    cable(a: [string, string], b: [string, string], kind: Cable = { cable: 'straight' }) {
+    /** `suffix` tells apart two cables between the same devices, as an EtherChannel has. */
+    cable(
+      a: [string, string],
+      b: [string, string],
+      kind: Cable = { cable: 'straight' },
+      suffix = '',
+    ) {
       const link = {
-        id: LinkId.parse(`lnk_${tag}${a[0]}${b[0]}`),
+        id: LinkId.parse(`lnk_${tag}${a[0]}${b[0]}${suffix}`),
         a: { device: deviceId(a[0]), port: PortId.parse(a[1]) },
         b: { device: deviceId(b[0]), port: PortId.parse(b[1]) },
         ...kind,
@@ -757,6 +763,64 @@ function remoteManagement() {
   return lab.topology;
 }
 
+function etherchannelLab() {
+  const lab = labBuilder('etherchannel');
+  const bundle = (mode: string) => [
+    'interface range GigabitEthernet0/1 - 2',
+    ' switchport mode trunk',
+    ` channel-group 1 mode ${mode}`,
+  ];
+  lab.ios('SW1', 'switch-24', 232, 40, bundle('active'));
+  lab.ios('SW2', 'switch-24', 616, 40, bundle('passive'));
+  lab.pc('PC1', 232, 232, '192.168.1.10/24');
+  lab.pc('PC2', 616, 232, '192.168.1.11/24');
+  lab.cable(['SW1', 'GigabitEthernet0/1'], ['SW2', 'GigabitEthernet0/1'], undefined, '1');
+  lab.cable(['SW1', 'GigabitEthernet0/2'], ['SW2', 'GigabitEthernet0/2'], undefined, '2');
+  lab.cable(['PC1', 'FastEthernet0'], ['SW1', 'FastEthernet0/1']);
+  lab.cable(['PC2', 'FastEthernet0'], ['SW2', 'FastEthernet0/1']);
+  lab.note(
+    'lacp',
+    328,
+    -112,
+    'Both uplinks are in channel group 1. SW1 is LACP active and SW2 passive, so they bundle into Port-channel1.',
+  );
+  lab.note(
+    'stp',
+    760,
+    120,
+    'Spanning tree sees Port-channel1 as one port, so neither uplink blocks: both carry traffic.',
+  );
+  return lab.topology;
+}
+
+function portSecurityLab() {
+  const lab = labBuilder('port-security');
+  lab.ios('SW1', 'switch-24', 424, 40, [
+    'interface FastEthernet0/1',
+    ' switchport mode access',
+    ' switchport port-security',
+    ' switchport port-security mac-address sticky',
+  ]);
+  lab.pc('PC1', 232, 232, '192.168.1.10/24');
+  lab.pc('PC2', 616, 232, '192.168.1.11/24');
+  lab.pc('Intruder', 232, 424, '192.168.1.66/24');
+  lab.cable(['PC1', 'FastEthernet0'], ['SW1', 'FastEthernet0/1']);
+  lab.cable(['PC2', 'FastEthernet0'], ['SW1', 'FastEthernet0/2']);
+  lab.note(
+    'secure',
+    544,
+    -64,
+    'Fa0/1 takes one MAC address, learned sticky: the first one it hears goes into the running-config.',
+  );
+  lab.note(
+    'intruder',
+    40,
+    512,
+    'Move PC1’s cable to the Intruder and ping from it: Fa0/1 sees a second address and err-disables.',
+  );
+  return lab.topology;
+}
+
 export const BUILDERS: Record<string, () => Topology> = {
   'two-pcs-switch': twoPcsSwitch,
   'two-lans-router': twoLansRouter,
@@ -771,4 +835,6 @@ export const BUILDERS: Record<string, () => Topology> = {
   'pat-acl': patAcl,
   'ipv6-slaac': ipv6Slaac,
   'remote-management': remoteManagement,
+  etherchannel: etherchannelLab,
+  'port-security': portSecurityLab,
 };

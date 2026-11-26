@@ -1,5 +1,6 @@
 import {
   Ipv4Address,
+  MacAddress,
   normalizeVlans,
   SubnetMask,
   type InterfaceId,
@@ -141,6 +142,19 @@ export function ipv4<N extends string>(name: N, help: string): Param<N, Ipv4Addr
   );
 }
 
+/** A MAC address as IOS writes it, `H.H.H`: three groups of up to four hex digits. */
+export function mac<N extends string>(name: N, help: string): Param<N, MacAddress> {
+  const read = (text: string) => {
+    if (!/^[0-9a-f]{1,4}\.[0-9a-f]{1,4}\.[0-9a-f]{1,4}$/i.test(text)) return undefined;
+    const hex = text
+      .split('.')
+      .map((group) => group.padStart(4, '0'))
+      .join('');
+    return MacAddress.safeParse(hex.match(/.{2}/g)!.join(':')).data;
+  };
+  return param(name, help, singleToken('mac', 'H.H.H', read));
+}
+
 /** A dotted subnet mask such as `255.255.255.0`, read as its prefix length. */
 export function mask<N extends string>(name: N, help: string): Param<N, PrefixLength> {
   return param(
@@ -188,7 +202,7 @@ export function choice<N extends string, const W extends string>(
 const interfaceEntries = () => INTERFACE_TYPES.map((t) => ({ name: t.name, help: t.help }));
 
 function completeInterfaceType(partial: string): readonly string[] {
-  if (!/^[a-z]+$/i.test(partial)) return [];
+  if (!/^[a-z][a-z-]*$/i.test(partial)) return [];
   const p = partial.toLowerCase();
   return INTERFACE_TYPES.map((t) => t.name).filter((name) => name.toLowerCase().startsWith(p));
 }
@@ -203,7 +217,7 @@ export function iface<N extends string>(name: N, help: string): Param<N, Interfa
     match: ({ tokens, index }) => {
       const first = tokens[index];
       if (!first) return INCOMPLETE;
-      const [, prefix = '', port = ''] = /^([a-z]+)(.*)$/i.exec(first.text) ?? [];
+      const [, prefix = '', port = ''] = /^([a-z][a-z-]*?)(\d.*)?$/i.exec(first.text) ?? [];
       if (!resolveInterfaceType(prefix)) return fail(first.start);
       if (port) {
         const value = normalizeInterface(first.text);
@@ -225,7 +239,7 @@ export function ifaceRange<N extends string>(
   const read = (text: string) => {
     const names = expandInterfaceRange(text);
     if (names) return names;
-    const typeOnly = /^[a-z]+$/i.test(text) && resolveInterfaceType(text) !== undefined;
+    const typeOnly = /^[a-z][a-z-]*$/i.test(text) && resolveInterfaceType(text) !== undefined;
     return typeOnly || /-\s*$/.test(text) ? UNFINISHED : undefined;
   };
   return param(

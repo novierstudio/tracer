@@ -362,28 +362,32 @@
             "switchport": {
               "mode": "access",
               "vlan": 10
-            }
+            },
+            "modeAccess": true
           },
           "FastEthernet0/2": {
             "shutdown": false,
             "switchport": {
               "mode": "access",
               "vlan": 10
-            }
+            },
+            "modeAccess": true
           },
           "FastEthernet0/3": {
             "shutdown": false,
             "switchport": {
               "mode": "access",
               "vlan": 20
-            }
+            },
+            "modeAccess": true
           },
           "FastEthernet0/4": {
             "shutdown": false,
             "switchport": {
               "mode": "access",
               "vlan": 20
-            }
+            },
+            "modeAccess": true
           },
           "FastEthernet0/5": {
             "shutdown": false,

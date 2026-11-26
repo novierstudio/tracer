@@ -213,6 +213,7 @@ describe('ipv6 global config', () => {
       '  FastEthernet     FastEthernet IEEE 802.3',
       '  GigabitEthernet  GigabitEthernet IEEE 802.3z',
       '  Loopback         Loopback interface',
+      '  Port-channel     Ethernet Channel of interfaces',
       '  Serial           Serial',
       '  Vlan             Catalyst Vlans',
       '  X:X:X:X::X       IPv6 address of next-hop',

@@ -183,7 +183,9 @@ describe('a VLAN interface', () => {
         event.from.device === mls &&
         event.from.port === 'FastEthernet0/2' &&
         event.frame.kind === 'ethernet' &&
-        event.frame.payload.kind !== 'bpdu',
+        // BPDUs and CDP cross a blocked port, as on IOS: neither is switched traffic.
+        event.frame.payload.kind !== 'bpdu' &&
+        event.frame.payload.kind !== 'cdp',
     );
     expect(outOfBlocked).toEqual([]);
   });

@@ -7,9 +7,13 @@ import {
   ALL_SPF_ROUTERS,
   BROADCAST_MAC,
   EIGRP_GROUP,
+  CDP_MAC,
+  LLDP_MAC,
   multicastMac,
   RIP_GROUP,
+  SLOW_PROTOCOLS_MAC,
   type EthernetFrame,
+  type EthernetPayload,
   type Ipv4Packet,
 } from '@/engine/pdu';
 import { access, cidr, ip, labBuilder, routedLab, trunk } from '@/engine/testing';
@@ -34,6 +38,7 @@ import {
   type Ipv6Address,
 } from '@/model/ipv6';
 import {
+  cdpAdvertisement,
   dnsAnswer,
   dnsNoSuchName,
   dnsQuery,
@@ -43,6 +48,8 @@ import {
   eigrpPacket,
   eigrpQuery,
   eigrpUpdate,
+  lacpPdu,
+  lldpAdvertisement,
   neighborAdvertisement,
   neighborSolicitation,
   ospfAck,
@@ -51,6 +58,7 @@ import {
   ospfLsr,
   ospfLsu,
   ospfPacket,
+  pagpPdu,
   PC1_IPV6,
   pingFrames,
   R1_IPV6,
@@ -317,6 +325,116 @@ describe('a decision read from hand-made frames', () => {
       "PC2 ignored it: it is addressed to 02:00:00:00:00:09, not to PC2's MAC.",
     );
     expect(dropLabel(decision)).toBeUndefined();
+  });
+});
+
+describe('a CDP, LLDP, LACP or PAgP frame', () => {
+  const DST: Record<string, MacAddress> = {
+    cdp: CDP_MAC,
+    lldp: LLDP_MAC,
+    lacp: SLOW_PROTOCOLS_MAC,
+    pagp: CDP_MAC,
+  };
+
+  /** What `device` says it did with `payload` on `port`. */
+  function told(
+    lab: ReturnType<typeof routedLab>['lab'],
+    device: DeviceId,
+    port: string,
+    payload: EthernetPayload,
+  ) {
+    const frame: EthernetFrame = {
+      kind: 'ethernet',
+      dst: DST[payload.kind]!,
+      src: mac(9),
+      payload,
+    };
+    const target = lab.device(device);
+    return describeDecision(
+      decide(arrival(device, port, frame, []), target)!,
+      target.config.hostname,
+    );
+  }
+
+  it('is read by a router or switch running CDP, and ignored by a host', () => {
+    const { lab, pc1, r1, sw1 } = routedLab();
+    const fromR1 = { ...cdpAdvertisement, deviceId: 'R1', portId: 'GigabitEthernet0/0' };
+    expect(told(lab, sw1, 'GigabitEthernet0/1', fromR1)).toBe(
+      'SW1 read the CDP advertisement on Gi0/1 and keeps R1 as a neighbour for 180 s.',
+    );
+    expect(told(lab, r1, 'GigabitEthernet0/0', cdpAdvertisement)).toBe(
+      'R1 read the CDP advertisement on Gi0/0 and keeps SW1 as a neighbour for 180 s.',
+    );
+    expect(told(lab, pc1, 'FastEthernet0', cdpAdvertisement)).toBe(
+      'PC1 ignored it: hosts do not run CDP.',
+    );
+  });
+
+  it('is ignored where CDP is off, for the device or the port', () => {
+    const { lab, r1, sw1 } = routedLab();
+    lab.edit(r1, (device) =>
+      device.kind === 'router'
+        ? { ...device, config: { ...device.config, cdpRun: false } }
+        : device,
+    );
+    lab.edit(sw1, (device) => {
+      if (device.kind !== 'switch') return device;
+      const port = PortId.parse('GigabitEthernet0/1');
+      const iface = device.config.interfaces[port]!;
+      const interfaces = { ...device.config.interfaces, [port]: { ...iface, cdpEnable: false } };
+      return { ...device, config: { ...device.config, interfaces } };
+    });
+    expect(told(lab, r1, 'GigabitEthernet0/0', cdpAdvertisement)).toBe(
+      'R1 ignored it: R1 does not run CDP on Gi0/0.',
+    );
+    expect(told(lab, sw1, 'GigabitEthernet0/1', cdpAdvertisement)).toBe(
+      'SW1 ignored it: SW1 does not run CDP on Gi0/1.',
+    );
+  });
+
+  it('is read only by a device set to lldp run', () => {
+    const { lab, pc1, r1 } = routedLab();
+    const fromSw2 = { ...lldpAdvertisement, systemName: 'SW2', portId: 'GigabitEthernet0/1' };
+    expect(told(lab, r1, 'GigabitEthernet0/1', fromSw2)).toBe(
+      'R1 ignored it: R1 does not run LLDP on Gi0/1.',
+    );
+    lab.edit(r1, (device) =>
+      device.kind === 'router'
+        ? { ...device, config: { ...device.config, lldpRun: true } }
+        : device,
+    );
+    expect(told(lab, r1, 'GigabitEthernet0/1', fromSw2)).toBe(
+      'R1 read the LLDP advertisement on Gi0/1 and keeps SW2 as a neighbour for 120 s.',
+    );
+    expect(told(lab, pc1, 'FastEthernet0', lldpAdvertisement)).toBe(
+      'PC1 ignored it: hosts do not run LLDP.',
+    );
+  });
+
+  it('is read by a port in a channel group of its protocol, and ignored elsewhere', () => {
+    const { lab, pc1, r1, sw1 } = routedLab();
+    lab.edit(sw1, (device) => {
+      if (device.kind !== 'switch') return device;
+      const port = PortId.parse('FastEthernet0/2');
+      const iface = device.config.interfaces[port]!;
+      const channelGroup = { group: 1, mode: 'active' as const };
+      const interfaces = { ...device.config.interfaces, [port]: { ...iface, channelGroup } };
+      return { ...device, config: { ...device.config, interfaces } };
+    });
+    expect(told(lab, sw1, 'FastEthernet0/2', lacpPdu)).toBe(
+      'SW1 read the LACP packet on Fa0/2 and uses it to bundle the port into Port-channel1.',
+    );
+    expect(told(lab, sw1, 'FastEthernet0/2', pagpPdu)).toBe(
+      'SW1 ignored it: Fa0/2 is in no PAgP channel group.',
+    );
+    expect(told(lab, sw1, 'FastEthernet0/3', lacpPdu)).toBe(
+      'SW1 ignored it: Fa0/3 is in no LACP channel group.',
+    );
+    expect(told(lab, r1, 'GigabitEthernet0/0', pagpPdu)).toBe(
+      'R1 ignored it: Gi0/0 is in no PAgP channel group.',
+    );
+    expect(told(lab, pc1, 'FastEthernet0', lacpPdu)).toBe('PC1 ignored it: hosts do not run LACP.');
+    expect(told(lab, pc1, 'FastEthernet0', pagpPdu)).toBe('PC1 ignored it: hosts do not run PAgP.');
   });
 });
 

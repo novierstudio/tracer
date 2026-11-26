@@ -12,6 +12,18 @@ import type { SimTime } from './core/time';
 import type { LinkEnd, LinkStatus } from './engine';
 import type { EventId, SimEvent } from './events';
 import type { MacTableEntry, SpanningTreeVlan } from './l2/switching';
+import type {
+  CdpNeighbor,
+  ChannelMember,
+  ChannelPortFlag,
+  DiscoveryStatus,
+  ErrDisabledPort,
+  EtherChannelStatus,
+  Layer2Status,
+  LldpNeighbor,
+  PortSecurityStatus,
+  SecureAddressEntry,
+} from './l2/status';
 import type { PortRole, PortState, SpanningTreePort, StpTimes } from './l2/stp';
 import type { AclHits } from './l3/acl';
 import type { ArpTableEntry } from './l3/arp';
@@ -59,7 +71,16 @@ export type {
   AclHits,
   ArpTableEntry,
   BrowseTarget,
+  CdpNeighbor,
+  ChannelMember,
+  ChannelPortFlag,
   DeviceUnavailable,
+  DiscoveryStatus,
+  ErrDisabledPort,
+  EtherChannelStatus,
+  LldpNeighbor,
+  PortSecurityStatus,
+  SecureAddressEntry,
   DhcpBindingEntry,
   DhcpListener,
   DhcpOutcome,
@@ -82,6 +103,7 @@ export type {
   Ipv6Route,
   Ipv6Status,
   LearnedRoute,
+  Layer2Status,
   Lease,
   LinkEnd,
   LinkStatus,
@@ -232,6 +254,11 @@ export interface SimAPI {
   macTable(device: DeviceId): Result<MacTableEntry[], DeviceUnavailable>;
   /** A switch's spanning tree instances, by VLAN, for `show spanning-tree`. */
   spanningTree(device: DeviceId): Result<SpanningTreeVlan[], DeviceUnavailable>;
+  /**
+   * A router or switch's CDP and LLDP neighbours, and a switch's EtherChannels and port security,
+   * for their show commands.
+   */
+  layer2Status(device: DeviceId): Result<Layer2Status, DeviceUnavailable>;
   /** Whether each of a device's ports has its link up now, for interface status in `show`. */
   portStates(device: DeviceId): Result<Record<PortId, boolean>, DeviceUnavailable>;
   /**

@@ -147,6 +147,12 @@ function triangle({ portfast = false, timers }: { portfast?: boolean; timers?: S
 const isBpdu = (event: SimEvent) =>
   event.kind === 'frame' && event.frame.kind === 'ethernet' && event.frame.payload.kind === 'bpdu';
 
+/** Spanning tree's and CDP's own frames, which each switch sends its neighbours unasked. */
+const isControl = (event: SimEvent) =>
+  event.kind === 'frame' &&
+  event.frame.kind === 'ethernet' &&
+  (event.frame.payload.kind === 'bpdu' || event.frame.payload.kind === 'cdp');
+
 const delivered = (events: SimEvent[]) =>
   events.filter((event) => event.kind === 'frame' && event.outcome === 'delivered');
 
@@ -211,14 +217,14 @@ describe('spanning tree in a triangle of switches', () => {
     const events = ping();
 
     expect(events.at(-1)).toMatchObject({ kind: 'summary', sent: 4, received: 4 });
-    const traffic = delivered(engine.log.since(mark)).filter((event) => !isBpdu(event));
+    const traffic = delivered(engine.log.since(mark)).filter((event) => !isControl(event));
     // One ARP request crossing each of the 5 links once (one copy dies on the blocked port),
     // one reply across the 3 links of the path, then 4 echoes and 4 replies of 3 hops each.
     expect(traffic).toHaveLength(5 + 3 + 4 * 3 * 2);
 
     const quiet = engine.log.lastId;
     runFor(60_000);
-    expect(delivered(engine.log.since(quiet)).filter((event) => !isBpdu(event))).toEqual([]);
+    expect(delivered(engine.log.since(quiet)).filter((event) => !isControl(event))).toEqual([]);
   });
 
   it('moves the root to a bridge given a better priority, and moves the blocked port with it', () => {

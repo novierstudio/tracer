@@ -221,6 +221,36 @@ export const SAMPLE_LABS: readonly SampleLab[] = [
     ],
     load: () => import('./remote-management.tracer.json?raw').then(text),
   },
+  {
+    id: 'etherchannel',
+    title: 'EtherChannel between switches',
+    description:
+      'Two switches joined by two cables that LACP bundles into one port-channel. Spanning tree treats the bundle as one link, so both cables carry traffic and either can fail.',
+    difficulty: 'intermediate',
+    devices: { switch: 2, pc: 2 },
+    tryThis: [
+      'Run `show etherchannel summary` on SW1: Po1(SU) with both ports (P)',
+      'Run `show spanning-tree` on SW1: Po1 is one port, and nothing blocks',
+      'Run `show cdp neighbors` on SW1 to see SW2 on both uplinks',
+      'Ping PC2 (192.168.1.11) from PC1, delete one uplink cable, and ping again',
+    ],
+    load: () => import('./etherchannel.tracer.json?raw').then(text),
+  },
+  {
+    id: 'port-security',
+    title: 'Port security',
+    description:
+      'SW1’s Fa0/1 takes one device, learned sticky. A second device on the port is a violation, and the switch err-disables the port.',
+    difficulty: 'intermediate',
+    devices: { switch: 1, pc: 3 },
+    tryThis: [
+      'Ping PC2 (192.168.1.11) from PC1, then run `show port-security interface fa0/1` on SW1',
+      'Run `show running-config` on SW1 to find the sticky address it learned',
+      'Move PC1’s cable to the Intruder and ping PC2 from it: Fa0/1 goes down',
+      'Move the cable back, then `shutdown` and `no shutdown` Fa0/1 to recover it',
+    ],
+    load: () => import('./port-security.tracer.json?raw').then(text),
+  },
 ];
 
 export const DIFFICULTY_LABELS: Record<Difficulty, string> = {

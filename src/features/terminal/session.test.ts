@@ -62,6 +62,7 @@ function lab() {
     natTranslations: async (device) => sim.natTranslations(device),
     clearNatTranslations: async (device) => sim.clearNatTranslations(device),
     ipv6Status: async (device) => sim.ipv6Status(device),
+    layer2Status: async (device) => sim.layer2Status(device),
     now: () => engine.now,
     ping: async (...args) => sim.ping(...args),
     traceroute: async (...args) => sim.traceroute(...args),
@@ -244,9 +245,15 @@ describe('a console reading live state', () => {
     const mark = engine.log.lastId;
     engine.runUntil(simTime(engine.now + 10_000));
 
+    // CDP keeps advertising; nothing else leaves R1.
     const sent = engine.log
       .since(mark)
-      .filter((event) => event.kind === 'frame' && event.from.device === r1Id);
+      .filter(
+        (event) =>
+          event.kind === 'frame' &&
+          event.from.device === r1Id &&
+          !(event.frame.kind === 'ethernet' && event.frame.payload.kind === 'cdp'),
+      );
     expect(sent).toEqual([]);
     expect((await rows(r1)).slice(-2)).toEqual([
       expect.stringMatching(/^Success rate is 100 percent \(3\/3\)/),

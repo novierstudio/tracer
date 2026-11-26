@@ -105,6 +105,8 @@ export function createHostTty(shell: HostShell): HostTty {
 
   return {
     session,
+    // A host logs nothing on its own.
+    log: () => {},
     get transcript() {
       return transcript;
     },

@@ -104,7 +104,7 @@ function ripSent(engine: Engine, since = 0 as EventId): RipFrame[] {
     if (event.kind !== 'frame' || event.outcome !== 'delivered') return [];
     const { frame } = event;
     const packet =
-      frame.kind === 'hdlc'
+      frame.kind === 'hdlc' && frame.payload.kind === 'ipv4'
         ? frame.payload
         : frame.kind === 'ethernet' && frame.payload.kind === 'ipv4'
           ? frame.payload
@@ -167,6 +167,8 @@ describe('RIPv2 on a line of three routers', () => {
           event.kind === 'frame' &&
           event.from.device === r1 &&
           event.from.port === 'Serial0/0/0' &&
+          event.frame.kind === 'hdlc' &&
+          event.frame.payload.kind !== 'cdp' &&
           event.time >= 1000,
       )
       .map((event) => event.time);

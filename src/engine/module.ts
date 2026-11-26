@@ -1,4 +1,4 @@
-import type { Device, DeviceKind, LabSettings, PortId, VlanId } from '@/model';
+import type { Device, DeviceKind, LabSettings, MacAddress, PortId, VlanId } from '@/model';
 import type { SimDuration, SimTime } from './core/time';
 import type { Frame } from './frame';
 import type { LearnedRoute } from './l3/routes';
@@ -16,6 +16,11 @@ export interface DeviceContext {
    * spanning tree does on a port that is not forwarding. A switch's VLAN interface uses only these.
    */
   forwards(port: PortId, vlan: VlanId): boolean;
+  /**
+   * The bundle a port is bundled into now, as an EtherChannel member is into its port-channel, or
+   * undefined. A frame flooded out of a bundle leaves by one member only.
+   */
+  bundleOf(port: PortId): string | undefined;
   /** Sends a frame out of a port. A port with no cable sends nothing. */
   send(port: PortId, frame: Frame): void;
   /** Fires `onTimer(key)` after `delay`. Setting a key again replaces its pending timer. */
@@ -24,6 +29,12 @@ export interface DeviceContext {
   /** The run's seeded random stream, in [0, 1). Modules must not use Math.random. */
   random(): number;
   note(text: string): void;
+  /** Prints a message on the device's console, as IOS logs `%LINK-3-UPDOWN: ...`. */
+  syslog(text: string): void;
+  /** Adds a sticky secure address to the port's config, as IOS writes it into the running-config. */
+  learnSticky(port: PortId, mac: MacAddress): void;
+  /** A module's `disablesPort` answer changed: bring the device's links in line with it. */
+  relink(): void;
   /** The routes every module on the device offers now, for its routing table. See `routes`. */
   learnedRoutes(): readonly LearnedRoute[];
 }
@@ -64,6 +75,13 @@ export interface SimModule<S = unknown> {
    * the port forwards. The port's end of its link shows as held while any module says so.
    */
   holdsPort?(ctx: ModuleContext<S>, port: PortId): boolean;
+  /**
+   * Whether the module has taken the port down, as IOS err-disables one: its link is down at both
+   * ends while any module says so. Call `relink` when the answer changes.
+   */
+  disablesPort?(ctx: ModuleContext<S>, port: PortId): boolean;
+  /** The bundle the module has bundled the port into, if any. See `bundleOf`. */
+  bundleOf?(ctx: ModuleContext<S>, port: PortId): string | undefined;
   /** Whether the module holds an up port back from forwarding `vlan`'s frames. See `forwards`. */
   holdsVlan?(ctx: ModuleContext<S>, port: PortId, vlan: VlanId): boolean;
   /**

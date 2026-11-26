@@ -46,7 +46,8 @@ function tagsBetween(engine: Engine, a: DeviceId, b: DeviceId) {
   const tags = new Set<number | 'untagged'>();
   for (const event of engine.log.since(0 as EventId)) {
     if (event.kind !== 'frame' || event.frame.kind !== 'ethernet') continue;
-    if (event.frame.payload.kind === 'bpdu') continue;
+    // BPDUs go per VLAN, and CDP untagged: neither is the traffic a test routes.
+    if (event.frame.payload.kind === 'bpdu' || event.frame.payload.kind === 'cdp') continue;
     const ends = [event.from.device, event.to.device];
     if (ends.includes(a) && ends.includes(b)) tags.add(event.frame.tag?.vlan ?? 'untagged');
   }

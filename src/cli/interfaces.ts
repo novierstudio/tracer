@@ -7,6 +7,7 @@ export interface InterfaceTypeHelp {
 
 const HELP: Record<InterfaceType, string> = {
   Loopback: 'Loopback interface',
+  'Port-channel': 'Ethernet Channel of interfaces',
   FastEthernet: 'FastEthernet IEEE 802.3',
   GigabitEthernet: 'GigabitEthernet IEEE 802.3z',
   Serial: 'Serial',
@@ -19,8 +20,8 @@ export const INTERFACE_TYPES: readonly InterfaceTypeHelp[] = TYPE_NAMES.map((nam
 }));
 
 const MAX_RANGE = 256;
-const SINGLE = /^([a-z]+)\s*(\d+(?:\/\d+)*(?:\.\d+)?)$/i;
-const RANGE = /^([a-z]+)\s*(\d+(?:\/\d+)*)(?:\s*-\s*(\d+))?$/i;
+const SINGLE = /^([a-z][a-z-]*?)\s*(\d+(?:\/\d+)*(?:\.\d+)?)$/i;
+const RANGE = /^([a-z][a-z-]*?)\s*(\d+(?:\/\d+)*)(?:\s*-\s*(\d+))?$/i;
 
 export function resolveInterfaceType(prefix: string): InterfaceTypeHelp | undefined {
   const p = prefix.toLowerCase();
@@ -76,6 +77,7 @@ export function expandInterfaceRange(text: string): readonly InterfaceId[] | und
 
 const SHORT: Record<InterfaceType, string> = {
   Loopback: 'Lo',
+  'Port-channel': 'Po',
   FastEthernet: 'Fa',
   GigabitEthernet: 'Gi',
   Serial: 'Se',
@@ -83,6 +85,18 @@ const SHORT: Record<InterfaceType, string> = {
 };
 
 /** `FastEthernet0/1` as IOS abbreviates it in tables, `Fa0/1`. */
+/**
+ * An interface as Packet Tracer abbreviates it in EtherChannel, port security and LLDP tables:
+ * `Fa0/1`, `Gig0/1`, `Se0/0/0`, `Po1`.
+ */
+export function ptShortName(id: string): string {
+  return id
+    .replace(/^FastEthernet/, 'Fa')
+    .replace(/^GigabitEthernet/, 'Gig')
+    .replace(/^Serial/, 'Se')
+    .replace(/^Port-channel/, 'Po');
+}
+
 export function shortInterfaceName(id: InterfaceId): string {
   const type = TYPE_NAMES.find((name) => id.startsWith(name));
   return type ? SHORT[type] + id.slice(type.length) : id;

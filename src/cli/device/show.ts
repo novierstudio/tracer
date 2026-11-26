@@ -6,6 +6,8 @@ import {
   type DhcpServerConfig,
   formatVlans,
   INTERFACE_TYPES,
+  IOS_SOFTWARE,
+  IOS_VERSION,
   normalizeVlans,
   parentPort,
   VTY_LINE_COUNT,
@@ -14,6 +16,11 @@ import {
   type LineConfig,
   type OspfConfig,
   type Port,
+  type PortChannelId,
+  type PortChannelInterface,
+  type PortId,
+  type PortSecurity,
+  type Switchport,
   type RipConfig,
   type RoutedInterface,
   type StaticRoute,
@@ -32,7 +39,6 @@ import { sshLines, usernameLines } from './remote';
 import { eigrpLines } from './eigrpConfig';
 import { accessListLines, natLines } from './showAclNat';
 
-export const IOS_VERSION = '15.1';
 export const UNSUPPORTED_MARKER = '! unsupported in Tracer';
 
 export type InterfaceEntry =
@@ -49,6 +55,15 @@ export type InterfaceEntry =
       readonly id: InterfaceId;
       readonly port: Port;
       readonly config: SwitchedInterface;
+    }
+  | {
+      /** A switch's `interface Port-channelN`: an EtherChannel's settings, which its members copy. */
+      readonly kind: 'port-channel';
+      readonly id: PortChannelId;
+      readonly port: undefined;
+      readonly config: PortChannelInterface;
+      /** The ports in its channel group, in hardware order. */
+      readonly members: readonly PortId[];
     }
   | {
       readonly kind: 'subinterface';
@@ -72,9 +87,33 @@ function subinterfacesOf(device: IosDevice, port: Port): InterfaceEntry[] {
     .map(([id, config]) => ({ kind: 'subinterface', id, port, config }));
 }
 
+/** Whether an interface switches frames: a switchport, or the port-channel that bundles some. */
+export const isLayer2 = (
+  entry: InterfaceEntry,
+): entry is Extract<InterfaceEntry, { kind: 'switched' | 'port-channel' }> =>
+  entry.kind === 'switched' || entry.kind === 'port-channel';
+
+/** A switch's port-channels by number, each with the ports its channel group holds. */
+function portChannelsOf(device: IosDevice): InterfaceEntry[] {
+  if (device.kind !== 'switch') return [];
+  return (
+    Object.entries(device.config.portChannels ?? {}) as [PortChannelId, PortChannelInterface][]
+  )
+    .sort(([a], [b]) => numberOf(a) - numberOf(b))
+    .map(([id, config]) => ({
+      kind: 'port-channel',
+      id,
+      port: undefined,
+      config,
+      members: device.ports
+        .filter((port) => device.config.interfaces[port.id]?.channelGroup?.group === numberOf(id))
+        .map((port) => port.id),
+    }));
+}
+
 /**
- * Every interface in running-config order: loopbacks, then ports as the hardware lists them, each
- * followed by its subinterfaces, then VLANs.
+ * Every interface in running-config order: loopbacks, port-channels, then ports as the hardware
+ * lists them, each followed by its subinterfaces, then VLANs.
  */
 export function interfaceEntries(device: IosDevice): InterfaceEntry[] {
   const virtual = Object.entries(device.config.virtualInterfaces)
@@ -101,6 +140,7 @@ export function interfaceEntries(device: IosDevice): InterfaceEntry[] {
   });
   return [
     ...virtual.filter((entry) => typeOf(entry.id) === 'Loopback'),
+    ...portChannelsOf(device),
     ...physical,
     ...virtual.filter((entry) => typeOf(entry.id) === 'Vlan'),
   ];
@@ -114,22 +154,73 @@ function passwordText(device: IosDevice, password: string): string {
   return device.config.servicePasswordEncryption ? `7 ${encodeType7(password)}` : password;
 }
 
+/** A switchport's VLAN lines, in IOS's order. */
+function switchportLines(switchport: Switchport, modeAccess: boolean | undefined): string[] {
+  const lines: string[] = [];
+  const access = switchport.mode === 'access' ? switchport.vlan : switchport.accessVlan;
+  if (access !== undefined && access !== 1) lines.push(` switchport access vlan ${access}`);
+  if (switchport.nativeVlan !== undefined && switchport.nativeVlan !== 1) {
+    lines.push(` switchport trunk native vlan ${switchport.nativeVlan}`);
+  }
+  if (switchport.allowedVlans) {
+    lines.push(` switchport trunk allowed vlan ${formatVlans(switchport.allowedVlans)}`);
+  }
+  if (switchport.mode === 'trunk') lines.push(' switchport mode trunk');
+  else if (modeAccess) lines.push(' switchport mode access');
+  return lines;
+}
+
+/** Port security's lines, in Packet Tracer's order. The settings print even while it is off. */
+function portSecurityLines(security: PortSecurity | undefined): string[] {
+  if (!security) return [];
+  const lines: string[] = [];
+  if (security.enabled) lines.push(' switchport port-security');
+  if (security.maximum !== undefined) {
+    lines.push(` switchport port-security maximum ${security.maximum}`);
+  }
+  if (security.agingTime !== undefined) {
+    lines.push(` switchport port-security aging time ${security.agingTime}`);
+  }
+  if (security.sticky) lines.push(' switchport port-security mac-address sticky');
+  if (security.violation !== undefined && security.violation !== 'shutdown') {
+    lines.push(` switchport port-security violation ${security.violation}`);
+  }
+  // Packet Tracer writes secure addresses in upper case.
+  for (const { mac, sticky } of security.addresses) {
+    const text = ciscoMac(mac).toUpperCase();
+    lines.push(` switchport port-security mac-address ${sticky ? 'sticky ' : ''}${text}`);
+  }
+  return lines;
+}
+
+/** `no cdp enable`, `no lldp transmit` and `no lldp receive`, where an interface has them. */
+function discoveryLines(config: {
+  cdpEnable?: false;
+  lldpTransmit?: false;
+  lldpReceive?: false;
+}): string[] {
+  return [
+    ...(config.lldpReceive === false ? [' no lldp receive'] : []),
+    ...(config.lldpTransmit === false ? [' no lldp transmit'] : []),
+    ...(config.cdpEnable === false ? [' no cdp enable'] : []),
+  ];
+}
+
 function interfaceBlock(entry: InterfaceEntry): string[] {
   const { config } = entry;
   const lines = [`interface ${entry.id}`];
   if (entry.kind === 'routed' && entry.noSwitchport) lines.push(' no switchport');
   if (config.description !== undefined) lines.push(` description ${config.description}`);
+  if (entry.kind === 'port-channel') {
+    lines.push(...switchportLines(entry.config.switchport, entry.config.modeAccess));
+    if (config.shutdown) lines.push(' shutdown');
+    if (entry.config.portfast) lines.push(' spanning-tree portfast');
+    if (entry.config.stpCost) lines.push(` spanning-tree cost ${entry.config.stpCost}`);
+    return lines;
+  }
   if (entry.kind === 'switched') {
-    const { switchport } = entry.config;
-    const access = switchport.mode === 'access' ? switchport.vlan : switchport.accessVlan;
-    if (access !== undefined && access !== 1) lines.push(` switchport access vlan ${access}`);
-    if (switchport.nativeVlan !== undefined && switchport.nativeVlan !== 1) {
-      lines.push(` switchport trunk native vlan ${switchport.nativeVlan}`);
-    }
-    if (switchport.allowedVlans) {
-      lines.push(` switchport trunk allowed vlan ${formatVlans(switchport.allowedVlans)}`);
-    }
-    if (switchport.mode === 'trunk') lines.push(' switchport mode trunk');
+    lines.push(...switchportLines(entry.config.switchport, entry.config.modeAccess));
+    lines.push(...portSecurityLines(entry.config.portSecurity));
   } else {
     if (entry.kind === 'subinterface' && entry.config.encapsulation) {
       const { vlan, native } = entry.config.encapsulation;
@@ -158,6 +249,11 @@ function interfaceBlock(entry: InterfaceEntry): string[] {
   if (entry.kind !== 'switched') lines.push(...ipv6InterfaceLines(entry.config.ipv6));
   if (entry.kind === 'routed' && entry.config.clockRate)
     lines.push(` clock rate ${entry.config.clockRate}`);
+  if (entry.kind !== 'subinterface') lines.push(...discoveryLines(entry.config));
+  if (entry.kind === 'switched' && entry.config.channelGroup) {
+    const { group, mode } = entry.config.channelGroup;
+    lines.push(` channel-group ${group} mode ${mode}`);
+  }
   if (config.shutdown) lines.push(' shutdown');
   if (entry.kind === 'switched') {
     if (entry.config.portfast) lines.push(' spanning-tree portfast');
@@ -183,6 +279,29 @@ function spanningTreeLines(config: SwitchConfig): string[] {
       ([priority, vlans]) =>
         `spanning-tree vlan ${formatVlans(normalizeVlans(vlans))} priority ${priority}`,
     ),
+  ];
+}
+
+/** `errdisable recovery` lines, closed by `!`, when the config has any. */
+function errdisableLines(config: SwitchConfig): string[] {
+  const recovery = config.errdisableRecovery;
+  if (!recovery) return [];
+  const lines = [
+    ...(recovery.psecureViolation ? ['errdisable recovery cause psecure-violation'] : []),
+    ...(recovery.interval === undefined
+      ? []
+      : [`errdisable recovery interval ${recovery.interval}`]),
+  ];
+  return lines.length > 0 ? [...lines, '!'] : [];
+}
+
+/** CDP and LLDP's global lines where the config differs from IOS's defaults. */
+function discoveryGlobalLines(config: IosDevice['config']): string[] {
+  return [
+    ...(config.cdpTimer === undefined ? [] : [`cdp timer ${config.cdpTimer}`]),
+    ...(config.cdpHoldtime === undefined ? [] : [`cdp holdtime ${config.cdpHoldtime}`]),
+    ...(config.cdpRun === false ? ['no cdp run'] : []),
+    ...(config.lldpRun ? ['lldp run'] : []),
   ];
 }
 
@@ -325,7 +444,13 @@ export function runningConfig(device: IosDevice): string[] {
   if (!config.domainLookup) out.push('no ip domain-lookup');
   if (config.domainName !== undefined) out.push(`ip domain-name ${config.domainName}`);
   out.push('!');
-  if (device.kind === 'switch') out.push(...spanningTreeLines(device.config), '!');
+  if (device.kind === 'switch') {
+    out.push(...errdisableLines(device.config));
+    if (device.config.loadBalance) {
+      out.push(`port-channel load-balance ${device.config.loadBalance}`, '!');
+    }
+    out.push(...spanningTreeLines(device.config), '!');
+  }
   for (const entry of interfaceEntries(device)) out.push(...interfaceBlock(entry), '!');
   if (device.kind === 'router' && device.config.eigrp) {
     out.push(...eigrpLines(device.config.eigrp), '!');
@@ -343,6 +468,8 @@ export function runningConfig(device: IosDevice): string[] {
   if (device.kind === 'switch' && device.config.defaultGateway) {
     out.push(`ip default-gateway ${device.config.defaultGateway}`, '!');
   }
+  const discovery = discoveryGlobalLines(config);
+  if (discovery.length > 0) out.push(...discovery, '!');
   if (config.bannerMotd !== undefined) out.push(...bannerLines(config.bannerMotd), '!');
   out.push('line con 0', ...lineBody(device, config.lines.console), '!');
   if (device.kind === 'router')
@@ -382,7 +509,7 @@ export function showVersion(device: IosDevice): string[] {
   for (const port of device.ports) counts.set(port.kind, (counts.get(port.kind) ?? 0) + 1);
   const hardware = [...counts].map(([kind, n]) => `${n} ${PORT_LABEL[kind][n === 1 ? 0 : 1]}`);
   return [
-    `Tracer IOS Software, Version ${IOS_VERSION}, RELEASE SOFTWARE`,
+    IOS_SOFTWARE,
     '',
     `${device.config.hostname} uptime is 0 minutes`,
     'System returned to ROM by power-on',
@@ -425,6 +552,9 @@ export function interfaceStatus(
     if (parent) return interfaceStatus(device, parent, ports);
   }
   if (!ports) return UP;
+  if (entry.kind === 'port-channel') {
+    return entry.members.some((member) => ports[member]) ? UP : DOWN;
+  }
   if (entry.port) return ports[entry.port.id] ? UP : DOWN;
   if (typeOf(entry.id) === 'Vlan') return sviStatus(device, numberOf(entry.id) as VlanId, ports);
   return UP;
@@ -445,7 +575,7 @@ export function showIpInterfaceBrief(device: IosDevice, ports?: PortStates): str
   return [
     row(['Interface', 'IP-Address', 'OK?', 'Method', 'Status', 'Protocol']),
     ...interfaceEntries(device).map((entry) => {
-      const ipv4 = entry.kind === 'switched' ? undefined : entry.config.ipv4;
+      const ipv4 = isLayer2(entry) ? undefined : entry.config.ipv4;
       return row([
         entry.id,
         ipv4?.address ?? 'unassigned',
@@ -466,6 +596,7 @@ interface Hardware {
 
 const HARDWARE: Record<InterfaceType, Hardware> = {
   Loopback: { name: 'Loopback', bandwidth: 8000000, delay: 5000, encapsulation: 'LOOPBACK' },
+  'Port-channel': { name: 'EtherChannel', bandwidth: 100000, delay: 100, encapsulation: 'ARPA' },
   FastEthernet: { name: 'Lance', bandwidth: 100000, delay: 100, encapsulation: 'ARPA' },
   GigabitEthernet: {
     name: 'CN Gigabit Ethernet',
@@ -492,9 +623,10 @@ function interfaceDetail(device: IosDevice, entry: InterfaceEntry, ports?: PortS
     mac && hardware.encapsulation === 'ARPA'
       ? `, address is ${ciscoMac(mac)} (bia ${ciscoMac(mac)})`
       : '';
-  const ipv4 = entry.kind === 'switched' ? undefined : entry.config.ipv4;
-  const speed = entry.kind === 'subinterface' ? undefined : entry.config.speed;
-  const configured = entry.kind === 'switched' ? undefined : entry.config;
+  const ipv4 = isLayer2(entry) ? undefined : entry.config.ipv4;
+  const speed =
+    entry.kind === 'subinterface' || entry.kind === 'port-channel' ? undefined : entry.config.speed;
+  const configured = isLayer2(entry) ? undefined : entry.config;
   // An Ethernet port's delay follows its speed: 10 µs at 1 Gbit/s, 100 at 100 Mbit/s.
   const bandwidth = configured?.bandwidth ?? (speed ? speed * 1000 : hardware.bandwidth);
   const delay =

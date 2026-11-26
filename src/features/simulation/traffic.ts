@@ -1,7 +1,7 @@
 import type { FrameEvent } from '@/engine/events';
 import { BROADCAST_MAC } from '@/engine/pdu';
 import type { DeviceId } from '@/model';
-import { protocolOf, type ProtocolId } from './protocols';
+import { isLinkControl, protocolOf, type ProtocolId } from './protocols';
 
 /**
  * How a chip moves along its link. `travel` crosses once and goes (realtime). `arrive` crosses
@@ -99,12 +99,12 @@ const arrivalKey = (device: DeviceId, time: number) => `${device} ${time}`;
 
 /**
  * A flood or a broadcast: copies of one frame that left a device at once, keyed by device,
- * instant and destination. Spanning tree's hellos leave every port at once too, but each is its
- * own frame, so they do not count.
+ * instant and destination. Spanning tree, CDP, LLDP, LACP and PAgP leave every port at once too,
+ * but each is its own frame, so they do not count.
  */
 function fanOutKey(event: FrameEvent): string | undefined {
   const { frame } = event;
-  if (frame.kind !== 'ethernet' || frame.payload.kind === 'bpdu') return undefined;
+  if (frame.kind !== 'ethernet' || isLinkControl(frame.payload)) return undefined;
   return `${event.from.device} ${event.sentAt} ${frame.dst}`;
 }
 
