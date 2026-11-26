@@ -352,6 +352,9 @@ export const SwitchInterface = z.object({
   ipv4: Ipv4Cidr.optional(),
   /** A routed port's `ip helper-address` lines. */
   helperAddresses,
+  /** A routed port's OSPF settings and routing metrics. */
+  ...ospfInterfaceFields,
+  ...metricInterfaceFields,
   /** A routed port's access lists. */
   ...accessGroupFields,
   /**
@@ -887,6 +890,11 @@ export const SwitchConfig = z.object({
       interval: z.int().min(30).max(86400).optional(),
     })
     .optional(),
+  /** A multilayer switch's DHCP server and routing protocols, as a router's. They run with `ip routing`. */
+  dhcp: DhcpServerConfig.optional(),
+  rip: RipConfig.optional(),
+  ospf: OspfConfig.optional(),
+  eigrp: EigrpConfig.optional(),
 });
 export type SwitchConfig = z.infer<typeof SwitchConfig>;
 

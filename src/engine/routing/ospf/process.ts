@@ -131,7 +131,7 @@ function stopProcess(ctx: OspfContext) {
 export function reconcile(ctx: OspfContext) {
   const { device } = ctx;
   const config = ospfConfig(device);
-  if (!config || device.kind !== 'router') {
+  if (!config || (device.kind !== 'router' && device.kind !== 'switch')) {
     stopProcess(ctx);
     return;
   }

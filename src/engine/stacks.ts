@@ -14,7 +14,16 @@ import { ripModule } from './routing/rip';
 /** The protocol modules each kind of device runs in the app. Protocol layers register here. */
 export const STACKS: Stacks = {
   router: [ipModule, ipv6Module, ripModule, ospfModule, eigrpModule, discoveryModule, hsrpModule],
-  switch: [switchingModule, ipModule, discoveryModule, vtpModule, hsrpModule],
+  switch: [
+    switchingModule,
+    ipModule,
+    ripModule,
+    ospfModule,
+    eigrpModule,
+    discoveryModule,
+    vtpModule,
+    hsrpModule,
+  ],
   pc: [ipModule, ipv6Module],
   server: [ipModule, ipv6Module],
   hub: [hubModule],

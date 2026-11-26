@@ -1,6 +1,6 @@
 import type { Device, InterfaceId, Ipv4Address, Ipv4Cidr, PrefixLength, RipConfig } from '@/model';
 import { ms, type SimDuration, type SimTime } from '../core/time';
-import { ipInterfaces, ownsAddress, type IpInterface } from '../l3/interfaces';
+import { ipInterfaces, ownsAddress, routingDevice, type IpInterface } from '../l3/interfaces';
 import { classfulLength, classfulNetwork, compareAddresses, inPrefix, networkOf } from '../l3/ipv4';
 import { ADMINISTRATIVE_DISTANCE, type LearnedRoute } from '../l3/routes';
 import type { DeviceContext, ModuleContext, SimModule } from '../module';
@@ -102,8 +102,7 @@ const seconds = (value: number): SimDuration => ms(value * 1000);
 const keyOf = ({ address, prefixLength }: Ipv4Cidr) => `${address}/${prefixLength}`;
 const timersOf = (ctx: DeviceContext) => RIP_TIMERS[ctx.settings.routingTimers];
 
-const ripConfig = (device: Device): RipConfig | undefined =>
-  device.kind === 'router' ? device.config.rip : undefined;
+const ripConfig = (device: Device): RipConfig | undefined => routingDevice(device)?.config.rip;
 
 /** IOS sends RIPv1 until told `version 2`. */
 const sendVersion = (config: RipConfig): RipVersion => config.version ?? 1;

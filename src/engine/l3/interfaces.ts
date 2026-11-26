@@ -56,6 +56,18 @@ export const routesPackets = (device: Device): boolean =>
   device.kind === 'wirelessRouter' ||
   (device.kind === 'switch' && device.config.ipRouting === true);
 
+/** A device that can route: a router, or a multilayer switch. */
+export type RoutingDevice = Router | Switch;
+
+/**
+ * The device, when it runs routing protocols and a DHCP server: a router, or a multilayer switch
+ * while it has `ip routing`. Undefined for every other device.
+ */
+export const routingDevice = (device: Device): RoutingDevice | undefined =>
+  device.kind === 'router' || (device.kind === 'switch' && device.config.ipRouting === true)
+    ? device
+    : undefined;
+
 /** Each port with an address and its link up, as a routed interface. */
 function routedPorts(
   device: Router | Switch,

@@ -464,7 +464,9 @@ export function createSimService({
     dhcpBindings: (device) =>
       flatten(
         engine.withModule(device, ipModule, (ctx) =>
-          ctx.device.kind === 'router' ? dhcpBindings(ctx) : undefined,
+          ctx.device.kind === 'router' || ctx.device.kind === 'switch'
+            ? dhcpBindings(ctx)
+            : undefined,
         ),
       ),
     dhcpRenew: (device, listener) =>

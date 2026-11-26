@@ -18,7 +18,7 @@ import {
   type Ipv4Packet,
 } from '../pdu';
 import { hostAddressingOf, interfacesOf, type IpContext } from './context';
-import { isLan, ownsAddress, routesPackets, type IpInterface } from './interfaces';
+import { isLan, ownsAddress, routesPackets, routingDevice, type IpInterface } from './interfaces';
 import { compareAddresses, inPrefix, ipv4ToUint32, uint32ToIpv4 } from './ipv4';
 import { broadcastOn, originate } from './output';
 import { udp } from './udp';
@@ -79,16 +79,18 @@ function upstreamDns(ctx: IpContext): readonly Ipv4Address[] {
   return wan?.kind === 'leased' ? wan.dns : [];
 }
 
-/** Every address configured on the router, which no pool may lend whether or not it is up. */
+/** Every address configured on the device, which no pool may lend whether or not it is up. */
 function ownAddresses(ctx: IpContext): Set<number> {
-  const { device } = ctx;
-  if (device.kind === 'wirelessRouter') return new Set([ipv4ToUint32(device.config.lan.address)]);
-  if (device.kind !== 'router') return new Set();
-  const { interfaces, subinterfaces, virtualInterfaces } = device.config;
-  const configured = [
-    ...Object.values(interfaces),
-    ...Object.values(subinterfaces),
-    ...Object.values(virtualInterfaces),
+  if (ctx.device.kind === 'wirelessRouter') {
+    return new Set([ipv4ToUint32(ctx.device.config.lan.address)]);
+  }
+  const device = routingDevice(ctx.device);
+  if (!device) return new Set();
+  const { config } = device;
+  const configured: readonly { ipv4?: Ipv4Cidr }[] = [
+    ...Object.values(config.interfaces),
+    ...('subinterfaces' in config ? Object.values(config.subinterfaces) : []),
+    ...Object.values(config.virtualInterfaces),
   ];
   return new Set(
     configured.flatMap((iface) => (iface.ipv4 ? [ipv4ToUint32(iface.ipv4.address)] : [])),
@@ -195,11 +197,9 @@ const replyHeader = (request: DhcpMessage, yiaddr: Ipv4Address = UNSPECIFIED_ADD
 function serve(ctx: IpContext, message: DhcpMessage, arrival: IpInterface | undefined) {
   const { device } = ctx;
   const config =
-    device.kind === 'router'
-      ? device.config.dhcp
-      : device.kind === 'wirelessRouter'
-        ? homeRouterIos(device.config, upstreamDns(ctx)).dhcp
-        : undefined;
+    device.kind === 'wirelessRouter'
+      ? homeRouterIos(device.config, upstreamDns(ctx)).dhcp
+      : routingDevice(device)?.config.dhcp;
   if (!config) return;
   const network = isSet(message.giaddr)
     ? message.giaddr
