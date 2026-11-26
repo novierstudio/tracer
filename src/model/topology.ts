@@ -797,6 +797,12 @@ const iosFields = {
   lldpRun: z.literal(true).optional(),
   /** The saved config in NVRAM, as running-config lines. Absent until the first save. */
   startupConfig: z.array(z.string()).optional(),
+  /** `ntp server`, in the order entered. Absent until the first one. */
+  ntpServers: z.array(Ipv4Address).optional(),
+  /** `logging host` (or `logging <ip>`), in the order entered. Absent until the first one. */
+  loggingHosts: z.array(Ipv4Address).optional(),
+  /** `logging trap`: the least severe level sent to the hosts, 0 to 7. Absent means 6, informational. */
+  loggingTrap: z.int().min(0).max(7).optional(),
   unknownLines: z.array(z.string()),
 };
 
@@ -938,6 +944,34 @@ export type WirelessRadio = z.infer<typeof WirelessRadio>;
 export const WirelessProfile = z.object({ ssid: Ssid, security: WirelessSecurity });
 export type WirelessProfile = z.infer<typeof WirelessProfile>;
 
+/** A file name, as a PC's disk, a TFTP server or an FTP server keeps it: no spaces or slashes. */
+export const FileName = z
+  .string()
+  .trim()
+  .min(1, 'A file name must not be empty')
+  .max(64, 'A file name must be at most 64 characters')
+  .regex(/^[^\s/\\]+$/, 'A file name must have no spaces or slashes');
+export type FileName = z.infer<typeof FileName>;
+
+/** A text file: a saved config, or a note a PC's Text Editor wrote. */
+export const StoredFile = z.object({ name: FileName, content: z.string() });
+export type StoredFile = z.infer<typeof StoredFile>;
+
+/** A PC's Email client settings, as its Email app's Configure Mail sets them. */
+export const MailAccount = z.object({
+  /** Your Name. */
+  name: z.string(),
+  /** Email Address, such as `user1@lab.local`. */
+  address: z.string(),
+  /** Incoming Mail Server (POP3): an address or a name. */
+  incoming: z.string(),
+  /** Outgoing Mail Server (SMTP): an address or a name. */
+  outgoing: z.string(),
+  username: z.string(),
+  password: z.string(),
+});
+export type MailAccount = z.infer<typeof MailAccount>;
+
 /**
  * Absent `ipv6` means static with no address: the host has its link-local address only. Absent
  * `wireless` means a wireless NIC joins no network.
@@ -947,6 +981,10 @@ export const HostConfig = z.object({
   ipv4: HostIpv4,
   ipv6: HostIpv6.optional(),
   wireless: WirelessProfile.optional(),
+  /** The files on the host's disk. Absent means the disk as it ships: see `hostFiles`. */
+  files: z.array(StoredFile).optional(),
+  /** The Email app's account. Absent until it is configured. */
+  mail: MailAccount.optional(),
 });
 export type HostConfig = z.infer<typeof HostConfig>;
 
@@ -967,11 +1005,56 @@ export type DomainName = z.infer<typeof DomainName>;
 export const DnsRecord = z.object({ name: DomainName, address: Ipv4Address });
 export type DnsRecord = z.infer<typeof DnsRecord>;
 
-/** The services a server runs, as its Services tab sets them. */
+/** What an FTP account may do, as Packet Tracer's Write, Read, Delete, Rename and List boxes. */
+export const FtpPermissions = z.object({
+  write: z.boolean(),
+  read: z.boolean(),
+  delete: z.boolean(),
+  rename: z.boolean(),
+  list: z.boolean(),
+});
+export type FtpPermissions = z.infer<typeof FtpPermissions>;
+
+export const FtpUser = z.object({
+  username: z.string().trim().min(1).regex(/^\S+$/),
+  password: z.string(),
+  permissions: FtpPermissions,
+});
+export type FtpUser = z.infer<typeof FtpUser>;
+
+export const MailUser = z.object({
+  username: z.string().trim().min(1).regex(/^\S+$/),
+  password: z.string(),
+});
+export type MailUser = z.infer<typeof MailUser>;
+
+/**
+ * The services a server runs, as its Services tab sets them. The services added after DNS and
+ * HTTP are optional so older labs still load: absent means the service as it ships.
+ */
 export const ServerServices = z.object({
   dns: z.object({ enabled: z.boolean(), records: z.array(DnsRecord) }),
   /** The one page the server serves, at `/` and `/index.html`. */
   http: z.object({ enabled: z.boolean(), indexHtml: z.string() }),
+  /** `files` are the ones uploaded; the IOS images every server lists come on top. */
+  tftp: z.object({ enabled: z.boolean(), files: z.array(StoredFile) }).optional(),
+  ftp: z
+    .object({ enabled: z.boolean(), users: z.array(FtpUser), files: z.array(StoredFile) })
+    .optional(),
+  email: z
+    .object({
+      smtp: z.boolean(),
+      pop3: z.boolean(),
+      domain: z.string(),
+      users: z.array(MailUser),
+    })
+    .optional(),
+  /**
+   * `epoch` is the server's clock, in milliseconds since 1970 UTC, when the simulation starts.
+   * It runs on with simulated time.
+   */
+  ntp: z.object({ enabled: z.boolean(), epoch: z.number() }).optional(),
+  syslog: z.object({ enabled: z.boolean() }).optional(),
 });
 export type ServerServices = z.infer<typeof ServerServices>;
 
