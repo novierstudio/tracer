@@ -7,6 +7,8 @@ import type { PortRole, PortState, SpanningTreePort, StpTimes } from './l2/stp';
 import type { ArpTableEntry } from './l3/arp';
 import type { DhcpListener, DhcpOutcome, Lease } from './l3/dhcpClient';
 import type { DhcpBindingEntry } from './l3/dhcpServer';
+import type { DnsListener, DnsLookup } from './l3/dnsResolver';
+import type { BrowseTarget, FetchEvent, FetchFailure, FetchListener } from './l3/httpClient';
 import type { HostAddressing } from './l3/hostAddress';
 import type { PingEvent, PingListener, PingOptions, PingReply, PingSummary } from './l3/ping';
 import type { LearnedRoute, Route } from './l3/routes';
@@ -24,14 +26,22 @@ import type {
 import type { RipStatus } from './routing/rip';
 import type { OspfTimers, RipTimers } from './routing/timers';
 import type { TopologyPatch } from './patch';
+import type { HttpResponse } from './http';
 
 export type {
   ArpTableEntry,
+  BrowseTarget,
   DeviceUnavailable,
   DhcpBindingEntry,
   DhcpListener,
   DhcpOutcome,
+  DnsListener,
+  DnsLookup,
+  FetchEvent,
+  FetchFailure,
+  FetchListener,
   HostAddressing,
+  HttpResponse,
   LearnedRoute,
   Lease,
   LinkEnd,
@@ -188,6 +198,26 @@ export interface SimAPI {
   dhcpRenew(device: DeviceId, listener: DhcpListener): Result<void, DeviceUnavailable>;
   /** `ipconfig /release`: a DHCP host gives its lease back and asks for nothing until renewed. */
   dhcpRelease(device: DeviceId): Result<void, DeviceUnavailable>;
+  /**
+   * `nslookup`: asks `server`, or else the host's first DNS server, for `name`'s address. The
+   * listener hears the outcome once, as a ping's listener hears its events.
+   */
+  resolve(
+    device: DeviceId,
+    name: string,
+    server: Ipv4Address | undefined,
+    listener: DnsListener,
+  ): Result<void, DeviceUnavailable>;
+  /**
+   * A web browser's page load: resolves the target's name with DNS unless it is an address,
+   * opens a TCP connection, sends a GET and waits for the response. Each step goes to `listener`
+   * once, as with `ping`.
+   */
+  browse(
+    device: DeviceId,
+    target: BrowseTarget,
+    listener: FetchListener,
+  ): Result<void, DeviceUnavailable>;
   /** Sets the one batch listener. Calling it again replaces the previous listener. */
   subscribe(listener: (batch: SimEventBatch) => void): void;
 }

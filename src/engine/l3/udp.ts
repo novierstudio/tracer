@@ -2,6 +2,8 @@ import type { Ipv4Packet, UdpDatagram, UdpPayload } from '../pdu';
 import { UDP_PORT } from '../pdu';
 import type { IpContext } from './context';
 import { onDhcpServerPort } from './dhcpServer';
+import { onDnsResponse } from './dnsResolver';
+import { onDnsQuery } from './dnsServer';
 import type { IpInterface } from './interfaces';
 
 export const udp = (srcPort: number, dstPort: number, payload: UdpPayload): UdpDatagram => ({
@@ -28,7 +30,12 @@ export function deliverUdp(
       if (datagram.payload.kind === 'dhcp')
         onDhcpServerPort(ctx, packet, datagram.payload, arrival);
       return;
+    case UDP_PORT.dns:
+      if (datagram.payload.kind === 'dns') onDnsQuery(ctx, packet, datagram, datagram.payload);
+      return;
     default:
+      // A DNS response comes back to the port its query went from.
+      if (datagram.payload.kind === 'dns') onDnsResponse(ctx, datagram.dstPort, datagram.payload);
       return;
   }
 }

@@ -3,6 +3,8 @@ import { err, ok, type Result } from '@/model/result';
 import type {
   DeviceUnavailable,
   DhcpOutcome,
+  DnsLookup,
+  FetchEvent,
   PingEvent,
   ProbeHandle,
   SimAPI,
@@ -18,6 +20,8 @@ import { arpTable, clearArp } from './l3/arp';
 import { hostAddressingOf, routesOf, type IpContext } from './l3/context';
 import { releaseDhcp, renewDhcp } from './l3/dhcpClient';
 import { dhcpBindings } from './l3/dhcpServer';
+import { lookup } from './l3/dnsResolver';
+import { startFetch } from './l3/httpClient';
 import { ipModule, stopProbe } from './l3/ip';
 import { pingSummary, startPing } from './l3/ping';
 import { startTrace } from './l3/traceroute';
@@ -76,6 +80,14 @@ function hearOnce<E>(
 }
 
 const pingOrder = (event: PingEvent) => (event.kind === 'summary' ? Infinity : event.seq);
+
+/** A page load's steps in order. The response or the failure is the last. */
+const FETCH_ORDER: Record<FetchEvent['kind'], number> = {
+  resolving: 1,
+  connecting: 2,
+  response: Infinity,
+  failed: Infinity,
+};
 
 const traceOrder = (probesPerHop: number) => (event: TraceEvent) =>
   event.kind === 'done' ? Infinity : (event.hop - 1) * probesPerHop + event.probe;
@@ -219,6 +231,29 @@ export function createSimService({
     return ok(handle);
   }
 
+  /**
+   * Starts something on `device`'s IP stack as an input, so a replay starts it again, with the
+   * listener hearing each event once. `ending` is what it hears if a step back un-starts it.
+   */
+  function startListening<E>(
+    device: DeviceId,
+    listener: (event: E) => void,
+    order: (event: E) => number,
+    ending: () => E,
+    start: (ctx: IpContext, listener: (event: E) => void) => void,
+  ): Result<void, DeviceUnavailable> {
+    const once = hearOnce(listener, order, ending);
+    let started: Result<void, DeviceUnavailable> | undefined;
+    input({
+      apply: () => {
+        started = engine.withModule(device, ipModule, (ctx) => start(ctx, once.listener));
+      },
+      forget: once.forget,
+    });
+    requestFrame();
+    return started!;
+  }
+
   function play(speed: number) {
     if (!Number.isFinite(speed) || speed <= 0) {
       throw new RangeError(`Speed must be a finite number > 0, got ${speed}`);
@@ -338,28 +373,36 @@ export function createSimService({
           ctx.device.kind === 'router' ? dhcpBindings(ctx) : undefined,
         ),
       ),
-    dhcpRenew(device, listener) {
-      const once = hearOnce<DhcpOutcome>(
+    dhcpRenew: (device, listener) =>
+      startListening<DhcpOutcome>(
+        device,
         listener,
         () => Infinity,
         () => ({ kind: 'failed' }),
-      );
-      let started: Result<void, DeviceUnavailable> | undefined;
-      input({
-        apply: () => {
-          started = engine.withModule(device, ipModule, (ctx) => renewDhcp(ctx, once.listener));
-        },
-        forget: once.forget,
-      });
-      requestFrame();
-      return started!;
-    },
+        renewDhcp,
+      ),
     dhcpRelease(device) {
       let released: Result<void, DeviceUnavailable> | undefined;
       input({ apply: () => void (released = engine.withModule(device, ipModule, releaseDhcp)) });
       requestFrame();
       return released!;
     },
+    resolve: (device, name, server, listener) =>
+      startListening<DnsLookup>(
+        device,
+        listener,
+        () => Infinity,
+        () => ({ kind: 'cancelled' }),
+        (ctx, once) => lookup(ctx, name, server, once),
+      ),
+    browse: (device, target, listener) =>
+      startListening<FetchEvent>(
+        device,
+        listener,
+        (event) => FETCH_ORDER[event.kind],
+        () => ({ kind: 'failed', failure: { kind: 'cancelled' } }),
+        (ctx, once) => startFetch(ctx, target, once),
+      ),
     subscribe(next) {
       listener = next;
       sent = undefined;

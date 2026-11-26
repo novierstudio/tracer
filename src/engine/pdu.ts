@@ -1,4 +1,6 @@
 import type { Ipv4Address, MacAddress, PrefixLength, VlanId } from '@/model';
+import type { DnsMessage } from './dns';
+import type { TcpSegment } from './tcp';
 
 /**
  * Protocol data units, as plain data. They cross to the main thread inside frame events and
@@ -55,10 +57,9 @@ export type Ipv4Packet = {
   readonly payload: Ipv4Payload;
 };
 
-/** TCP joins this union when it arrives. */
-export type Ipv4Payload = IcmpMessage | UdpDatagram | OspfPacket;
+export type Ipv4Payload = IcmpMessage | UdpDatagram | OspfPacket | TcpSegment;
 
-export const IP_PROTOCOL = { icmp: 1, udp: 17, ospf: 89 } as const satisfies Record<
+export const IP_PROTOCOL = { icmp: 1, tcp: 6, udp: 17, ospf: 89 } as const satisfies Record<
   Ipv4Payload['kind'],
   number
 >;
@@ -99,10 +100,10 @@ export type UdpDatagram = {
   readonly payload: UdpPayload;
 };
 
-export type UdpPayload = DhcpMessage | RipMessage;
+export type UdpPayload = DhcpMessage | RipMessage | DnsMessage;
 
 /** Well-known ports. RIP sends from and to 520. */
-export const UDP_PORT = { dhcpServer: 67, dhcpClient: 68, rip: 520 } as const;
+export const UDP_PORT = { dns: 53, dhcpServer: 67, dhcpClient: 68, rip: 520 } as const;
 
 /** Option 53, which says what a DHCP message is for. */
 export type DhcpMessageType = DhcpMessage['type'];

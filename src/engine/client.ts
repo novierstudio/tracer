@@ -13,7 +13,10 @@ export type BatchListener = (batch: SimEventBatch) => void;
 
 export type SimClient = {
   /** Calls into the worker. Batches arrive through `onBatch`, which owns the worker's listener. */
-  sim: Omit<Comlink.Remote<SimAPI>, 'subscribe' | 'ping' | 'traceroute' | 'dhcpRenew'>;
+  sim: Omit<
+    Comlink.Remote<SimAPI>,
+    'subscribe' | 'ping' | 'traceroute' | 'dhcpRenew' | 'resolve' | 'browse'
+  >;
   onBatch(listener: BatchListener): () => void;
   /** What each end of each link is doing, as of the latest batch, for listeners that join late. */
   linkStates(): Readonly<Record<LinkId, LinkStatus>>;
@@ -23,6 +26,10 @@ export type SimClient = {
   traceroute(...args: Parameters<SimAPI['traceroute']>): Promise<ReturnType<SimAPI['traceroute']>>;
   /** SimAPI.dhcpRenew, with the listener proxied to the worker. */
   dhcpRenew(...args: Parameters<SimAPI['dhcpRenew']>): Promise<ReturnType<SimAPI['dhcpRenew']>>;
+  /** SimAPI.resolve, with the listener proxied to the worker. */
+  resolve(...args: Parameters<SimAPI['resolve']>): Promise<ReturnType<SimAPI['resolve']>>;
+  /** SimAPI.browse, with the listener proxied to the worker. */
+  browse(...args: Parameters<SimAPI['browse']>): Promise<ReturnType<SimAPI['browse']>>;
 };
 
 let started: Promise<SimClient> | undefined;
@@ -85,5 +92,8 @@ async function connect(source: TopologySource): Promise<SimClient> {
     traceroute: (device, target, options, listener) =>
       sim.traceroute(device, target, options, Comlink.proxy(listener)),
     dhcpRenew: (device, listener) => sim.dhcpRenew(device, Comlink.proxy(listener)),
+    resolve: (device, name, server, listener) =>
+      sim.resolve(device, name, server, Comlink.proxy(listener)),
+    browse: (device, target, listener) => sim.browse(device, target, Comlink.proxy(listener)),
   };
 }
