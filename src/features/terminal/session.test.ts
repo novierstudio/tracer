@@ -56,6 +56,7 @@ function lab() {
     macTable: async (device) => sim.macTable(device),
     portStates: async (device) => sim.portStates(device),
     spanningTree: async (device) => sim.spanningTree(device),
+    dhcpBindings: async (device) => sim.dhcpBindings(device),
     now: () => engine.now,
     ping: async (...args) => sim.ping(...args),
     traceroute: async (...args) => sim.traceroute(...args),

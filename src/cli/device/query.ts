@@ -1,6 +1,7 @@
 import type {
   ArpTableEntry,
   DeviceUnavailable,
+  DhcpBindingEntry,
   MacTableEntry,
   PingListener,
   PingOptions,
@@ -27,6 +28,8 @@ export interface EngineAnswers {
   /** The simulated clock, in milliseconds since the run started. */
   readonly clock: number;
   readonly spanningTree: readonly SpanningTreeVlan[];
+  /** A router's DHCP leases in force. */
+  readonly dhcpBindings: readonly DhcpBindingEntry[];
 }
 
 export type EngineQueryKind = keyof EngineAnswers;

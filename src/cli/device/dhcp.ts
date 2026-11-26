@@ -14,11 +14,13 @@ import type { ModeOf } from '../modes';
 import { ipv4, keyword, mask, num, word, type Param } from '../params';
 import { defineCommand } from '../tree';
 import { INVALID_INPUT, type RouterContext } from './context';
+import { showIpDhcpBinding, showIpDhcpPool } from './showDhcp';
 
 const routerCommand = defineCommand<RouterContext>();
 
 const GLOBAL = ['global-config'] as const;
 const DHCP = ['dhcp-config'] as const;
+const EXEC = ['user-exec', 'priv-exec'] as const;
 
 type PoolMode = ModeOf<'dhcp-config'>;
 
@@ -163,8 +165,42 @@ function leaseCommands() {
   ];
 }
 
-/** The commands of a router's DHCP server, in global config and in a pool. */
+function showCommands() {
+  const path = [
+    keyword('show', 'Show running system information'),
+    keyword('ip', 'IP information'),
+    keyword('dhcp', 'Show items in the DHCP database'),
+  ] as const;
+  const pool = keyword('pool', 'DHCP pools information');
+  return [
+    routerCommand({
+      modes: EXEC,
+      path: [...path, keyword('binding', 'DHCP address bindings')],
+      run: (_a, ctx) => ctx.query('dhcpBindings', showIpDhcpBinding),
+    }),
+    routerCommand({
+      modes: EXEC,
+      path: [...path, pool],
+      run: (_a, ctx) =>
+        ctx.query('dhcpBindings', (bindings, device) => showIpDhcpPool(bindings, device) ?? []),
+    }),
+    routerCommand({
+      modes: EXEC,
+      path: [...path, pool, word('name', 'Pool name')],
+      run: ({ name }, ctx) =>
+        showIpDhcpPool(undefined, ctx.device, name) === undefined
+          ? ctx.reject(`%Pool ${name} is not found`)
+          : ctx.query(
+              'dhcpBindings',
+              (bindings, device) => showIpDhcpPool(bindings, device, name) ?? [],
+            ),
+    }),
+  ];
+}
+
+/** The commands of a router's DHCP server: config in global config and in a pool, and show. */
 export const dhcpCommands = [
+  ...showCommands(),
   routerCommand({
     modes: GLOBAL,
     path: [
