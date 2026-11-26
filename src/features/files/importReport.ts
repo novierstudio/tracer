@@ -77,6 +77,7 @@ const CABLE_NAME: Record<Cable, string> = {
   straight: 'straight-through',
   crossover: 'crossover',
   serial: 'serial',
+  console: 'console',
 };
 
 const FIELD_NAME = { ipv4: 'IPv4 address', gateway: 'gateway', dns: 'DNS server' } as const;

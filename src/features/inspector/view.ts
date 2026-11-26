@@ -171,6 +171,7 @@ export const CABLE_LABELS: Record<Link['cable'], string> = {
   straight: 'Copper straight-through',
   crossover: 'Copper crossover',
   serial: 'Serial DCE/DTE',
+  console: 'Console',
 };
 
 /** "2 routers, 1 PC, 3 links and 1 annotation", in kind order. */

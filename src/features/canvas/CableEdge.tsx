@@ -79,7 +79,7 @@ export const CableEdge = memo(function CableEdge(props: EdgeProps<CableFlowEdge>
         className="cable-path"
         interactionWidth={interactionWidth ?? 16}
       />
-      {layout.lights && (
+      {layout.lights && cable !== 'console' && (
         <>
           <Light at={layout.lights[0]} state={lights.a} />
           <Light at={layout.lights[1]} state={lights.b} />

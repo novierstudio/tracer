@@ -8,6 +8,8 @@ const CABLE_FITS: Record<Cable, readonly PortKind[]> = {
   straight: ['fastEthernet', 'gigabitEthernet'],
   crossover: ['fastEthernet', 'gigabitEthernet'],
   serial: ['serial'],
+  // It carries the CLI from a PC's Terminal app, never frames, so it never comes up.
+  console: [],
 };
 
 function adminUp(device: Device, port: PortId): boolean {

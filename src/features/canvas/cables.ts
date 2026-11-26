@@ -1,9 +1,12 @@
 import {
+  consolePortOf,
   describeTopologyError,
   err,
   linkAt,
   ok,
+  portOf,
   type Cable,
+  type ConsolePortKind,
   type DeviceId,
   type DeviceKind,
   type Endpoint,
@@ -15,7 +18,7 @@ import {
   type TopologyError,
 } from '@/model';
 
-export const CABLE_CHOICES = ['auto', 'straight', 'crossover', 'serial'] as const;
+export const CABLE_CHOICES = ['auto', 'straight', 'crossover', 'serial', 'console'] as const;
 export type CableChoice = (typeof CABLE_CHOICES)[number];
 
 export const CABLE_LABELS: Record<CableChoice, string> = {
@@ -23,20 +26,27 @@ export const CABLE_LABELS: Record<CableChoice, string> = {
   straight: 'Straight-through',
   crossover: 'Crossover',
   serial: 'Serial',
+  console: 'Console',
 };
 
-export type Medium = 'copper' | 'serial';
+export type Medium = 'copper' | 'serial' | 'console';
 
-const PORT_MEDIUM: Record<PortKind, Medium> = {
+/** A network port or a console port: anything a cable plugs into. */
+type JackKind = PortKind | ConsolePortKind;
+
+const PORT_MEDIUM: Record<JackKind, Medium> = {
   fastEthernet: 'copper',
   gigabitEthernet: 'copper',
   serial: 'serial',
+  console: 'console',
+  rs232: 'console',
 };
 
 const CABLE_MEDIUM: Record<Cable, Medium> = {
   straight: 'copper',
   crossover: 'copper',
   serial: 'serial',
+  console: 'console',
 };
 
 // Hosts and routers transmit on the pins switches receive on (MDI vs MDI-X), so unlike devices
@@ -48,13 +58,17 @@ const MDI_X: Record<DeviceKind, boolean> = {
   switch: true,
 };
 
-export type PortEnd = { device: DeviceKind; port: PortKind };
+export type PortEnd = { device: DeviceKind; port: JackKind };
 
-/** The cable Auto picks, or undefined when one end is serial and the other copper. */
+/**
+ * The cable Auto picks, or undefined when the ends take different cables, such as serial and
+ * copper, or two Console ports.
+ */
 export function autoCable(a: PortEnd, b: PortEnd): Cable | undefined {
   const medium = PORT_MEDIUM[a.port];
   if (medium !== PORT_MEDIUM[b.port]) return undefined;
   if (medium === 'serial') return 'serial';
+  if (medium === 'console') return a.port === b.port ? undefined : 'console';
   return MDI_X[a.device] === MDI_X[b.device] ? 'crossover' : 'straight';
 }
 
@@ -70,7 +84,16 @@ export function requiredMedium(
 }
 
 function findPort(topology: Topology, { device, port }: Endpoint) {
-  return topology.devices[device]?.ports.find((candidate) => candidate.id === port);
+  const found = topology.devices[device];
+  return found && portOf(found, port);
+}
+
+/** The device's ports in catalog order, then its console port, as Packet Tracer lists them. */
+function jacksOf(topology: Topology, device: DeviceId) {
+  const found = topology.devices[device];
+  if (!found) return [];
+  const console = consolePortOf(found.kind);
+  return console ? [...found.ports, console] : found.ports;
 }
 
 const SHORT_PREFIX: Record<PortKind, [long: string, short: string]> = {
@@ -87,7 +110,7 @@ export function shortPortName(id: PortId): string {
   return id;
 }
 
-export type PortOption = { id: PortId; kind: PortKind; short: string } & (
+export type PortOption = { id: PortId; kind: JackKind; short: string } & (
   { status: 'free' } | { status: 'used'; peer: string } | { status: 'incompatible' }
 );
 
@@ -97,8 +120,7 @@ export function portOptions(
   device: DeviceId,
   needs: Medium | undefined,
 ): PortOption[] {
-  const ports = topology.devices[device]?.ports ?? [];
-  const options = ports.map((port): PortOption => {
+  const options = jacksOf(topology, device).map((port): PortOption => {
     const base = { id: port.id, kind: port.kind, short: shortPortName(port.id) };
     const link = linkAt(topology, { device, port: port.id });
     if (link) {
@@ -120,8 +142,9 @@ export function onlyPort(
   device: DeviceId,
   needs: Medium | undefined,
 ): PortId | undefined {
-  const ports = (topology.devices[device]?.ports ?? []).filter(
-    (port) => !needs || PORT_MEDIUM[port.kind] === needs,
+  // Without a medium to match, a console port never counts: Auto means a network cable.
+  const ports = jacksOf(topology, device).filter((port) =>
+    needs ? PORT_MEDIUM[port.kind] === needs : PORT_MEDIUM[port.kind] !== 'console',
   );
   const [port] = ports;
   return ports.length === 1 && port && !linkAt(topology, { device, port: port.id })
@@ -196,7 +219,12 @@ export function planLink(
 
   const cable = choice === 'auto' ? autoCable(aEnd, bEnd) : choice;
   if (!cable) {
-    const wanted: Cable = aEnd.port === 'serial' ? 'serial' : 'straight';
+    const wanted: Cable =
+      aEnd.port === 'serial'
+        ? 'serial'
+        : PORT_MEDIUM[aEnd.port] === 'console'
+          ? 'console'
+          : 'straight';
     return err({ kind: 'cable-mismatch', endpoint: b, cable: wanted, portKind: bEnd.port });
   }
   return ok(cable === 'serial' ? { cable, a, b, dce: 'a' } : { cable, a, b });
@@ -210,7 +238,11 @@ function describeEndpoint(topology: Topology, endpoint: Endpoint): string {
   return `${hostname(topology, endpoint.device)} ${shortPortName(endpoint.port)}`;
 }
 
-const MEDIUM_CABLE: Record<Medium, string> = { copper: 'a copper', serial: 'a serial' };
+const MEDIUM_CABLE: Record<Medium, string> = {
+  copper: 'a copper',
+  serial: 'a serial',
+  console: 'a console',
+};
 
 /** A message for the person holding the cable, naming devices by hostname. */
 export function describeCableError(topology: Topology, error: CableError): string {
@@ -224,6 +256,9 @@ export function describeCableError(topology: Topology, error: CableError): strin
       return `${describeEndpoint(topology, error.endpoint)} is already connected${peer}.`;
     }
     case 'cable-mismatch': {
+      if (error.cable === 'console' && PORT_MEDIUM[error.portKind] === 'console') {
+        return "A console cable joins a PC's RS232 port to a router or switch's Console port.";
+      }
       const needs = MEDIUM_CABLE[PORT_MEDIUM[error.portKind]];
       return `${describeEndpoint(topology, error.endpoint)} needs ${needs} cable, not ${CABLE_LABELS[error.cable].toLowerCase()}.`;
     }

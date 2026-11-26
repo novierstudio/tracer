@@ -3,6 +3,7 @@
 .tracer-canvas {
   --cable-copper: color-mix(in oklab, var(--text-3) 85%, var(--text-1));
   --cable-serial: #c2410c;
+  --cable-console: #0f766e;
   --light-unknown: var(--text-3);
   /* How strongly an annotation's colour shows in a fill and an edge. */
   --annotation-fill: 9%;
@@ -13,6 +14,7 @@
 .dark .tracer-canvas {
   --cable-copper: color-mix(in oklab, var(--text-3) 80%, var(--surface-0));
   --cable-serial: #fb923c;
+  --cable-console: #2dd4bf;
   --annotation-fill: 10%;
   --annotation-edge: 28%;
   --area-fill: 7%;
@@ -138,6 +140,13 @@
   stroke: var(--cable-serial);
 }
 
+/* A console cable carries the CLI, not packets: dotted, with no link lights. */
+.tracer-canvas .react-flow__edge .cable[data-cable='console'] .cable-path {
+  stroke: var(--cable-console);
+  stroke-dasharray: 1 4.5;
+  stroke-width: 2.25;
+}
+
 .tracer-canvas .react-flow__edge:hover .cable-path {
   stroke: var(--text-2);
 }
@@ -226,6 +235,12 @@
 
 [data-cable='serial'] > .cable-swatch {
   stroke: var(--cable-serial);
+}
+
+[data-cable='console'] > .cable-swatch {
+  stroke: var(--cable-console);
+  stroke-dasharray: 0.5 2.5;
+  stroke-width: 2;
 }
 
 /* Quick cable: a band along each tile edge starts a drag; another tile takes the drop. */

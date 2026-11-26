@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { AnnotationId, DeviceId, LinkId } from './ids';
+import { consolePortOf, portOf, type ConsolePortKind } from './remote';
 import {
   Hostname,
   Ipv4Address,
@@ -26,7 +27,10 @@ const PORT_NAME_PREFIX = {
 export const PortId = z
   .string()
   .regex(
-    new RegExp(`^(?:${Object.values(PORT_NAME_PREFIX).join('|')})\\d+(?:/\\d+)*$`),
+    // `Console` and `RS232` are the management ports a console cable plugs into.
+    new RegExp(
+      `^(?:(?:${Object.values(PORT_NAME_PREFIX).join('|')})\\d+(?:/\\d+)*|Console|RS232)$`,
+    ),
     'Invalid interface name',
   )
   .brand<'PortId'>();
@@ -263,6 +267,27 @@ export const LineConfig = z.object({
 export type LineConfig = z.infer<typeof LineConfig>;
 
 export const VTY_LINE_COUNT = 16;
+
+/** A local username, as `username NAME` takes it. */
+export const Username = z.string().regex(/^\S{1,64}$/, 'Invalid username');
+export type Username = z.infer<typeof Username>;
+
+/**
+ * `username NAME [privilege N] secret|password X`: an account `login local` and SSH check.
+ * `secret` keeps an MD5-crypt hash; `password` keeps clear text, as line passwords do.
+ */
+export const LocalUser = z.object({
+  /** Absent means 1. A user with 15 starts in privileged EXEC. */
+  privilege: z.int().min(0).max(15).optional(),
+  credential: z.discriminatedUnion('kind', [
+    z.object({ kind: z.literal('secret'), hash: Md5CryptHash }),
+    z.object({ kind: z.literal('password'), text: z.string().min(1) }),
+  ]),
+});
+export type LocalUser = z.infer<typeof LocalUser>;
+
+/** `crypto key generate rsa`: the key's size in bits. IOS takes 360 to 4096. */
+export const RsaModulus = z.int().min(360).max(4096);
 
 const vtyLines = z.array(LineConfig).length(VTY_LINE_COUNT);
 
@@ -526,6 +551,14 @@ const iosFields = {
   /** `ip domain-lookup`, on unless the config says `no ip domain-lookup`. */
   domainLookup: z.boolean().default(true),
   bannerMotd: z.string().optional(),
+  /** `ip domain-name`. SSH keys are named after the hostname and this. */
+  domainName: z.string().regex(/^\S+$/).optional(),
+  /** `username` accounts, by name. Absent until the first one. */
+  users: z.record(Username, LocalUser).optional(),
+  /** The RSA key pair's modulus, once `crypto key generate rsa` has made one. SSH needs it. */
+  rsaModulus: RsaModulus.optional(),
+  /** `ip ssh version`. Absent means 1.99: the server takes version 1 and version 2 clients. */
+  sshVersion: z.union([z.literal(1), z.literal(2)]).optional(),
   /** Absent until the first access list, and again once the last one goes. */
   accessLists: z.record(AclName, AccessList).optional(),
   /** The saved config in NVRAM, as running-config lines. Absent until the first save. */
@@ -669,6 +702,8 @@ export const Link = z.discriminatedUnion('cable', [
     b: Endpoint,
     dce: z.enum(['a', 'b']),
   }),
+  /** From a PC's RS-232 port to a router or switch's Console port. It carries the CLI, not packets. */
+  z.object({ id: LinkId, cable: z.literal('console'), a: Endpoint, b: Endpoint }),
 ]);
 export type Link = z.infer<typeof Link>;
 export type Cable = Link['cable'];
@@ -811,18 +846,21 @@ export function emptyTopology({ name, now }: { name: string; now: Date }): Topol
   };
 }
 
-type Medium = 'copper' | 'serial';
+type Medium = 'copper' | 'serial' | 'console';
 
-const PORT_MEDIUM: Record<PortKind, Medium> = {
+const PORT_MEDIUM: Record<PortKind | ConsolePortKind, Medium> = {
   fastEthernet: 'copper',
   gigabitEthernet: 'copper',
   serial: 'serial',
+  console: 'console',
+  rs232: 'console',
 };
 
 const CABLE_MEDIUM: Record<Cable, Medium> = {
   straight: 'copper',
   crossover: 'copper',
   serial: 'serial',
+  console: 'console',
 };
 
 export type TopologyError =
@@ -836,7 +874,12 @@ export type TopologyError =
   | { kind: 'interfaces-mismatch'; device: DeviceId; missing: PortId[]; extra: string[] }
   | { kind: 'port-not-found'; endpoint: Endpoint }
   | { kind: 'port-in-use'; endpoint: Endpoint; link: LinkId }
-  | { kind: 'cable-mismatch'; endpoint: Endpoint; cable: Cable; portKind: PortKind }
+  | {
+      kind: 'cable-mismatch';
+      endpoint: Endpoint;
+      cable: Cable;
+      portKind: PortKind | ConsolePortKind;
+    }
   | { kind: 'same-port'; endpoint: Endpoint };
 
 export function findDeviceProblem(device: Device): TopologyError | undefined {
@@ -877,11 +920,21 @@ export function findLinkProblem(topology: Topology, link: Link): TopologyError |
     const device = topology.devices[endpoint.device];
     if (!device) return { kind: 'device-not-found', device: endpoint.device };
 
-    const port = device.ports.find((candidate) => candidate.id === endpoint.port);
+    const port = portOf(device, endpoint.port);
     if (!port) return { kind: 'port-not-found', endpoint };
 
     if (PORT_MEDIUM[port.kind] !== CABLE_MEDIUM[link.cable]) {
       return { kind: 'cable-mismatch', endpoint, cable: link.cable, portKind: port.kind };
+    }
+    // A console cable joins a PC's RS-232 port to a Console port, never two of a kind.
+    const far = link.a === endpoint ? link.b : link.a;
+    const farDevice = topology.devices[far.device];
+    if (
+      link.cable === 'console' &&
+      farDevice &&
+      consolePortOf(farDevice.kind)?.kind === port.kind
+    ) {
+      return { kind: 'cable-mismatch', endpoint: far, cable: link.cable, portKind: port.kind };
     }
 
     const occupant = linkAt(topology, endpoint);
