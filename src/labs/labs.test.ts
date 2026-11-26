@@ -5,6 +5,7 @@ import { createEngine } from '@/engine/engine';
 import { createSimService } from '@/engine/service';
 import { STACKS } from '@/engine/stacks';
 import { Ipv4Address, parseTopologyJson, serializeTopology, type Topology } from '@/model';
+import { readIpv6 } from '@/model/ipv6';
 import { BUILDERS } from './build';
 import { SAMPLE_LABS } from './catalog';
 
@@ -20,6 +21,8 @@ const HEADLINE_PING: Record<string, string> = {
   'ospf-three-routers': '192.168.3.10',
   'dns-web-server': '192.168.1.20',
   'pat-acl': '203.0.113.10',
+  // PC3's SLAAC address: LAN B's prefix and PC3's MAC, b2:1f:56:da:90:69, by EUI-64.
+  'ipv6-slaac': '2001:db8:2:0:b01f:56ff:feda:9069',
 };
 
 async function load(id: string): Promise<Topology> {
@@ -57,7 +60,8 @@ function ping(topology: Topology, target: string) {
   const events: PingEvent[] = [];
   const options = { count: 4, timeoutMs: 1000 };
   const pc1 = Object.values(topology.devices).find((d) => d.config.hostname === 'PC1')!;
-  const started = sim.ping(pc1.id, Ipv4Address.parse(target), options, (e) => events.push(e));
+  const address = readIpv6(target) ?? Ipv4Address.parse(target);
+  const started = sim.ping(pc1.id, address, options, (e) => events.push(e));
   if (!started.ok) throw new Error(started.error);
   while (!events.some((e) => e.kind === 'summary') && engine.nextTime() !== undefined) {
     engine.step();

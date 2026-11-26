@@ -172,6 +172,22 @@ export const SAMPLE_LABS: readonly SampleLab[] = [
     ],
     load: () => import('./pat-acl.tracer.json?raw').then(text),
   },
+  {
+    id: 'ipv6-slaac',
+    title: 'IPv6 with SLAAC',
+    description:
+      'Two LANs behind one router, on IPv6 alone. No PC has an address typed in: R1 advertises each LAN’s prefix, and every PC builds its own address from it and its MAC.',
+    difficulty: 'intermediate',
+    devices: { router: 1, switch: 2, pc: 4 },
+    tryThis: [
+      'Run `ipv6config` on PC3 to see the address it formed and its gateway, FE80::1',
+      'Ping PC3’s IPv6 address from PC1’s Command Prompt',
+      'Run `show ipv6 route` on R1: both prefixes are connected, with a local /128 for each address',
+      'Run `show ipv6 neighbors` on R1 after the ping to see the PCs it resolved',
+      'Switch to Simulation mode and ping again to step through Neighbor Discovery, then ICMPv6',
+    ],
+    load: () => import('./ipv6-slaac.tracer.json?raw').then(text),
+  },
 ];
 
 export const DIFFICULTY_LABELS: Record<Difficulty, string> = {
