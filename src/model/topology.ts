@@ -217,9 +217,43 @@ export type Ipv6InterfaceConfig = z.infer<typeof Ipv6InterfaceConfig>;
 /** Interface settings for IPv6. Absent means IPv6 is off on the interface. */
 const ipv6InterfaceFields = { ipv6: Ipv6InterfaceConfig.optional() };
 
+/** An HSRP group number: 0 to 255 in version 1, up to 4095 in version 2. */
+export const HsrpGroupNumber = z.int().min(0).max(4095);
+
+/** `standby <group> track <interface> [decrement]`. Absent decrement means 10. */
+export const HsrpTrack = z.object({
+  interface: InterfaceId,
+  decrement: z.int().min(1).max(255).optional(),
+});
+export type HsrpTrack = z.infer<typeof HsrpTrack>;
+
+/** One HSRP group on an interface, as its `standby <group> ...` lines set it. */
+export const HsrpGroup = z.object({
+  /** `standby <group> ip <address>`: the virtual address the group answers for while active. */
+  ip: Ipv4Address.optional(),
+  /** `standby <group> priority`. Absent means 100. */
+  priority: z.int().min(0).max(255).optional(),
+  /** `standby <group> preempt`. */
+  preempt: z.literal(true).optional(),
+  /** `standby <group> timers <hello> <hold>`, in seconds. Absent means 3 and 10. */
+  timers: z.object({ hello: z.int().min(1).max(254), hold: z.int().min(2).max(255) }).optional(),
+  /** `standby <group> track`, in the order entered. Absent means none. */
+  track: z.array(HsrpTrack).optional(),
+});
+export type HsrpGroup = z.infer<typeof HsrpGroup>;
+
+/** HSRP on a routed interface: a router's port or subinterface, or a multilayer switch's SVI. */
+const hsrpInterfaceFields = {
+  /** `standby version 2`. Absent means version 1. */
+  standbyVersion: z.literal(2).optional(),
+  /** The interface's groups, by number. Absent until the first `standby` line. */
+  standby: z.record(HsrpGroupNumber, HsrpGroup).optional(),
+};
+
 export const RoutedInterface = z.object({
   ...interfaceFields,
   ...ipv6InterfaceFields,
+  ...hsrpInterfaceFields,
   ...ospfInterfaceFields,
   ...metricInterfaceFields,
   ...filterInterfaceFields,
@@ -375,6 +409,7 @@ export type Dot1q = z.infer<typeof Dot1q>;
 /** A router subinterface. It has no speed, duplex or clock of its own: those belong to its port. */
 export const Subinterface = z.object({
   ...ospfInterfaceFields,
+  ...hsrpInterfaceFields,
   ...metricInterfaceFields,
   ...ipv6InterfaceFields,
   ...filterInterfaceFields,
@@ -788,10 +823,34 @@ export const RouterConfig = z.object({
 });
 export type RouterConfig = z.infer<typeof RouterConfig>;
 
+/** How a switch takes part in VTP. A server's VLAN changes go out to the domain; a client takes them. */
+export const VtpMode = z.enum(['server', 'client', 'transparent']);
+export type VtpMode = z.infer<typeof VtpMode>;
+
+/**
+ * A switch's VTP settings and the revision of its VLAN database. IOS keeps them, with the VLANs,
+ * in vlan.dat rather than the running-config. Absent fields take IOS's defaults.
+ */
+export const VtpConfig = z.object({
+  /** `vtp mode`. Absent means server. */
+  mode: VtpMode.optional(),
+  /** `vtp domain`. Absent means none: IOS shows it as NULL, and learns the first one it hears. */
+  domain: z.string().regex(/^\S{1,32}$/).optional(),
+  /** `vtp password`. */
+  password: z.string().regex(/^\S{1,64}$/).optional(),
+  /** `vtp version 2`. Absent means version 1. */
+  version: z.literal(2).optional(),
+  /** The configuration revision: a server adds one per VLAN change. Absent means 0. */
+  revision: z.int().min(0).max(4294967295).optional(),
+});
+export type VtpConfig = z.infer<typeof VtpConfig>;
+
 export const SwitchConfig = z.object({
   ...iosFields,
   interfaces: z.record(PortId, SwitchInterface),
   vlans: z.record(VlanId, z.object({ name: z.string().min(1).max(32) })),
+  /** Absent until the first `vtp` command or VTP update: a server in no domain, at revision 0. */
+  vtp: VtpConfig.optional(),
   lines: SwitchLines.default(factorySwitchLines),
   defaultGateway: Ipv4Address.optional(),
   /** Bridge priority by VLAN. A VLAN without one has DEFAULT_BRIDGE_PRIORITY. */
