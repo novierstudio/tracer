@@ -1,6 +1,15 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
-import { InterfaceId, PortId, SubinterfaceId, VirtualInterfaceId } from './topology';
+import {
+  DhcpExcludedRange,
+  DhcpLease,
+  DhcpServerConfig,
+  InterfaceId,
+  MAX_LEASE_MINUTES,
+  PortId,
+  SubinterfaceId,
+  VirtualInterfaceId,
+} from './topology';
 
 describe('InterfaceId', () => {
   it.each(['GigabitEthernet0/0', 'FastEthernet0/1', 'Serial0/0/0'])(
@@ -42,4 +51,32 @@ describe('InterfaceId', () => {
       expect(InterfaceId.safeParse(name).success).toBe(false);
     },
   );
+});
+
+describe('DhcpServerConfig', () => {
+  it('reads pools by name and excluded ranges', () => {
+    const config = DhcpServerConfig.parse({
+      pools: {
+        LAN: {
+          network: { address: '192.168.1.0', prefixLength: 24 },
+          defaultRouters: ['192.168.1.1'],
+          dnsServers: ['8.8.8.8', '8.8.4.4'],
+          lease: 'infinite',
+        },
+        EMPTY: {},
+      },
+      excluded: [{ first: '192.168.1.1', last: '192.168.1.10' }],
+    });
+    expect(Object.keys(config.pools)).toEqual(['LAN', 'EMPTY']);
+    expect(config.pools.LAN!.lease).toBe('infinite');
+  });
+
+  it('refuses an excluded range that runs backwards', () => {
+    const range = { first: '192.168.1.10', last: '192.168.1.1' };
+    expect(DhcpExcludedRange.safeParse(range).success).toBe(false);
+  });
+
+  it.each([0, MAX_LEASE_MINUTES + 1, 1.5])('refuses a lease of %d minutes', (minutes) => {
+    expect(DhcpLease.safeParse(minutes).success).toBe(false);
+  });
 });
