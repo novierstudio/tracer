@@ -1,0 +1,32 @@
+import type { Ipv4Packet, UdpDatagram, UdpPayload } from '../pdu';
+import { UDP_PORT } from '../pdu';
+import type { IpContext } from './context';
+import { onDhcpServerPort } from './dhcpServer';
+import type { IpInterface } from './interfaces';
+
+export const udp = (srcPort: number, dstPort: number, payload: UdpPayload): UdpDatagram => ({
+  kind: 'udp',
+  srcPort,
+  dstPort,
+  payload,
+});
+
+/**
+ * A datagram for this device, by the port it is for. `arrival` is the interface it came in on,
+ * absent for one the device sent itself. A DHCP host takes its replies on port 68 before IP sees
+ * them, since it may have no address yet, and nothing else listens, so other ports drop.
+ */
+export function deliverUdp(
+  ctx: IpContext,
+  packet: Ipv4Packet,
+  datagram: UdpDatagram,
+  arrival: IpInterface | undefined,
+) {
+  switch (datagram.dstPort) {
+    case UDP_PORT.dhcpServer:
+      onDhcpServerPort(ctx, packet, datagram.payload, arrival);
+      return;
+    default:
+      return;
+  }
+}

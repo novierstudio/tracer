@@ -1,9 +1,16 @@
 import type { DeviceKind, Ipv4Address } from '@/model';
 import { ms } from '../core/time';
-import type { IcmpDestinationUnreachable, IcmpTimeExceeded, Ipv4Packet, Ipv4Payload } from '../pdu';
+import {
+  BROADCAST_MAC,
+  LIMITED_BROADCAST,
+  type IcmpDestinationUnreachable,
+  type IcmpTimeExceeded,
+  type Ipv4Packet,
+  type Ipv4Payload,
+} from '../pdu';
 import { sendToNeighbour } from './arp';
 import { routesOf, timerKey, type IpContext } from './context';
-import { isLan, ownsAddress } from './interfaces';
+import { isLan, ownsAddress, sendOnLan, type LanInterface } from './interfaces';
 import { nextHop, type NextHop } from './routes';
 
 /** The TTL a device's own packets start with: 255 on IOS, 128 on Windows. */
@@ -68,4 +75,22 @@ export function reportError(
   message: IcmpDestinationUnreachable | IcmpTimeExceeded,
 ) {
   if (!isIcmpError(message.original.payload)) originate(ctx, message.original.src, message);
+}
+
+/** Sends a packet to every host on a LAN interface's network, as a DHCP server answers a client. */
+export function broadcastOn(ctx: IpContext, iface: LanInterface, payload: Ipv4Payload) {
+  const packet: Ipv4Packet = {
+    kind: 'ipv4',
+    src: iface.cidr.address,
+    dst: LIMITED_BROADCAST,
+    ttl: INITIAL_TTL[ctx.device.kind],
+    id: ctx.state.nextPacketId++,
+    payload,
+  };
+  sendOnLan(ctx, iface, {
+    kind: 'ethernet',
+    dst: BROADCAST_MAC,
+    src: iface.medium.mac,
+    payload: packet,
+  });
 }

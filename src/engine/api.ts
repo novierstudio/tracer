@@ -5,6 +5,9 @@ import type { EventId, SimEvent } from './events';
 import type { MacTableEntry, SpanningTreeVlan } from './l2/switching';
 import type { PortRole, PortState, SpanningTreePort, StpTimes } from './l2/stp';
 import type { ArpTableEntry } from './l3/arp';
+import type { DhcpListener, DhcpOutcome, Lease } from './l3/dhcpClient';
+import type { DhcpBindingEntry } from './l3/dhcpServer';
+import type { HostAddressing } from './l3/hostAddress';
 import type { PingEvent, PingListener, PingOptions, PingReply, PingSummary } from './l3/ping';
 import type { Route } from './l3/routes';
 import type { TraceEvent, TraceListener, TraceOptions, TraceProbe } from './l3/traceroute';
@@ -14,6 +17,11 @@ import type { TopologyPatch } from './patch';
 export type {
   ArpTableEntry,
   DeviceUnavailable,
+  DhcpBindingEntry,
+  DhcpListener,
+  DhcpOutcome,
+  HostAddressing,
+  Lease,
   LinkEnd,
   LinkStatus,
   MacTableEntry,
@@ -136,6 +144,20 @@ export interface SimAPI {
   spanningTree(device: DeviceId): Result<SpanningTreeVlan[], DeviceUnavailable>;
   /** Whether each of a device's ports has its link up now, for interface status in `show`. */
   portStates(device: DeviceId): Result<Record<PortId, boolean>, DeviceUnavailable>;
+  /**
+   * A PC or server's IPv4 settings as the simulation runs them: from its config, or from DHCP,
+   * which the config never stores. `unsupported` for a router or a switch.
+   */
+  hostIp(device: DeviceId): Result<HostAddressing, DeviceUnavailable>;
+  /** The DHCP leases a router has granted and not yet lost, by address. */
+  dhcpBindings(device: DeviceId): Result<DhcpBindingEntry[], DeviceUnavailable>;
+  /**
+   * `ipconfig /renew` on a DHCP host: it asks its server to extend its lease, or asks for one.
+   * `listener` hears the lease, or that none came, once, as a ping's listener hears its events.
+   */
+  dhcpRenew(device: DeviceId, listener: DhcpListener): Result<void, DeviceUnavailable>;
+  /** `ipconfig /release`: a DHCP host gives its lease back and asks for nothing until renewed. */
+  dhcpRelease(device: DeviceId): Result<void, DeviceUnavailable>;
   /** Sets the one batch listener. Calling it again replaces the previous listener. */
   subscribe(listener: (batch: SimEventBatch) => void): void;
 }

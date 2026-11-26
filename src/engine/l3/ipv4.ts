@@ -4,11 +4,11 @@ import type { Ipv4Address, Ipv4Cidr, PrefixLength } from '@/model';
 // whose zod schemas would otherwise ride into the worker bundle. NOV-206 wants this math shared
 // with the CLI and the inspector: move it to a schema-free model module and import it from both.
 
-function ipv4ToUint32(address: Ipv4Address): number {
+export function ipv4ToUint32(address: Ipv4Address): number {
   return address.split('.').reduce((acc, octet) => acc * 256 + Number(octet), 0);
 }
 
-function uint32ToIpv4(value: number): Ipv4Address {
+export function uint32ToIpv4(value: number): Ipv4Address {
   return [24, 16, 8, 0].map((shift) => (value >>> shift) & 0xff).join('.') as Ipv4Address;
 }
 

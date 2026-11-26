@@ -135,13 +135,15 @@ export type DhcpGrant = {
  */
 export type DhcpMessage =
   | (DhcpHeader & { readonly type: 'discover'; readonly requestedIp?: Ipv4Address })
-  | (DhcpHeader & { readonly type: 'offer' | 'ack' } & DhcpGrant)
+  | (DhcpHeader & { readonly type: 'offer' } & DhcpGrant)
   | (DhcpHeader & {
       readonly type: 'request';
       readonly requestedIp?: Ipv4Address;
       readonly serverId?: Ipv4Address;
     })
-  | (DhcpHeader & { readonly type: 'nak' | 'release'; readonly serverId: Ipv4Address });
+  | (DhcpHeader & { readonly type: 'ack' } & DhcpGrant)
+  | (DhcpHeader & { readonly type: 'nak'; readonly serverId: Ipv4Address })
+  | (DhcpHeader & { readonly type: 'release'; readonly serverId: Ipv4Address });
 
 export type IcmpMessage = IcmpEcho | IcmpDestinationUnreachable | IcmpTimeExceeded;
 

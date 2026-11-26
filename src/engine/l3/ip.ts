@@ -1,5 +1,5 @@
 import type { SimModule } from '../module';
-import { BROADCAST_MAC, type Ipv4Packet } from '../pdu';
+import { BROADCAST_MAC, LIMITED_BROADCAST, type Ipv4Packet } from '../pdu';
 import { forgetPort, onArp, onArpTimer } from './arp';
 import {
   interfacesOf,
@@ -9,12 +9,21 @@ import {
   type IpState,
   type Probe,
 } from './context';
+import {
+  abandonDhcp,
+  bootDhcp,
+  DHCP_STOPPED,
+  onDhcpTimer,
+  reconcileDhcp,
+  takeDhcpReply,
+} from './dhcpClient';
 import { matchAnswer, type EchoAnswer } from './echo';
-import { lanInterfaceFor, ownsAddress, serialOn } from './interfaces';
+import { lanInterfaceFor, ownsAddress, serialOn, type IpInterface } from './interfaces';
 import { originate, reportError, transmit } from './output';
 import { finishPing, onPingAnswer, onPingTimer } from './ping';
 import { nextHop } from './routes';
 import { finishTrace, onTraceAnswer } from './traceroute';
+import { deliverUdp } from './udp';
 
 function onProbeAnswer(ctx: IpContext, probe: Probe, answer: EchoAnswer) {
   if (probe.kind === 'ping') onPingAnswer(ctx, probe, answer);
@@ -31,10 +40,13 @@ export function stopProbe(ctx: IpContext, id: number) {
   else if (probe?.kind === 'trace') finishTrace(ctx, probe);
 }
 
-function deliver(ctx: IpContext, packet: Ipv4Packet) {
+/** A packet for this device, by what it carries. `arrival` is absent for one it sent itself. */
+function deliver(ctx: IpContext, packet: Ipv4Packet, arrival?: IpInterface) {
   const message = packet.payload;
-  // UDP has nothing listening yet.
-  if (message.kind !== 'icmp') return;
+  if (message.kind === 'udp') {
+    deliverUdp(ctx, packet, message, arrival);
+    return;
+  }
   if (message.type === 'echo-request') {
     const reply = { kind: 'icmp', type: 'echo-reply', id: message.id, seq: message.seq } as const;
     originate(ctx, packet.src, reply, { src: packet.dst });
@@ -45,13 +57,14 @@ function deliver(ctx: IpContext, packet: Ipv4Packet) {
 }
 
 /**
- * A packet arrived on a working interface. One for this device is delivered. A router forwards
- * the rest with the TTL decremented, or tells the sender why it cannot. A host drops them.
+ * A packet arrived on a working interface. One for this device, or for every host on the
+ * network, is delivered. A router forwards the rest with the TTL decremented, or tells the sender
+ * why it cannot. A host drops them.
  */
-function receive(ctx: IpContext, packet: Ipv4Packet) {
+function receive(ctx: IpContext, packet: Ipv4Packet, arrival: IpInterface) {
   const { interfaces, routes } = routesOf(ctx);
-  if (ownsAddress(interfaces, packet.dst)) {
-    deliver(ctx, packet);
+  if (packet.dst === LIMITED_BROADCAST || ownsAddress(interfaces, packet.dst)) {
+    deliver(ctx, packet, arrival);
     return;
   }
   if (ctx.device.kind !== 'router') return;
@@ -76,32 +89,42 @@ function receive(ctx: IpContext, packet: Ipv4Packet) {
 
 /**
  * IPv4 on a router or an end host: ARP, forwarding, ICMP, ping and traceroute in one module, since
- * every part reads the same ARP cache and the module boundary keeps state private. The device's
- * interfaces and routing table are derived from its config and link state on each use, so a
- * config edit or a link change takes effect on the next packet with nothing to invalidate.
+ * every part reads the same ARP cache and the module boundary keeps state private. So do UDP and
+ * DHCP: a host's DHCP lease is its address, and a router's DHCP server answers on its interfaces.
+ * The device's interfaces and routing table are derived from its config, its lease and its link
+ * state on each use, so a change takes effect on the next packet with nothing to invalidate.
  */
 export const ipModule: SimModule<IpState> = {
   id: 'ipv4',
-  init: () => ({
-    arp: new Map(),
-    resolving: new Map(),
-    probes: new Map(),
-    loopback: [],
-    nextPacketId: 1,
-    nextProbeId: 1,
-  }),
+  init: (ctx) => {
+    bootDhcp(ctx);
+    return {
+      arp: new Map(),
+      resolving: new Map(),
+      probes: new Map(),
+      loopback: [],
+      nextPacketId: 1,
+      nextProbeId: 1,
+      dhcp: DHCP_STOPPED,
+      dhcpWaiters: [],
+      bindings: new Map(),
+    };
+  },
   onFrame(ctx, port, frame) {
     switch (frame.kind) {
-      case 'hdlc':
-        if (serialOn(interfacesOf(ctx), port)) receive(ctx, frame.payload);
+      case 'hdlc': {
+        const iface = serialOn(interfacesOf(ctx), port);
+        if (iface) receive(ctx, frame.payload, iface);
         return;
+      }
       case 'ethernet': {
+        if (takeDhcpReply(ctx, port, frame)) return;
         // A LAN interface takes frames of its VLAN for its own MAC or broadcast.
         const iface = lanInterfaceFor(ctx.device, interfacesOf(ctx), port, frame);
         if (!iface) return;
         if (frame.dst !== iface.medium.mac && frame.dst !== BROADCAST_MAC) return;
         if (frame.payload.kind === 'arp') onArp(ctx, iface, port, frame.payload);
-        else if (frame.payload.kind === 'ipv4') receive(ctx, frame.payload);
+        else if (frame.payload.kind === 'ipv4') receive(ctx, frame.payload, iface);
         return;
       }
       case 'hello':
@@ -123,15 +146,26 @@ export const ipModule: SimModule<IpState> = {
       case 'loopback':
         for (const packet of ctx.state.loopback.splice(0)) deliver(ctx, packet);
         return;
+      case 'dhcp':
+        onDhcpTimer(ctx);
+        return;
       case undefined:
         return;
     }
   },
   onLinkChange(ctx, port, up) {
     if (!up) forgetPort(ctx, port);
+    reconcileDhcp(ctx);
   },
-  /** The device is going away: every ping and traceroute it runs ends with what it got so far. */
+  onConfigChange(ctx) {
+    reconcileDhcp(ctx);
+  },
+  /**
+   * The device is going away: every ping and traceroute it runs ends with what it got so far,
+   * and whoever waits on its DHCP client hears that nothing came.
+   */
   onStop(ctx) {
     for (const id of [...ctx.state.probes.keys()]) stopProbe(ctx, id);
+    abandonDhcp(ctx);
   },
 };

@@ -12,6 +12,7 @@ import { parentPort } from '@/model/vlans';
 import { egressFrame, ingressVlan, vlanPorts } from '../l2/switching';
 import type { DeviceContext } from '../module';
 import type { EthernetFrame } from '../pdu';
+import { addressOf, hostPort, type HostAddressing } from './hostAddress';
 
 /**
  * What carries an interface's packets. Ethernet and a switch's VLAN interface need ARP, a serial
@@ -89,9 +90,14 @@ function svis(device: Switch, portUp: (port: PortId) => boolean): IpInterface[] 
 
 /**
  * The device's working IP interfaces, from its config and its link state now. A physical port
- * counts while its link is up, which already means it is not shut down.
+ * counts while its link is up, which already means it is not shut down. A host's one address is
+ * `host`'s, whether its config set it or DHCP did.
  */
-export function ipInterfaces(device: Device, portUp: (port: PortId) => boolean): IpInterface[] {
+export function ipInterfaces(
+  device: Device,
+  portUp: (port: PortId) => boolean,
+  host: HostAddressing | undefined,
+): IpInterface[] {
   switch (device.kind) {
     case 'router': {
       const found: IpInterface[] = [];
@@ -113,14 +119,13 @@ export function ipInterfaces(device: Device, portUp: (port: PortId) => boolean):
     }
     case 'pc':
     case 'server': {
-      const { ipv4 } = device.config;
-      const port = device.ports.find((candidate) => candidate.kind !== 'serial');
-      if (ipv4.mode !== 'static' || !ipv4.address || !port) return [];
-      if (!portUp(port.id)) return [];
+      const address = host && addressOf(host);
+      const port = hostPort(device);
+      if (!address || !port || !portUp(port.id)) return [];
       return [
         {
           name: port.id,
-          cidr: ipv4.address,
+          cidr: address,
           medium: { kind: 'ethernet', port: port.id, mac: port.mac },
         },
       ];

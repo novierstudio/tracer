@@ -1,6 +1,7 @@
-import { ok, type DeviceId, type Result } from '@/model';
+import { err, ok, type DeviceId, type Result } from '@/model';
 import type {
   DeviceUnavailable,
+  DhcpOutcome,
   PingEvent,
   ProbeHandle,
   SimAPI,
@@ -13,7 +14,9 @@ import type { EventId } from './events';
 import { createHistory, stepInstant, type History, type Input } from './history';
 import { macTable, spanningTreeOf, switchingModule } from './l2/switching';
 import { arpTable, clearArp } from './l3/arp';
-import { routesOf, type IpContext } from './l3/context';
+import { hostAddressingOf, routesOf, type IpContext } from './l3/context';
+import { releaseDhcp, renewDhcp } from './l3/dhcpClient';
+import { dhcpBindings } from './l3/dhcpServer';
 import { ipModule, stopProbe } from './l3/ip';
 import { pingSummary, startPing } from './l3/ping';
 import { startTrace } from './l3/traceroute';
@@ -73,6 +76,14 @@ const pingOrder = (event: PingEvent) => (event.kind === 'summary' ? Infinity : e
 
 const traceOrder = (probesPerHop: number) => (event: TraceEvent) =>
   event.kind === 'done' ? Infinity : (event.hop - 1) * probesPerHop + event.probe;
+
+/** A result whose value says the device cannot answer, folded into its error. */
+function flatten<T>(
+  result: Result<T | undefined, DeviceUnavailable>,
+): Result<T, DeviceUnavailable> {
+  if (!result.ok) return result;
+  return result.value === undefined ? err('unsupported') : ok(result.value);
+}
 
 function checkCount(name: string, count: number) {
   if (!Number.isInteger(count) || count < 1) {
@@ -311,6 +322,35 @@ export function createSimService({
       engine.withModule(device, ipModule, (ctx) =>
         Object.fromEntries(ctx.device.ports.map((port) => [port.id, ctx.portUp(port.id)])),
       ),
+    hostIp: (device) => flatten(engine.withModule(device, ipModule, hostAddressingOf)),
+    dhcpBindings: (device) =>
+      flatten(
+        engine.withModule(device, ipModule, (ctx) =>
+          ctx.device.kind === 'router' ? dhcpBindings(ctx) : undefined,
+        ),
+      ),
+    dhcpRenew(device, listener) {
+      const once = hearOnce<DhcpOutcome>(
+        listener,
+        () => Infinity,
+        () => ({ kind: 'failed' }),
+      );
+      let started: Result<void, DeviceUnavailable> | undefined;
+      input({
+        apply: () => {
+          started = engine.withModule(device, ipModule, (ctx) => renewDhcp(ctx, once.listener));
+        },
+        forget: once.forget,
+      });
+      requestFrame();
+      return started!;
+    },
+    dhcpRelease(device) {
+      let released: Result<void, DeviceUnavailable> | undefined;
+      input({ apply: () => void (released = engine.withModule(device, ipModule, releaseDhcp)) });
+      requestFrame();
+      return released!;
+    },
     subscribe(next) {
       listener = next;
       sent = undefined;
