@@ -66,12 +66,12 @@ describe('diffTopology', () => {
     expect(diffTopology(topology, ios)).toEqual({
       devices: {},
       links: {},
-      settings: { stpTimers: 'ios' },
+      settings: { stpTimers: 'ios', routingTimers: 'fast' },
     });
     expect(diffTopology(ios, updateLabSettings(ios, { stpTimers: 'fast' }))).toEqual({
       devices: {},
       links: {},
-      settings: { stpTimers: 'fast' },
+      settings: { stpTimers: 'fast', routingTimers: 'fast' },
     });
   });
 });

@@ -97,7 +97,10 @@ function simulate(topology: Topology, seed = 1) {
 const dhcpOf = ({ frame }: FrameEvent): DhcpMessage | undefined => {
   const packet =
     frame.kind === 'ethernet' && frame.payload.kind === 'ipv4' ? frame.payload : undefined;
-  return packet?.payload.kind === 'udp' ? packet.payload.payload : undefined;
+  const datagram = packet?.payload;
+  return datagram?.kind === 'udp' && datagram.payload.kind === 'dhcp'
+    ? datagram.payload
+    : undefined;
 };
 
 /** The DHCP messages `device` sent, in order, with when they left. */
@@ -159,7 +162,10 @@ describe('DHCP', () => {
 
   it('waits out spanning tree behind a switch, then gets its lease', () => {
     const { lab, pcs } = switchedLab();
-    const topology: Topology = { ...lab.topology, settings: { stpTimers: 'ios' } };
+    const topology: Topology = {
+      ...lab.topology,
+      settings: { stpTimers: 'ios', routingTimers: 'fast' },
+    };
     const { hostIp, runUntil, leased, engine } = simulate(topology);
     const [pc1] = pcs as [DeviceId];
 

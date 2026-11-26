@@ -1,5 +1,5 @@
 import type { SimModule } from '../module';
-import { BROADCAST_MAC, LIMITED_BROADCAST, type Ipv4Packet } from '../pdu';
+import { BROADCAST_MAC, isMulticast, LIMITED_BROADCAST, type Ipv4Packet } from '../pdu';
 import { forgetPort, onArp, onArpTimer } from './arp';
 import {
   interfacesOf,
@@ -68,6 +68,9 @@ function receive(ctx: IpContext, packet: Ipv4Packet, arrival: IpInterface) {
     return;
   }
   if (ctx.device.kind !== 'router') return;
+  // A router forwards unicast only. A multicast stays on its own link, where routing protocols,
+  // which run in modules of their own, read it.
+  if (isMulticast(packet.dst)) return;
   if (packet.ttl <= 1) {
     ctx.note(`Dropped a packet for ${packet.dst} from ${packet.src}: TTL expired`);
     reportError(ctx, { kind: 'icmp', type: 'time-exceeded', original: packet });

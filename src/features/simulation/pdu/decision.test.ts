@@ -259,6 +259,7 @@ describe('the decision sentence for DHCP', () => {
       return (
         packet?.kind === 'ipv4' &&
         packet.payload.kind === 'udp' &&
+        packet.payload.payload.kind === 'dhcp' &&
         packet.payload.payload.type === 'discover' &&
         lab.device(event.to.device).kind === 'router'
       );

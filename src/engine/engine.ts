@@ -241,9 +241,13 @@ export function createEngine({
 
   function applyPatch(patch: TopologyPatch) {
     const touched = Object.keys(patch.devices) as DeviceId[];
+    const nextSettings = patch.settings;
     const settingsChanged =
-      patch.settings !== undefined && patch.settings.stpTimers !== settings.stpTimers;
-    if (patch.settings) settings = patch.settings;
+      nextSettings !== undefined &&
+      (Object.keys(nextSettings) as (keyof LabSettings)[]).some(
+        (key) => nextSettings[key] !== settings[key],
+      );
+    if (nextSettings) settings = nextSettings;
     for (const id of touched) {
       const next = patch.devices[id];
       if (next) devices.set(id, next);

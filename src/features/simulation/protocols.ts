@@ -3,13 +3,14 @@ import type { Frame } from '@/engine/frame';
 import type { ArpPacket, Bpdu, DhcpMessage, IcmpMessage, Ipv4Packet } from '@/engine/pdu';
 
 /** The protocol a frame shows as: the innermost one the engine models. */
-export type ProtocolId = 'arp' | 'icmp' | 'dhcp' | 'stp' | 'hello';
+export type ProtocolId = 'arp' | 'icmp' | 'dhcp' | 'rip' | 'stp' | 'hello';
 
 /** Each protocol's short label and colour token. The label means colour is never the only cue. */
 export const PROTOCOLS: Record<ProtocolId, { label: string; token: `--proto-${string}` }> = {
   arp: { label: 'ARP', token: '--proto-arp' },
   icmp: { label: 'ICMP', token: '--proto-icmp' },
   dhcp: { label: 'DHCP', token: '--proto-dhcp' },
+  rip: { label: 'RIP', token: '--proto-routing' },
   stp: { label: 'STP', token: '--proto-stp' },
   hello: { label: 'Hello', token: '--proto-stp' },
 };
@@ -21,7 +22,7 @@ function ipProtocol(packet: Ipv4Packet): ProtocolId {
     case 'icmp':
       return 'icmp';
     case 'udp':
-      // DHCP is the one protocol over UDP so far.
+      // Each protocol over UDP is a protocol of its own.
       return packet.payload.payload.kind;
   }
 }
@@ -104,7 +105,8 @@ function describeDhcp(message: DhcpMessage): string {
 
 function describePacket(packet: Ipv4Packet): string {
   const { payload } = packet;
-  return payload.kind === 'icmp' ? describeIcmp(packet, payload) : describeDhcp(payload.payload);
+  if (payload.kind === 'icmp') return describeIcmp(packet, payload);
+  return payload.payload.kind === 'dhcp' ? describeDhcp(payload.payload) : 'RIP';
 }
 
 /** The Info column: what the frame says, in a line a student can read. */

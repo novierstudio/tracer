@@ -12,6 +12,8 @@ import type { PingEvent, PingListener, PingOptions, PingReply, PingSummary } fro
 import type { LearnedRoute, Route } from './l3/routes';
 import type { TraceEvent, TraceListener, TraceOptions, TraceProbe } from './l3/traceroute';
 import type { DeviceUnavailable } from './module';
+import type { RipStatus } from './routing/rip';
+import type { RipTimers } from './routing/timers';
 import type { TopologyPatch } from './patch';
 
 export type {
@@ -33,6 +35,8 @@ export type {
   PingSummary,
   PortRole,
   PortState,
+  RipStatus,
+  RipTimers,
   Route,
   SpanningTreePort,
   SpanningTreeVlan,
@@ -69,6 +73,9 @@ export type SimEventBatch = {
 };
 
 export type CliResult = { kind: 'not-implemented' };
+
+/** A router's routing protocols as they run, each undefined while it is not configured. */
+export type RoutingProtocols = { readonly rip: RipStatus | undefined };
 
 /** The simulation worker's contract with the main thread. */
 export interface SimAPI {
@@ -139,6 +146,8 @@ export interface SimAPI {
   arpTable(device: DeviceId): Result<ArpTableEntry[], DeviceUnavailable>;
   /** The routes a router or host uses now, by network, for `show ip route`. */
   routes(device: DeviceId): Result<Route[], DeviceUnavailable>;
+  /** A router's routing protocols as they run now, for `show ip protocols` and friends. */
+  routingProtocols(device: DeviceId): Result<RoutingProtocols, DeviceUnavailable>;
   /** The addresses a switch has learned and not yet aged out, by VLAN then MAC. */
   macTable(device: DeviceId): Result<MacTableEntry[], DeviceUnavailable>;
   /** A switch's spanning tree instances, by VLAN, for `show spanning-tree`. */

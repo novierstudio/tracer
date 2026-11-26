@@ -456,16 +456,17 @@ describe('updateLabSettings', () => {
   it('reads a lab without settings as fast spanning tree timers', () => {
     const { topology } = buildLab();
     expect(topology.settings).toBeUndefined();
-    expect(labSettings(topology)).toEqual({ stpTimers: 'fast' });
+    expect(labSettings(topology)).toEqual({ stpTimers: 'fast', routingTimers: 'fast' });
   });
 
   it('switches to the real IOS timers and back', () => {
     const { topology } = buildLab();
 
     const ios = updateLabSettings(topology, { stpTimers: 'ios' });
-    expect(ios.settings).toEqual({ stpTimers: 'ios' });
+    expect(ios.settings).toEqual({ stpTimers: 'ios', routingTimers: 'fast' });
     expect(labSettings(updateLabSettings(ios, { stpTimers: 'fast' }))).toEqual({
       stpTimers: 'fast',
+      routingTimers: 'fast',
     });
   });
 

@@ -74,7 +74,7 @@ const ipv4Of = (frame: Frame): Ipv4Packet | undefined =>
 
 const dhcpOf = (frame: Frame): DhcpMessage | undefined => {
   const payload = ipv4Of(frame)?.payload;
-  return payload?.kind === 'udp' ? payload.payload : undefined;
+  return payload?.kind === 'udp' && payload.payload.kind === 'dhcp' ? payload.payload : undefined;
 };
 
 const arpOf = (frame: Frame): ArpPacket | undefined =>

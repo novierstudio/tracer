@@ -70,6 +70,24 @@ export const LIMITED_BROADCAST = '255.255.255.255' as Ipv4Address;
 export const UNSPECIFIED_ADDRESS = '0.0.0.0' as Ipv4Address;
 
 /**
+ * The Ethernet address an IPv4 multicast group maps to: 01:00:5e, then the group's low 23 bits.
+ * Only the devices that joined the group take frames sent to it.
+ */
+export function multicastMac(group: Ipv4Address): MacAddress {
+  const [, second = 0, third = 0, fourth = 0] = group.split('.').map(Number);
+  const low = [second & 0x7f, third, fourth];
+  return ['01', '00', '5e', ...low.map((byte) => byte.toString(16).padStart(2, '0'))].join(
+    ':',
+  ) as MacAddress;
+}
+
+/** Whether an address is an IPv4 multicast group, 224.0.0.0 to 239.255.255.255. */
+export const isMulticast = (address: Ipv4Address) => {
+  const first = Number(address.split('.')[0]);
+  return first >= 224 && first <= 239;
+};
+
+/**
  * A UDP datagram. Unlike the other headers its payload's `kind` cannot stand in for a number,
  * since one protocol listens on one port and answers from another, so both ports are explicit.
  * The checksum is left to the wire encoding.
@@ -81,10 +99,10 @@ export type UdpDatagram = {
   readonly payload: UdpPayload;
 };
 
-export type UdpPayload = DhcpMessage;
+export type UdpPayload = DhcpMessage | RipMessage;
 
-/** Well-known ports. */
-export const UDP_PORT = { dhcpServer: 67, dhcpClient: 68 } as const;
+/** Well-known ports. RIP sends from and to 520. */
+export const UDP_PORT = { dhcpServer: 67, dhcpClient: 68, rip: 520 } as const;
 
 /** Option 53, which says what a DHCP message is for. */
 export type DhcpMessageType = DhcpMessage['type'];
@@ -144,6 +162,39 @@ export type DhcpMessage =
   | (DhcpHeader & { readonly type: 'ack' } & DhcpGrant)
   | (DhcpHeader & { readonly type: 'nak'; readonly serverId: Ipv4Address })
   | (DhcpHeader & { readonly type: 'release'; readonly serverId: Ipv4Address });
+
+/** The group RIPv2 routers send updates to. RIPv1 broadcasts them instead. */
+export const RIP_GROUP = '224.0.0.9' as Ipv4Address;
+
+/** A metric of 16 hops means unreachable: RIP counts no further. */
+export const RIP_INFINITY = 16;
+
+/** The most routes one RIP message carries. A bigger table goes out in several. */
+export const RIP_MAX_ENTRIES = 25;
+
+export type RipVersion = 1 | 2;
+
+/**
+ * A RIP message. A request asks a neighbour for its whole table. A response carries routes: the
+ * answer to a request, a periodic update, or a triggered update after a change.
+ */
+export type RipMessage =
+  | { readonly kind: 'rip'; readonly command: 'request'; readonly version: RipVersion }
+  | {
+      readonly kind: 'rip';
+      readonly command: 'response';
+      readonly version: RipVersion;
+      readonly entries: readonly RipEntry[];
+    };
+
+/** One route in a response. */
+export type RipEntry = {
+  readonly network: Ipv4Address;
+  /** RIPv2 carries the mask. RIPv1 has no room for one, so it is absent and the receiver infers it. */
+  readonly prefixLength?: PrefixLength;
+  /** Hops from the sender to the network, 1 to 15, or RIP_INFINITY for unreachable. */
+  readonly metric: number;
+};
 
 export type IcmpMessage = IcmpEcho | IcmpDestinationUnreachable | IcmpTimeExceeded;
 
