@@ -18,6 +18,14 @@ const GLYPHS: Record<DeviceIconName, ReactNode> = {
       <circle cx="34.5" cy="24" r="2" fill={ACCENT} stroke="none" />
     </>
   ),
+  'multilayer-switch': (
+    <>
+      <rect x="8" y="22" width="32" height="14" rx="3.5" />
+      <path d="M14 27v4M19 27v4M24 27v4M29 27v4" />
+      <circle cx="34.5" cy="29" r="2" fill={ACCENT} stroke="none" />
+      <path d="M15 15h18m-3.5-3.5L33 15l-3.5 3.5" stroke={ACCENT} />
+    </>
+  ),
   pc: (
     <>
       <rect x="9" y="11" width="30" height="20" rx="3" fill={ACCENT} fillOpacity="0.16" />

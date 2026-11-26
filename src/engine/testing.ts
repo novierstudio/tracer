@@ -18,7 +18,7 @@ import {
   type LinkSpec,
   type RoutedInterface,
   type StaticRoute,
-  type SwitchInterface,
+  type Switchport,
   type Topology,
 } from '@/model';
 import { expectOk } from '@/model/testing';
@@ -93,12 +93,12 @@ export function staticRoute(prefix: string, via: string): StaticRoute {
   };
 }
 
-export const access = (vlan: number): SwitchInterface['switchport'] => ({
+export const access = (vlan: number): Switchport => ({
   mode: 'access',
   vlan: VlanId.parse(vlan),
 });
 
-export const trunk = (nativeVlan = 1): SwitchInterface['switchport'] => ({
+export const trunk = (nativeVlan = 1): Switchport => ({
   mode: 'trunk',
   nativeVlan: VlanId.parse(nativeVlan),
 });
@@ -184,10 +184,7 @@ export function labBuilder(seed = 1) {
       return add(device);
     },
 
-    switch(
-      name: string,
-      switchports: Record<string, SwitchInterface['switchport']> = {},
-    ): DeviceId {
+    switch(name: string, switchports: Record<string, Switchport> = {}): DeviceId {
       const device = createDevice(
         {
           ...base,

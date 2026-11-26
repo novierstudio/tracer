@@ -33,6 +33,7 @@ import {
   type Topology,
 } from '@/model';
 import { applyLines, type IosDevice } from '@/cli';
+import type { DeviceModelId } from '@/devices/catalog';
 import { decryptPkt, type DecryptError } from './codec';
 import {
   readPtNetwork,
@@ -101,14 +102,20 @@ export function mapPktXml(xml: string, options: MapOptions = {}): Result<PktImpo
   return network.ok ? ok(mapNetwork(network.value, options)) : network;
 }
 
-type KindRule = { readonly kind: DeviceKind; readonly approximated: boolean };
+/** `model` replaces Packet Tracer's model name where Tracer needs its own to tell what a device can do. */
+type KindRule = {
+  readonly kind: DeviceKind;
+  readonly approximated: boolean;
+  readonly model?: DeviceModelId;
+};
 
-// A MultiLayerSwitch imports as a switch so that its links survive. Its routing waits for layer 3
-// switches (NOV-229). Types missing here, such as Printer or AccessPoint, are skipped.
+// A MultiLayerSwitch, such as a 3560-24PS, is Tracer's multilayer switch, so its `ip routing`,
+// routed ports and static routes replay. Types missing here, such as Printer or AccessPoint, are
+// skipped.
 const DEVICE_KINDS = new Map<string, KindRule>([
   ['Router', { kind: 'router', approximated: false }],
   ['Switch', { kind: 'switch', approximated: false }],
-  ['MultiLayerSwitch', { kind: 'switch', approximated: true }],
+  ['MultiLayerSwitch', { kind: 'switch', approximated: false, model: 'switch-l3-24' }],
   ['Pc', { kind: 'pc', approximated: false }],
   ['Laptop', { kind: 'pc', approximated: false }],
   ['Server', { kind: 'server', approximated: false }],
@@ -283,7 +290,7 @@ function mapDevice(pt: PtDevice, rule: KindRule, position: Point, ctx: Context):
 
   const fields = {
     id,
-    model: pt.model || pt.type,
+    model: rule.model ?? (pt.model || pt.type),
     position,
     powered: pt.power,
     ports: ports.map(({ port }) => port),

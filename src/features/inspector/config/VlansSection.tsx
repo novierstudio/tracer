@@ -54,8 +54,8 @@ export function VlansSection({ device }: { device: SwitchDevice }) {
   const [active, setActive] = useState<'vlans' | PortId>('vlans');
   const ids = vlanIds(device);
   const ports = device.ports.flatMap((port) => {
-    const settings = interfaces[port.id];
-    return settings ? [{ id: port.id, membership: membershipOf(settings.switchport) }] : [];
+    const switchport = interfaces[port.id]?.switchport;
+    return switchport ? [{ id: port.id, membership: membershipOf(switchport) }] : [];
   });
   const members = (vlan: VlanId) =>
     ports.filter(({ membership }) => membership.mode === 'access' && membership.vlan === vlan)
@@ -256,7 +256,7 @@ function PortMembershipRow({
 }) {
   const [error, setError] = useState<string>();
   const short = shortPortName(port);
-  const before = device.config.interfaces[port]!.switchport;
+  const before = device.config.interfaces[port]!.switchport!;
   const run = (next: PortMembership) => {
     onActivity();
     setError(ios.commit(switchportLines(port, before, next)));

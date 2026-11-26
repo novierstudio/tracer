@@ -54,7 +54,7 @@ const vlanIds = (device: SwitchDevice) =>
 function switchports(device: SwitchDevice): [Port, Switchport][] {
   return device.ports.flatMap((port): [Port, Switchport][] => {
     const config = device.config.interfaces[port.id];
-    return config ? [[port, config.switchport]] : [];
+    return config?.switchport ? [[port, config.switchport]] : [];
   });
 }
 

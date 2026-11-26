@@ -1,5 +1,13 @@
 // No runtime imports: the simulation worker uses these, and must not pull in zod.
-import type { BridgePriority, PortId, SubinterfaceId, Switchport, VlanRange } from './topology';
+import type {
+  BridgePriority,
+  PortId,
+  SubinterfaceId,
+  SwitchedInterface,
+  SwitchInterface,
+  Switchport,
+  VlanRange,
+} from './topology';
 import type { VlanId } from './values';
 
 export const MAX_VLAN = 4094 as VlanId;
@@ -54,6 +62,10 @@ export function vlanAllowed(allowed: readonly VlanRange[] | undefined, vlan: Vla
     allowed === undefined || allowed.some((range) => range.first <= vlan && vlan <= range.last)
   );
 }
+
+/** Whether a switch port switches, rather than being a multilayer switch's routed port. */
+export const isSwitched = (port: SwitchInterface): port is SwitchedInterface =>
+  port.switchport !== undefined;
 
 /** Whether a switchport forwards frames of `vlan`: its access VLAN, or a VLAN its trunk allows. */
 export function carriesVlan(switchport: Switchport, vlan: VlanId): boolean {

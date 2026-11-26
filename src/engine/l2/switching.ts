@@ -153,7 +153,7 @@ export const switchingModule: SimModule<SwitchState> = {
     if (frame.kind !== 'ethernet' || device.kind !== 'switch') return;
     const interfaces = device.config.interfaces;
     const arrivedOn = interfaces[ingress];
-    const vlan = arrivedOn && ingressVlan(arrivedOn.switchport, frame);
+    const vlan = arrivedOn?.switchport && ingressVlan(arrivedOn.switchport, frame);
     if (vlan === undefined) return;
 
     prune(state, now);

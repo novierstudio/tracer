@@ -169,7 +169,7 @@ export function pathCost(device: Switch, port: PortId): number {
 /** PortFast takes effect on an access port only, as on IOS. */
 export function isEdge(device: Switch, port: PortId): boolean {
   const config = device.config.interfaces[port];
-  return config?.portfast === true && config.switchport.mode === 'access';
+  return config?.portfast === true && config.switchport?.mode === 'access';
 }
 
 const isRoot = (instance: Instance) => instance.rootPort === undefined;
