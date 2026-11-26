@@ -7,6 +7,7 @@ import type {
   PingOptions,
   ProbeHandle,
   Route,
+  RoutingProtocols,
   SpanningTreeVlan,
   TraceListener,
   TraceOptions,
@@ -30,6 +31,7 @@ export interface EngineAnswers {
   readonly spanningTree: readonly SpanningTreeVlan[];
   /** A router's DHCP leases in force. */
   readonly dhcpBindings: readonly DhcpBindingEntry[];
+  readonly protocols: RoutingProtocols;
 }
 
 export type EngineQueryKind = keyof EngineAnswers;

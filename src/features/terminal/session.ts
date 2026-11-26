@@ -40,7 +40,14 @@ type Remote<F> = F extends (...args: infer A) => infer R ? (...args: A) => Promi
 /** The simulation's queries that show commands read, as the worker's client offers them. */
 export type SimQueries = {
   readonly [
-    K in 'routes' | 'arpTable' | 'macTable' | 'portStates' | 'spanningTree' | 'dhcpBindings'
+    K in
+      | 'routes'
+      | 'arpTable'
+      | 'macTable'
+      | 'portStates'
+      | 'spanningTree'
+      | 'dhcpBindings'
+      | 'routingProtocols'
   ]: Remote<SimAPI[K]>;
 };
 
@@ -71,6 +78,7 @@ export function engineSource(sim: SimLink, device: DeviceId): EngineSource {
     clock: async () => sim.now(),
     spanningTree: () => sim.spanningTree(device).then(valueOf),
     dhcpBindings: () => sim.dhcpBindings(device).then(valueOf),
+    protocols: () => sim.routingProtocols(device).then(valueOf),
   };
 }
 

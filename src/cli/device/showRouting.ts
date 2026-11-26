@@ -3,7 +3,7 @@ import { ipv4ToUint32, prefixMask, uint32ToIpv4, type PrefixLength } from '../..
 import type { SwitchDevice } from './context';
 import { ciscoMac } from './show';
 
-const NO_ENGINE = ['% The simulation is not running, so there is no live state to show.'];
+export const NO_ENGINE = ['% The simulation is not running, so there is no live state to show.'];
 
 const LEGEND = [
   'Codes: L - local, C - connected, S - static, R - RIP, M - mobile, B - BGP',
