@@ -66,6 +66,7 @@ import {
 } from './showSwitching';
 import { execCommands } from './exec';
 import { dhcpCommands } from './dhcp';
+import { ospfCommands } from './ospf';
 import { ripCommands } from './rip';
 
 const EXEC = ['user-exec', 'priv-exec'] as const;
@@ -78,6 +79,7 @@ const CONFIG = [
   'vlan-config',
   'rip-config',
   'dhcp-config',
+  'ospf-config',
 ] as const;
 const GLOBAL = ['global-config'] as const;
 const IF = ['interface-config'] as const;
@@ -540,8 +542,12 @@ export const commonCommands = [
         return ctx.reject('% Removal of physical interfaces is not permitted');
       }
       // IOS drops the config that names a deleted interface.
-      const rip = device.kind === 'router' ? device.config.rip : undefined;
-      if (rip) rip.passiveInterfaces = rip.passiveInterfaces.filter((id) => id !== name);
+      if (device.kind === 'router') {
+        for (const routing of [device.config.rip, device.config.ospf]) {
+          if (routing)
+            routing.passiveInterfaces = routing.passiveInterfaces.filter((id) => id !== name);
+        }
+      }
       return NOTHING;
     },
   }),
@@ -795,6 +801,7 @@ export const routerCommands = [
   ...encapsulationCommands(),
   ...helperAddressCommands(),
   ...dhcpCommands,
+  ...ospfCommands,
   ...ripCommands,
 ];
 

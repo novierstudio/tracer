@@ -8,6 +8,7 @@ const IF: Mode = { kind: 'interface-config', interfaces: [g00] };
 const IF_RANGE: Mode = { kind: 'interface-config', interfaces: [g00, g01] };
 const LINE: Mode = { kind: 'line-config', line: { kind: 'console' } };
 const ROUTER: Mode = { kind: 'rip-config' };
+const OSPF: Mode = { kind: 'ospf-config', processId: 1 };
 
 describe('modes', () => {
   it.each<[Mode, string]>([
@@ -18,6 +19,7 @@ describe('modes', () => {
     [IF_RANGE, 'R1(config-if-range)#'],
     [LINE, 'R1(config-line)#'],
     [ROUTER, 'R1(config-router)#'],
+    [OSPF, 'R1(config-router)#'],
   ])('prompt for %o is %s', (mode, expected) => {
     expect(prompt('R1', mode)).toBe(expected);
   });
@@ -29,6 +31,7 @@ describe('modes', () => {
     [IF, GLOBAL_CONFIG],
     [LINE, GLOBAL_CONFIG],
     [ROUTER, GLOBAL_CONFIG],
+    [OSPF, GLOBAL_CONFIG],
   ])('exit from %o goes to %o', (from, to) => {
     expect(exitMode(from)).toEqual(to);
   });
@@ -40,6 +43,7 @@ describe('modes', () => {
     [IF, PRIV_EXEC],
     [LINE, PRIV_EXEC],
     [ROUTER, PRIV_EXEC],
+    [OSPF, PRIV_EXEC],
   ])('end or Ctrl+Z from %o goes to %o', (from, to) => {
     expect(endMode(from)).toEqual(to);
   });

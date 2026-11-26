@@ -80,6 +80,14 @@ describe('replaying a Packet Tracer running-config', () => {
       enableSecret: '$1$mERr$hx5rVt7rPNoS4wqbXKX7m0',
       enablePassword: 'cisco',
       bannerMotd: '\nAuthorized access only.\nDisconnect now if you are not an authorized user.\n',
+      ospf: {
+        processId: 1,
+        networks: [
+          { address: '192.168.10.0', wildcard: '0.0.0.255', area: 0 },
+          { address: '10.0.0.0', wildcard: '0.0.0.3', area: 0 },
+        ],
+        passiveInterfaces: [],
+      },
       staticRoutes: [
         {
           prefix: { address: '0.0.0.0', prefixLength: 0 },
@@ -129,8 +137,6 @@ describe('replaying a Packet Tracer running-config', () => {
       ' ip nat outside',
       'router ospf 1',
       ' log-adjacency-changes',
-      ' network 192.168.10.0 0.0.0.255 area 0',
-      ' network 10.0.0.0 0.0.0.3 area 0',
       'ip nat inside source list 1 interface Serial0/0/0 overload',
       'ip classless',
       'ip flow-export version 9',

@@ -11,6 +11,7 @@ import {
   type InterfaceId,
   type InterfaceType,
   type LineConfig,
+  type OspfConfig,
   type Port,
   type RipConfig,
   type RoutedInterface,
@@ -122,13 +123,15 @@ function interfaceBlock(entry: InterfaceEntry): string[] {
       const { vlan, native } = entry.config.encapsulation;
       lines.push(` encapsulation dot1Q ${vlan}${native ? ' native' : ''}`);
     }
-    const { ipv4, helperAddresses = [] } = entry.config;
+    const { ipv4, helperAddresses = [], ospfCost, ospfPriority } = entry.config;
     lines.push(
       ipv4
         ? ` ip address ${ipv4.address} ${formatSubnetMask(ipv4.prefixLength)}`
         : ' no ip address',
       ...helperAddresses.map((address) => ` ip helper-address ${address}`),
     );
+    if (ospfCost !== undefined) lines.push(` ip ospf cost ${ospfCost}`);
+    if (ospfPriority !== undefined) lines.push(` ip ospf priority ${ospfPriority}`);
   }
   if (entry.kind !== 'subinterface') {
     if (entry.config.duplex) lines.push(` duplex ${entry.config.duplex}`);
@@ -160,6 +163,18 @@ function spanningTreeLines(config: SwitchConfig): string[] {
     ...[...byPriority].map(
       ([priority, vlans]) =>
         `spanning-tree vlan ${formatVlans(normalizeVlans(vlans))} priority ${priority}`,
+    ),
+  ];
+}
+
+/** `router ospf` and its settings, in IOS's order. */
+function ospfBlock(ospf: OspfConfig): string[] {
+  return [
+    `router ospf ${ospf.processId}`,
+    ...(ospf.routerId === undefined ? [] : [` router-id ${ospf.routerId}`]),
+    ...ospf.passiveInterfaces.map((id) => ` passive-interface ${id}`),
+    ...ospf.networks.map(
+      ({ address, wildcard, area }) => ` network ${address} ${wildcard} area ${area}`,
     ),
   ];
 }
@@ -285,6 +300,9 @@ export function runningConfig(device: IosDevice): string[] {
   out.push('!');
   if (device.kind === 'switch') out.push(...spanningTreeLines(device.config), '!');
   for (const entry of interfaceEntries(device)) out.push(...interfaceBlock(entry), '!');
+  if (device.kind === 'router' && device.config.ospf) {
+    out.push(...ospfBlock(device.config.ospf), '!');
+  }
   if (device.kind === 'router' && device.config.rip) out.push(...ripBlock(device.config.rip), '!');
   if (device.kind === 'router' && device.config.staticRoutes.length > 0) {
     out.push(...device.config.staticRoutes.map(routeLine), '!');
