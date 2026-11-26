@@ -2,6 +2,7 @@ import {
   ChevronLeftIcon,
   GlobeIcon,
   NetworkIcon,
+  MonitorCogIcon,
   PowerIcon,
   SquareTerminalIcon,
   type LucideIcon,
@@ -23,9 +24,10 @@ import { Kbd } from '@/ui/kbd';
 import { addressPort, configAddressing, type HostDevice } from './format';
 import { HostPrompt } from './HostPrompt';
 import { hostBackend } from './registry';
+import { TerminalApp } from './TerminalApp';
 import { WebBrowser } from './WebBrowser';
 
-type App = 'ip' | 'prompt' | 'browser';
+type App = 'ip' | 'prompt' | 'terminal' | 'browser';
 
 const APPS: Record<App, { title: string; blurb: string; icon: LucideIcon; tile: string }> = {
   ip: {
@@ -40,6 +42,12 @@ const APPS: Record<App, { title: string; blurb: string; icon: LucideIcon; tile: 
     icon: SquareTerminalIcon,
     tile: 'bg-fg-1 text-surface-1',
   },
+  terminal: {
+    title: 'Terminal',
+    blurb: 'A console over the console cable',
+    icon: MonitorCogIcon,
+    tile: 'bg-proto-tcp text-surface-1',
+  },
   browser: {
     title: 'Web Browser',
     blurb: 'Open pages from HTTP servers',
@@ -47,6 +55,10 @@ const APPS: Record<App, { title: string; blurb: string; icon: LucideIcon; tile: 
     tile: 'bg-proto-icmp text-surface-1',
   },
 };
+
+/** A server has no RS232 port, so no Terminal. */
+const appsOf = (device: HostDevice) =>
+  (Object.keys(APPS) as App[]).filter((id) => id !== 'terminal' || device.kind === 'pc');
 
 // The app each host had open, so stepping between devices comes back to it.
 const openApps = new Map<DeviceId, App>();
@@ -107,6 +119,8 @@ function Desktop({ device, focusPrompt }: Props) {
         </div>
       ) : app === 'browser' ? (
         <WebBrowser device={device.id} backend={hostBackend} />
+      ) : app === 'terminal' ? (
+        <TerminalApp device={device.id} autoFocus={openedNow || focusPrompt} />
       ) : (
         <>
           <div className="min-h-0 flex-1 pt-2 pr-1 pb-2 pl-3">
@@ -127,7 +141,7 @@ function Home({ device, onOpen }: { device: HostDevice; onOpen: (app: App) => vo
     <div className="flex flex-col gap-3 px-3 py-3">
       <NetworkCard device={device} />
       <ul aria-label="Apps" className="grid grid-cols-2 gap-2">
-        {(Object.keys(APPS) as App[]).map((id) => {
+        {appsOf(device).map((id) => {
           const { title, blurb, icon: Icon, tile } = APPS[id];
           return (
             <li key={id}>
