@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { EventId } from '@/engine/events';
-import { describeFrame, protocolOf, visibleFrames } from './protocols';
+import type { Ipv6Packet } from '@/engine/pdu6';
+import { UNSPECIFIED_IPV6 } from '@/model/ipv6';
+import { describeFrame, PROTOCOLS, protocolOf, visibleFrames } from './protocols';
 import { currentFrames, receiveBatch, simulationStore, type SimulationState } from './store';
 import {
   arpRequest,
@@ -9,17 +11,24 @@ import {
   dnsNoSuchName,
   dnsQuery,
   echoRequest,
+  echoRequest6,
   hop,
+  neighborAdvertisement,
+  neighborSolicitation,
   ospfAck,
   ospfDbd,
   ospfHello,
   ospfLsr,
   ospfLsu,
   ospfPacket,
+  PC1_IPV6,
+  R1_IPV6,
   ripPacket,
   ripRequest,
   ripV1Response,
   ripV2Response,
+  routerAdvertisement,
+  routerSolicitation,
   webPacket,
   webSession,
 } from './testing';
@@ -110,6 +119,76 @@ describe('protocol filters', () => {
     expect(describeFrame(ospf(ospfLsr))).toBe('OSPF LS request, 2 LSAs');
     expect(describeFrame(ospf(ospfLsu))).toBe('OSPF LS update from 1.1.1.1, 2 LSAs');
     expect(describeFrame(ospf(ospfAck))).toBe('OSPF LS ack, 1 LSA');
+  });
+
+  it('classifies Neighbor Discovery as NDP and other ICMPv6 as ICMPv6, and says what each does', () => {
+    const v6 = (payload: Ipv6Packet) => hop({ id: 1, from: 'PC1', to: 'SW1', sentAt: 1, payload });
+    const original = { ...echoRequest6, hopLimit: 1 };
+    const error = (payload: Ipv6Packet['payload']): Ipv6Packet => ({
+      ...echoRequest6,
+      src: R1_IPV6,
+      dst: echoRequest6.src,
+      hopLimit: 64,
+      payload,
+    });
+    const timeExceeded = error({ kind: 'icmpv6', type: 'time-exceeded', original });
+    const unreachable = error({
+      kind: 'icmpv6',
+      type: 'destination-unreachable',
+      code: 'no-route',
+      original,
+    });
+    const reply = {
+      ...error({ kind: 'icmpv6', type: 'echo-reply', id: 1, seq: 1 }),
+      src: echoRequest6.dst,
+    };
+    const dad: Ipv6Packet = {
+      ...neighborSolicitation,
+      src: UNSPECIFIED_IPV6,
+      payload: { kind: 'icmpv6', type: 'neighbor-solicitation', target: PC1_IPV6 },
+    };
+    const packets = [
+      echoRequest6,
+      reply,
+      timeExceeded,
+      unreachable,
+      neighborSolicitation,
+      dad,
+      neighborAdvertisement,
+      routerSolicitation,
+      routerAdvertisement,
+    ];
+    expect(packets.map((packet) => protocolOf(v6(packet).frame))).toEqual([
+      'icmpv6',
+      'icmpv6',
+      'icmpv6',
+      'icmpv6',
+      'ndp',
+      'ndp',
+      'ndp',
+      'ndp',
+      'ndp',
+    ]);
+    expect(packets.map((packet) => describeFrame(v6(packet)))).toEqual([
+      'Echo request 2001:db8:1::10 → 2001:db8:2::10, seq 1, hop limit 128',
+      'Echo reply 2001:db8:2::10 → 2001:db8:1::10, seq 1, hop limit 64',
+      'Hop limit exceeded in transit 2001:db8:1::1 → 2001:db8:1::10',
+      'Destination unreachable (no route) 2001:db8:1::1 → 2001:db8:1::10',
+      'Neighbor solicitation: who has 2001:db8:1::1? Tell 2001:db8:1::10',
+      'Neighbor solicitation: is 2001:db8:1::10 in use? (duplicate address check)',
+      'Neighbor advertisement: 2001:db8:1::1 is at 00:d0:58:aa:bb:01 (router)',
+      'Router solicitation from fe80::2d0:97ff:fe12:3456',
+      'Router advertisement from fe80::1: prefix 2001:db8:1::/64',
+    ]);
+    const serial = { ...v6(echoRequest6), frame: { kind: 'hdlc', payload: echoRequest6 } as const };
+    expect(protocolOf(serial.frame)).toBe('icmpv6');
+    expect(describeFrame(serial)).toBe(
+      'Echo request 2001:db8:1::10 → 2001:db8:2::10, seq 1, hop limit 128',
+    );
+    const frames = packets.map((packet, index) => ({ ...v6(packet), id: index as EventId }));
+    expect(visibleFrames(frames, ['ndp']).map((event) => event.id)).toEqual([0, 1, 2, 3]);
+    expect(visibleFrames(frames, ['icmpv6']).map((event) => event.id)).toEqual([4, 5, 6, 7, 8]);
+    expect([PROTOCOLS.icmpv6.label, PROTOCOLS.ndp.label]).toEqual(['ICMPv6', 'NDP']);
   });
 
   it('classifies a segment that carries HTTP as HTTP, and a bare one as TCP', () => {

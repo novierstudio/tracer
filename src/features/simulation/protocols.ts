@@ -12,6 +12,7 @@ import type {
 } from '@/engine/pdu';
 import { isNdp, type Ipv6Packet } from '@/engine/pdu6';
 import type { TcpSegment } from '@/engine/tcp';
+import { formatIpv6Cidr, UNSPECIFIED_IPV6 } from '@/model/ipv6';
 import { describeDns, describeHttp, describeTcp } from './pdu/web';
 
 /** The protocol a frame shows as: the innermost one the engine models. */
@@ -204,7 +205,32 @@ function describePacket(packet: Ipv4Packet): string {
 }
 
 function describeIpv6(packet: Ipv6Packet): string {
-  return `IPv6 ${packet.src} → ${packet.dst}, ${packet.payload.type}`;
+  const message = packet.payload;
+  const route = `${packet.src} → ${packet.dst}`;
+  switch (message.type) {
+    case 'echo-request':
+      return `Echo request ${route}, seq ${message.seq}, hop limit ${packet.hopLimit}`;
+    case 'echo-reply':
+      return `Echo reply ${route}, seq ${message.seq}, hop limit ${packet.hopLimit}`;
+    case 'destination-unreachable':
+      return `Destination unreachable (${message.code === 'no-route' ? 'no route' : 'address unreachable'}) ${route}`;
+    case 'time-exceeded':
+      return `Hop limit exceeded in transit ${route}`;
+    case 'neighbor-solicitation':
+      return packet.src === UNSPECIFIED_IPV6
+        ? `Neighbor solicitation: is ${message.target} in use? (duplicate address check)`
+        : `Neighbor solicitation: who has ${message.target}? Tell ${packet.src}`;
+    case 'neighbor-advertisement':
+      return `Neighbor advertisement: ${message.target} is at ${message.targetMac}${message.router ? ' (router)' : ''}`;
+    case 'router-solicitation':
+      return `Router solicitation from ${packet.src}`;
+    case 'router-advertisement': {
+      const prefixes = message.prefixes.map((info) => formatIpv6Cidr(info.prefix));
+      return prefixes.length > 0
+        ? `Router advertisement from ${packet.src}: prefix ${prefixes.join(', ')}`
+        : `Router advertisement from ${packet.src}, no prefix`;
+    }
+  }
 }
 
 /** The Info column: what the frame says, in a line a student can read. */
