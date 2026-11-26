@@ -14,6 +14,7 @@ const HEADLINE_PING: Record<string, string> = {
   'two-lans-router': '192.168.2.10',
   'static-routes-serial': '192.168.2.10',
   'router-on-a-stick': '192.168.20.10',
+  'layer3-switch': '192.168.20.10',
   'stp-triangle': '192.168.1.11',
   'dhcp-router': '192.168.1.1',
   'ospf-three-routers': '192.168.3.10',
