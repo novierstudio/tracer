@@ -10,8 +10,11 @@ import { STACKS } from '@/engine/stacks';
 import { labBuilder } from '@/engine/testing';
 import { createIdSource, type DeviceId } from '@/model';
 import { createEditorStore } from '@/model/store';
+import type { HostBackend } from '@/features/desktop/backend';
+import { createHostPromptRegistry } from '@/features/desktop/registry';
+import { PROMPT } from '@/features/desktop/tty';
 import { createConsoleRegistry } from './registry';
-import { createVtyRegistry } from './remote';
+import { createVtyRegistry, deviceStack } from './remote';
 import type { SimLink } from './session';
 import type { Tty } from './tty';
 
@@ -40,7 +43,11 @@ function lab() {
     'GigabitEthernet0/0': '10.0.12.2/24',
     'GigabitEthernet0/1': '10.0.23.2/24',
   });
-  const r3 = build.router('R3', { 'GigabitEthernet0/0': '10.0.23.3/24' });
+  const r3 = build.router('R3', {
+    'GigabitEthernet0/0': '10.0.23.3/24',
+    'GigabitEthernet0/1': '10.0.30.3/24',
+  });
+  const pc = build.host('pc', 'PC1', '10.0.30.10/24', '10.0.30.3');
   const configure = (id: DeviceId, lines: readonly string[]) =>
     build.edit(id, (device) => {
       const { config, errors } = applyLines(device as IosDevice, lines);
@@ -61,6 +68,7 @@ function lab() {
   ]);
   build.connect(r1, 'GigabitEthernet0/0', r2, 'GigabitEthernet0/0');
   build.connect(r2, 'GigabitEthernet0/1', r3, 'GigabitEthernet0/0');
+  build.connect(pc, 'FastEthernet0', r3, 'GigabitEthernet0/1');
 
   const store = createEditorStore({ topology: build.topology, ids: createIdSource(4) });
   const engine = createEngine({ seed: 1, stacks: STACKS, linkDelay: ms(1) });
@@ -82,6 +90,9 @@ function lab() {
   } as unknown as SimLink;
   const vty = createVtyRegistry();
   const consoles = createConsoleRegistry(store, async () => link, vty);
+  const prompts = createHostPromptRegistry(store, {} as HostBackend, () =>
+    deviceStack({ store, engine: async () => link, vty }),
+  );
 
   /** Types a line and runs the simulation until the console shows a prompt again. */
   const type = async (tty: Tty, line: string) => {
@@ -90,11 +101,12 @@ function lab() {
     for (let i = 0; i < 5000; i++) {
       const added = tty.transcript.slice(before);
       if (/(?:[>#]|Password: |Username: )$/.test(added) && added.includes('\r\n')) return;
+      if (added.includes('\r\n') && added.endsWith(PROMPT)) return;
       if (engine.nextTime() !== undefined) engine.step();
       await new Promise(setImmediate);
     }
   };
-  return { consoles, r1, r2, r3, vty, engine, type };
+  return { consoles, prompts, pc, r1, r2, r3, vty, engine, type };
 }
 
 describe('Telnet and SSH between routers', () => {
@@ -186,6 +198,39 @@ describe('Telnet and SSH between routers', () => {
       '',
       '[Connection to 10.0.12.1 closed by foreign host]',
       'R2>',
+    ]);
+  });
+});
+
+describe('Telnet and SSH from a PC', () => {
+  it('logs in to R3 with ssh -l, and exit returns to the Command Prompt', async () => {
+    const { prompts, pc, r3, vty, type } = lab();
+    const tty = prompts.get(pc)!;
+    await type(tty, 'ssh -l admin 10.0.30.3');
+    await type(tty, 'class');
+    expect(vty.list(r3)).toEqual([{ line: 0, protocol: 'ssh', peer: '10.0.30.10', user: 'admin' }]);
+    await type(tty, 'exit');
+    expect((await rows(tty)).slice(3)).toEqual([
+      'C:\\>ssh -l admin 10.0.30.3',
+      '',
+      'Password:',
+      'R3#exit',
+      '',
+      '[Connection to 10.0.30.3 closed by foreign host]',
+      'C:\\>',
+    ]);
+    expect(vty.list(r3)).toEqual([]);
+  });
+
+  it('is refused Telnet by a router that takes SSH only', async () => {
+    const { prompts, pc, type } = lab();
+    const tty = prompts.get(pc)!;
+    await type(tty, 'telnet 10.0.30.3');
+    expect((await rows(tty)).slice(-4)).toEqual([
+      'C:\\>telnet 10.0.30.3',
+      'Trying 10.0.30.3 ...',
+      '% Connection refused by remote host',
+      'C:\\>',
     ]);
   });
 });

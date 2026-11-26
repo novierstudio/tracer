@@ -16,6 +16,9 @@ export type HostCommand =
   | { kind: 'arp-clear'; address?: Ipv4Address }
   /** Without a server, the host's own DNS server. */
   | { kind: 'nslookup'; name: DomainName; server?: Ipv4Address }
+  /** `telnet <ip>` or `ssh -l <user> <ip>`: a session on a router or switch's vty line. */
+  | { kind: 'remote'; protocol: 'telnet'; target: Ipv4Address }
+  | { kind: 'remote'; protocol: 'ssh'; target: Ipv4Address; user: string }
   | { kind: 'help' }
   | { kind: 'cls' };
 
@@ -97,6 +100,9 @@ export const NSLOOKUP_USAGE = [
   '',
 ];
 
+const TELNET_USAGE = ['', 'Usage: telnet target', ''];
+const SSH_USAGE = ['', 'Usage: SSH -l username target', ''];
+
 export const HELP = [
   '',
   'Available commands:',
@@ -113,6 +119,8 @@ export const HELP = [
   '  ipv6config /all     Also show the MAC address and DNS servers.',
   "  nslookup <name>     Ask the DNS server for a name's address. Add an IP to ask that server.",
   '  ping <ip>           Send 4 echo requests. -n <count> sends more or fewer, -t until Ctrl+C.',
+  '  ssh -l <user> <ip>  Log in to a router or switch over SSH.',
+  '  telnet <ip>         Log in to a router or switch over Telnet.',
   '  tracert <ip>        List the routers on the way to an address, hop by hop.',
   '',
   'Up and Down recall earlier commands. Ctrl+C stops a running command.',
@@ -249,6 +257,26 @@ function parseNslookup(args: readonly string[]): Result<HostCommand, ParseError>
   return ok({ kind: 'nslookup', name: domain.data, server: address.data });
 }
 
+function parseTelnet(args: readonly string[]): Result<HostCommand, ParseError> {
+  const [target, ...rest] = args;
+  if (target === undefined || rest.length > 0) return err(TELNET_USAGE);
+  const address = Ipv4Address.safeParse(target);
+  if (!address.success)
+    return err([`% Unknown command or computer name, or unable to find computer address`]);
+  return ok({ kind: 'remote', protocol: 'telnet', target: address.data });
+}
+
+function parseSsh(args: readonly string[]): Result<HostCommand, ParseError> {
+  const [option, user, target, ...rest] = args;
+  if (option !== '-l' || user === undefined || target === undefined || rest.length > 0) {
+    return err(SSH_USAGE);
+  }
+  const address = Ipv4Address.safeParse(target);
+  if (!address.success)
+    return err([`% Unknown command or computer name, or unable to find computer address`]);
+  return ok({ kind: 'remote', protocol: 'ssh', target: address.data, user });
+}
+
 export function parseCommand(line: string): Result<HostCommand, ParseError> {
   const [name, ...args] = line.trim().split(/\s+/).filter(Boolean);
   if (name === undefined) return ok({ kind: 'empty' });
@@ -265,6 +293,10 @@ export function parseCommand(line: string): Result<HostCommand, ParseError> {
       return parseArp(args);
     case 'nslookup':
       return parseNslookup(args);
+    case 'telnet':
+      return parseTelnet(args);
+    case 'ssh':
+      return parseSsh(args);
     case 'help':
       return ok({ kind: 'help' });
     case 'cls':

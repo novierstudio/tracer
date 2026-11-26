@@ -6,7 +6,7 @@ import {
   type LineState,
 } from '@/features/terminal/discipline';
 import type { TerminalSession } from '@/features/terminal/session';
-import { trimTranscript, type Tty } from '@/features/terminal/tty';
+import { createTty, trimTranscript, type Tty } from '@/features/terminal/tty';
 import type { HostShell, ShellIo } from './shell';
 
 export const PROMPT = 'C:\\>';
@@ -29,6 +29,8 @@ export function createHostTty(shell: HostShell): HostTty {
   let line: LineState = initialState(80, 24);
   let transcript = GREETING.map((text) => `${text}\r\n`).join('') + PROMPT;
   let job: AbortController | undefined;
+  /** A Telnet or SSH login the running job handed the keyboard to. */
+  let attached: Tty | undefined;
   const views = new Set<(out: string) => void>();
 
   const write = (out: string) => {
@@ -52,6 +54,17 @@ export function createHostTty(shell: HostShell): HostTty {
         if (job !== controller) return;
         transcript = '';
         for (const view of views) view(CLEAR);
+      },
+      attach: (remote, done) => {
+        if (job !== controller) return Promise.resolve();
+        const inner = createTty(remote);
+        write(inner.transcript);
+        const unsubscribe = inner.subscribe(write);
+        attached = inner;
+        return done.finally(() => {
+          unsubscribe();
+          if (attached === inner) attached = undefined;
+        });
       },
     };
     // After this tick, so the discipline's echo of the line lands before any output.
@@ -99,6 +112,7 @@ export function createHostTty(shell: HostShell): HostTty {
       return line.history;
     },
     input(data, { cols, rows }) {
+      if (attached) return attached.input(data, { cols, rows });
       if (cols !== line.cols || rows !== line.rows) {
         line = reduce(line, { kind: 'resize', cols, rows }, session).state;
       }

@@ -1,4 +1,6 @@
 import { addressOf } from '@/engine/l3/hostAddress';
+import type { RemoteStack } from '@/features/terminal/remote';
+import type { TerminalSession } from '@/features/terminal/session';
 import { isIpv6 } from '@/model/ipv6';
 import type { HostBackend, PingReply, TraceProbe } from './backend';
 import { HELP, parseCommand } from './commands';
@@ -27,6 +29,11 @@ export type ShellIo = {
   /** Writes part of a line, or more. `\n` breaks lines. */
   write(text: string): void;
   clear(): void;
+  /**
+   * Hands the keyboard to `session`, a remote login, until `done`: what it prints shows here and
+   * the keys typed go to it.
+   */
+  attach(session: TerminalSession, done: Promise<void>): Promise<void>;
   readonly signal: AbortSignal;
 };
 
@@ -38,6 +45,8 @@ export type ShellContext = {
   host(): HostView | undefined;
   backend: HostBackend;
   wallClock?: () => number;
+  /** A fresh stack for a Telnet or SSH login. Without one, the prompt cannot log in anywhere. */
+  remote?: () => RemoteStack;
 };
 
 /** A command line, run to completion. */
@@ -66,7 +75,12 @@ const NOT_DHCP = [
   '',
 ];
 
-export function hostShell({ host, backend, wallClock = Date.now }: ShellContext): HostShell {
+export function hostShell({
+  host,
+  backend,
+  wallClock = Date.now,
+  remote,
+}: ShellContext): HostShell {
   return async (line, io) => {
     const parsed = parseCommand(line);
     if (!parsed.ok) return io.print(block(parsed.error));
@@ -186,6 +200,21 @@ export function hostShell({ host, backend, wallClock = Date.now }: ShellContext)
           ]);
           io.print(pingSummary(command.target, replies));
           return io.print(io.signal.aborted ? ['Control-C', '^C', ''] : ['']);
+        }
+        case 'remote': {
+          if (!remote) return io.print(['% Unable to connect: no network.', '']);
+          const stack = remote();
+          const user = command.protocol === 'ssh' ? { user: command.user } : {};
+          const request = { protocol: command.protocol, target: command.target, ...user };
+          const output = stack.hooks.connect(device.id, request);
+          // Ctrl+C while connecting gives the prompt back.
+          void aborted(io.signal).then(() => output.abort());
+          await output.start((text) => io.write(text));
+          if (stack.depth === 0 || io.signal.aborted) return;
+          await Promise.race([io.attach(stack.session, stack.emptied()), aborted(io.signal)]);
+          // The device went away mid-session: hang up whatever is still open.
+          while (stack.depth > 0) stack.hooks.disconnect();
+          return;
         }
         case 'tracert': {
           if (!ready) return io.print(['Unable to contact IP driver. General failure.', '']);
