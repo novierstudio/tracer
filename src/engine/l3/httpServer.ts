@@ -26,7 +26,7 @@ export const httpListening = (ctx: IpContext, port: number) =>
 
 /** A request arrived on a connection to the HTTP service: answer it, then close, as HTTP/1.0 did. */
 export function onHttpRequest(ctx: IpContext, connection: TcpConnection, message: TcpPayload) {
-  if (message.type !== 'request' || ctx.device.kind !== 'server') return;
+  if (message.kind !== 'http' || message.type !== 'request' || ctx.device.kind !== 'server') return;
   const path = message.path.split(/[?#]/)[0]!;
   const response: HttpResponse = PAGE_PATHS.has(path)
     ? {

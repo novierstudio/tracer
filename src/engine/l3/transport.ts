@@ -1,8 +1,9 @@
-import type { Ipv4Address } from '@/model';
+import type { Ipv4Address, RemoteProtocol } from '@/model';
 import { EPHEMERAL_PORTS } from '../tcp';
 import type { IpContext } from './context';
 import type { DnsListener } from './dnsResolver';
 import type { BrowseTarget, FetchListener } from './httpClient';
+import type { TerminalListener } from './terminal';
 
 /**
  * Where a TCP connection is. A closed connection is not kept, and Tracer skips TIME-WAIT: the
@@ -18,9 +19,15 @@ export type TcpConnectionState =
   | 'closing'
   | 'last-ack';
 
-/** What reads a connection's data and hears how it ends: the HTTP server, or a page load. */
+/**
+ * What reads a connection's data and hears how it ends: the HTTP server, a page load, a vty line
+ * a Telnet or SSH client reached, or that client's end.
+ */
 export type TcpOwner =
-  { readonly kind: 'http-server' } | { readonly kind: 'fetch'; readonly fetch: number };
+  | { readonly kind: 'http-server' }
+  | { readonly kind: 'fetch'; readonly fetch: number }
+  | { readonly kind: 'vty'; readonly protocol: RemoteProtocol; readonly line: number }
+  | { readonly kind: 'terminal'; readonly terminal: number };
 
 export type TcpConnection = {
   readonly id: number;
@@ -56,13 +63,24 @@ export type Fetch = {
   readonly listener: FetchListener;
 };
 
+/** A Telnet or SSH client: the connection it opened, once it has one, and who hears about it. */
+export type Terminal = {
+  readonly id: number;
+  readonly protocol: RemoteProtocol;
+  readonly listener: TerminalListener;
+  connection?: number;
+  /** Set once the far end accepts. */
+  opened?: true;
+};
+
 /** A device's transport layer and the applications on it: plain data, so snapshots copy it. */
 export type Transport = {
   readonly connections: Map<number, TcpConnection>;
   /** By the local port each query went from. */
   readonly queries: Map<number, PendingQuery>;
   readonly fetches: Map<number, Fetch>;
-  /** Numbers connections and page loads. */
+  readonly terminals: Map<number, Terminal>;
+  /** Numbers connections, page loads and terminals. */
   nextId: number;
 };
 
@@ -70,6 +88,7 @@ export const emptyTransport = (): Transport => ({
   connections: new Map(),
   queries: new Map(),
   fetches: new Map(),
+  terminals: new Map(),
   nextId: 1,
 });
 

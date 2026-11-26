@@ -110,7 +110,7 @@ const flagNames = ({ flags }: TcpSegment) =>
   (['syn', 'fin', 'rst', 'psh', 'ack'] as const).filter((flag) => flags[flag]).join('+');
 
 const dataLength = (segment: TcpSegment) =>
-  segment.payload ? byteLength(httpText(segment.payload)) : 0;
+  segment.payload?.kind === 'http' ? byteLength(httpText(segment.payload)) : 0;
 
 /** What the protocol a frame carries shows as: the layer a student steps through. */
 function protocol(event: FrameEvent): string {

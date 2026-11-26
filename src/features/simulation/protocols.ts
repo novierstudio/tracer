@@ -13,7 +13,7 @@ import type {
 import { isNdp, type Ipv6Packet } from '@/engine/pdu6';
 import type { TcpSegment } from '@/engine/tcp';
 import { formatIpv6Cidr, UNSPECIFIED_IPV6 } from '@/model/ipv6';
-import { describeDns, describeHttp, describeTcp } from './pdu/web';
+import { describeDns, describePayload, describeTcp } from './pdu/web';
 
 /** The protocol a frame shows as: the innermost one the engine models. */
 export type ProtocolId =
@@ -25,6 +25,8 @@ export type ProtocolId =
   | 'dns'
   | 'tcp'
   | 'http'
+  | 'telnet'
+  | 'ssh'
   | 'rip'
   | 'ospf'
   | 'stp'
@@ -41,6 +43,8 @@ export const PROTOCOLS: Record<ProtocolId, { label: string; token: `--proto-${st
   dns: { label: 'DNS', token: '--proto-dns' },
   tcp: { label: 'TCP', token: '--proto-tcp' },
   http: { label: 'HTTP', token: '--proto-tcp' },
+  telnet: { label: 'Telnet', token: '--proto-tcp' },
+  ssh: { label: 'SSH', token: '--proto-tcp' },
   rip: { label: 'RIP', token: '--proto-routing' },
   ospf: { label: 'OSPF', token: '--proto-routing' },
   stp: { label: 'STP', token: '--proto-stp' },
@@ -59,8 +63,8 @@ function ipProtocol(packet: Ipv4Packet): ProtocolId {
     case 'ospf':
       return 'ospf';
     case 'tcp':
-      // A segment that carries HTTP shows as HTTP; a bare SYN, ACK, FIN or RST as TCP.
-      return packet.payload.payload ? 'http' : 'tcp';
+      // A segment that carries data shows as its application; a bare SYN, ACK, FIN or RST as TCP.
+      return packet.payload.payload?.kind ?? 'tcp';
   }
 }
 
@@ -188,7 +192,7 @@ function describeUdp(packet: Ipv4Packet, datagram: UdpDatagram): string {
 }
 
 const describeSegment = (segment: TcpSegment) =>
-  segment.payload ? `HTTP ${describeHttp(segment.payload)}` : `TCP ${describeTcp(segment)}`;
+  segment.payload ? describePayload(segment.payload) : `TCP ${describeTcp(segment)}`;
 
 function describePacket(packet: Ipv4Packet): string {
   const { payload } = packet;

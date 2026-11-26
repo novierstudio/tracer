@@ -421,10 +421,14 @@ const dnsOf = (frame: Frame): DnsMessage | undefined => {
   return payload?.kind === 'udp' && payload.payload.kind === 'dns' ? payload.payload : undefined;
 };
 
-const statusOf = (segment: TcpSegment | undefined) =>
-  segment?.payload?.type === 'response'
-    ? `${segment.payload.status} ${segment.payload.reason}`
-    : undefined;
+/** The HTTP message a segment carries, if it carries one. */
+const httpOf = (segment: TcpSegment | undefined) =>
+  segment?.payload?.kind === 'http' ? segment.payload : undefined;
+
+const statusOf = (segment: TcpSegment | undefined) => {
+  const message = httpOf(segment);
+  return message?.type === 'response' ? `${message.status} ${message.reason}` : undefined;
+};
 
 function decideDns(message: DnsMessage, sent: readonly SentFrame[]): WebStep | undefined {
   if (message.type === 'query') {
@@ -457,9 +461,10 @@ function decideTcp(segment: TcpSegment, sent: readonly SentFrame[]): WebStep {
       : [];
   });
   const out = replies[0]?.port;
-  const { flags, payload } = segment;
+  const { flags } = segment;
+  const payload = httpOf(segment);
   if (out === undefined) {
-    const bareAck = flags.ack && !flags.syn && !flags.fin && !flags.rst && !payload;
+    const bareAck = flags.ack && !flags.syn && !flags.fin && !flags.rst && !segment.payload;
     return { kind: 'took', segment: flags.rst ? 'rst' : bareAck ? 'ack' : 'other' };
   }
   const sentFlag = (flag: keyof TcpSegment['flags']) =>
@@ -468,7 +473,7 @@ function decideTcp(segment: TcpSegment, sent: readonly SentFrame[]): WebStep {
   if (sentFlag('rst')) return { kind: 'refused', port: segment.dstPort, out };
   if (flags.syn && !flags.ack) return { kind: 'accepted', port: segment.dstPort, out };
   if (flags.syn) {
-    const request = replies.find(({ reply }) => reply.payload?.type === 'request')?.reply.payload;
+    const request = replies.map(({ reply }) => httpOf(reply)).find((m) => m?.type === 'request');
     return { kind: 'connected', path: request?.type === 'request' ? request.path : undefined, out };
   }
   const status = replies.map(({ reply }) => statusOf(reply)).find(Boolean);

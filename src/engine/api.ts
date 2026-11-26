@@ -1,4 +1,12 @@
-import type { DeviceId, Ipv4Address, LinkId, PortId, Result, Topology } from '@/model';
+import type {
+  DeviceId,
+  Ipv4Address,
+  LinkId,
+  PortId,
+  RemoteProtocol,
+  Result,
+  Topology,
+} from '@/model';
 import type { IpAddress } from '@/model/ipv6';
 import type { SimTime } from './core/time';
 import type { LinkEnd, LinkStatus } from './engine';
@@ -15,6 +23,7 @@ import type { HostAddressing } from './l3/hostAddress';
 import type { NatEndpoint, NatTranslationEntry } from './l3/nat';
 import type { PingEvent, PingListener, PingOptions, PingReply, PingSummary } from './l3/ping';
 import type { LearnedRoute, Route } from './l3/routes';
+import type { TerminalEvent, TerminalListener } from './l3/terminal';
 import type { TraceEvent, TraceListener, TraceOptions, TraceProbe } from './l3/traceroute';
 import type {
   Ipv6AddressEntry,
@@ -90,6 +99,8 @@ export type {
   SpanningTreePort,
   SpanningTreeVlan,
   StpTimes,
+  TerminalEvent,
+  TerminalListener,
   TraceEvent,
   TraceListener,
   TraceOptions,
@@ -100,6 +111,11 @@ declare const probeHandleBrand: unique symbol;
 
 /** Names a ping or traceroute that `ping` or `traceroute` started, so `cancel` can stop it. */
 export type ProbeHandle = number & { readonly [probeHandleBrand]: true };
+
+declare const terminalHandleBrand: unique symbol;
+
+/** Names a Telnet or SSH session that `openTerminal` started. */
+export type TerminalHandle = number & { readonly [terminalHandleBrand]: true };
 
 export type SimMode = 'realtime' | 'simulation';
 
@@ -240,6 +256,24 @@ export interface SimAPI {
     target: BrowseTarget,
     listener: FetchListener,
   ): Result<void, DeviceUnavailable>;
+  /**
+   * Opens a Telnet or SSH connection from a router, switch or host to `target`'s port 23 or 22.
+   * `listener` hears it open or fail, then close, once each, as with `ping`. The far end's CLI
+   * runs outside the simulation; the connection carries the session's lines as segments.
+   */
+  openTerminal(
+    device: DeviceId,
+    target: Ipv4Address,
+    protocol: RemoteProtocol,
+    listener: TerminalListener,
+  ): Result<TerminalHandle, DeviceUnavailable>;
+  /** Sends a line typed into an open session to the far end. */
+  terminalSend(handle: TerminalHandle, text: string): void;
+  /**
+   * The session ended at the far end, `server`, as `exit` there ends it: `server` closes the
+   * connection. Without a server that can, the client closes its own end.
+   */
+  terminalClose(handle: TerminalHandle, server: DeviceId | undefined): void;
   /** How many packets each entry of each of a router or switch's access lists has matched. */
   aclHits(device: DeviceId): Result<AclHits, DeviceUnavailable>;
   /** A router's NAT translations in force, for `show ip nat translations`. */

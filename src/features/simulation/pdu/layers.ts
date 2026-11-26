@@ -67,7 +67,15 @@ import {
   type Part,
 } from './encode';
 import { describeIpv6GroupMac, ipv6Sections } from './ipv6';
-import { describeDns, describeHttp, dnsParts, portName, tcpFlagNames, tcpParts } from './web';
+import {
+  describeDns,
+  describeHttp,
+  describeTerminal,
+  dnsParts,
+  portName,
+  tcpFlagNames,
+  tcpParts,
+} from './web';
 
 /**
  * A frame taken apart for the PDU inspector: its layers, outermost first, each a list of labelled
@@ -93,6 +101,8 @@ export type LayerId =
   | 'dhcp'
   | 'dns'
   | 'http'
+  | 'telnet'
+  | 'ssh'
   | 'rip'
   | 'ospf'
   | 'bpdu'
@@ -459,9 +469,13 @@ function tcpLayers(wire: Wire, packet: Ipv4Packet, segment: TcpSegment): Layer[]
     fields: header.map(place),
   };
   const fields = data.map(place);
-  return segment.payload
-    ? [tcp, { id: 'http', osi: 7, name: 'HTTP', summary: describeHttp(segment.payload), fields }]
-    : [tcp];
+  const { payload } = segment;
+  if (!payload) return [tcp];
+  if (payload.kind === 'http') {
+    return [tcp, { id: 'http', osi: 7, name: 'HTTP', summary: describeHttp(payload), fields }];
+  }
+  const name = payload.kind === 'telnet' ? 'Telnet' : 'SSH';
+  return [tcp, { id: payload.kind, osi: 7, name, summary: describeTerminal(payload), fields }];
 }
 
 // DHCP

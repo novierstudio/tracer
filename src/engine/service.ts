@@ -11,6 +11,8 @@ import type {
   ProbeHandle,
   SimAPI,
   SimEventBatch,
+  TerminalEvent,
+  TerminalHandle,
   TraceEvent,
   TraceListener,
 } from './api';
@@ -29,6 +31,7 @@ import { startFetch } from './l3/httpClient';
 import { ipModule, stopProbe } from './l3/ip';
 import { clearNat, natTranslations } from './l3/nat';
 import { pingSummary, startPing } from './l3/ping';
+import { closeTerminal, closeVty, sendTerminal, startTerminal, terminalEnds } from './l3/terminal';
 import { startTrace } from './l3/traceroute';
 import { ipv6Module, ipv6Status, startPing6, startTrace6, stopProbe6 } from './l3v6/ipv6';
 import type { ModuleContext, SimModule } from './module';
@@ -113,6 +116,13 @@ const FETCH_ORDER: Record<FetchEvent['kind'], number> = {
   failed: Infinity,
 };
 
+/** A session opens, then fails or closes. Either of those is the last. */
+const TERMINAL_ORDER: Record<TerminalEvent['kind'], number> = {
+  open: 1,
+  failed: Infinity,
+  closed: Infinity,
+};
+
 const traceOrder = (probesPerHop: number) => (event: TraceEvent) =>
   event.kind === 'done' ? Infinity : (event.hop - 1) * probesPerHop + event.probe;
 
@@ -152,6 +162,8 @@ export function createSimService({
   let framePending = false;
   /** How to cancel each ping and traceroute that has not ended. */
   const cancels = new Map<ProbeHandle, () => void>();
+  /** Each open Telnet or SSH session: its device, and its id in that device's IP stack. */
+  const terminals = new Map<TerminalHandle, { device: DeviceId; id: () => number }>();
   let nextHandle = 1;
 
   /** Applies an input now. In Simulation mode the history records it, so replays repeat it. */
@@ -434,6 +446,61 @@ export function createSimService({
         (ctx, once) => startFetch(ctx, target, once),
       ),
     ipv6Status: (device) => engine.withModule(device, ipv6Module, ipv6Status),
+    openTerminal(device, target, protocol, listener) {
+      const handle = nextHandle++ as TerminalHandle;
+      let id = 0;
+      const once = hearOnce(
+        (event: TerminalEvent) => {
+          if (TERMINAL_ORDER[event.kind] === Infinity) terminals.delete(handle);
+          listener(event);
+        },
+        (event) => TERMINAL_ORDER[event.kind],
+        (): TerminalEvent => ({ kind: 'failed', why: 'cancelled' }),
+      );
+      let started: Result<void, DeviceUnavailable> | undefined;
+      input({
+        apply: () => {
+          started = engine.withModule(device, ipModule, (ctx) => {
+            id = startTerminal(ctx, target, protocol, once.listener);
+          });
+        },
+        forget: once.forget,
+      });
+      requestFrame();
+      if (!started!.ok) return started!;
+      terminals.set(handle, { device, id: () => id });
+      return ok(handle);
+    },
+    terminalSend(handle, text) {
+      const terminal = terminals.get(handle);
+      if (!terminal) return;
+      input({
+        apply: () =>
+          void engine.withModule(terminal.device, ipModule, (ctx) =>
+            sendTerminal(ctx, terminal.id(), text),
+          ),
+      });
+      requestFrame();
+    },
+    terminalClose(handle, server) {
+      const terminal = terminals.get(handle);
+      if (!terminal) return;
+      input({
+        apply: () => {
+          const client = engine.withModule(terminal.device, ipModule, (ctx) =>
+            terminalEnds(ctx, terminal.id()),
+          );
+          const ends = client.ok ? client.value : undefined;
+          const closed =
+            ends !== undefined &&
+            server !== undefined &&
+            engine.withModule(server, ipModule, (ctx) => closeVty(ctx, ends));
+          if (closed && closed.ok && closed.value) return;
+          engine.withModule(terminal.device, ipModule, (ctx) => closeTerminal(ctx, terminal.id()));
+        },
+      });
+      requestFrame();
+    },
     aclHits: (device) => engine.withModule(device, ipModule, aclHits),
     natTranslations: (device) => engine.withModule(device, ipModule, natTranslations),
     clearNatTranslations(device) {

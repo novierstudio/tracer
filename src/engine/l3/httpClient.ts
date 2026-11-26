@@ -117,7 +117,7 @@ export function onFetchData(
   message: TcpPayload,
 ) {
   const fetch = ctx.state.transport.fetches.get(id);
-  if (fetch && message.type === 'response') {
+  if (fetch && message.kind === 'http' && message.type === 'response') {
     finish(ctx, fetch, { kind: 'response', address: connection.remote, response: message });
   }
 }
