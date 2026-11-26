@@ -4,7 +4,7 @@ import type { RouterConfig } from '../../model';
 import { applyLines, withBlankConfig } from './session';
 import { runningConfig } from './show';
 import { showAccessLists } from './showAclNat';
-import { consoleOn, router, switchDevice } from './testing';
+import { consoleOn, multilayerSwitch, router, switchDevice } from './testing';
 
 const ENTER = ['enable', 'configure terminal'];
 
@@ -282,6 +282,28 @@ describe('running-config', () => {
     expect(replayed.errors).toEqual([]);
     expect(replayed.config).toEqual(c.device.config);
     expect(runningConfig({ ...c.device, config: replayed.config })).toEqual(running);
+  });
+
+  it('round-trips a multilayer switch with an access list on a routed port', () => {
+    const c = consoleOn(multilayerSwitch());
+    c.runAll([
+      ...ENTER,
+      'ip routing',
+      'access-list 101 deny tcp any any eq www',
+      'access-list 101 permit ip any any',
+      'interface g0/1',
+      'no switchport',
+      'ip address 10.0.0.1 255.255.255.0',
+      'ip access-group 101 out',
+    ]);
+    expect(c.device.config.interfaces['GigabitEthernet0/1' as never]).toMatchObject({
+      accessGroupOut: '101',
+    });
+    const running = runningConfig(c.device);
+    expect(running).toContain(' ip access-group 101 out');
+    const replayed = applyLines(withBlankConfig(c.device), running);
+    expect(replayed.errors).toEqual([]);
+    expect(replayed.config).toEqual(c.device.config);
   });
 
   it('round-trips a switch with an access list on its VLAN interface', () => {

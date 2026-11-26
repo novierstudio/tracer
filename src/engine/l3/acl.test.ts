@@ -1,4 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { applyLines, toConfigUpdate, type IosDevice } from '@/cli';
+import { updateConfig, type ServerServices } from '@/model';
+import { expectOk } from '@/model/testing';
 import type {
   AccessList,
   AclAddress,
@@ -8,13 +11,13 @@ import type {
   RouterConfig,
   StandardAclEntry,
 } from '@/model';
-import type { PingEvent } from '../api';
+import type { FetchEvent, PingEvent } from '../api';
 import { after, ms } from '../core/time';
 import { createEngine } from '../engine';
 import type { FrameEvent, SimEvent } from '../events';
 import { createSimService } from '../service';
 import { STACKS } from '../stacks';
-import { ip, routedLab, STP_CONVERGED } from '../testing';
+import { ip, labBuilder, routedLab, STP_CONVERGED } from '../testing';
 import { ACL_PROTOCOL, firstMatch, type Flow } from './acl';
 import { ipModule } from './ip';
 import { originate } from './output';
@@ -85,7 +88,7 @@ describe('matching an access list', () => {
     expect(firstMatch(standard(), flow('10.0.0.2', '8.8.8.8'))).toBeUndefined();
   });
 
-  it('blocks HTTP between two subnets but lets ping and HTTPS through', () => {
+  it('matches a TCP port rule only on TCP from the listed subnets', () => {
     const list = extended(
       rule('deny', 'tcp', net('10.1.0.0', '0.0.0.255'), net('10.2.0.0', '0.0.0.255'), {
         destinationPort: { op: 'eq', port: 80 },
@@ -271,5 +274,131 @@ describe('an access group in a running network', () => {
     expect(events.filter((e) => e.kind === 'unreachable')).toHaveLength(4);
     expect(events.find((e) => e.kind === 'summary')).toMatchObject({ received: 0 });
     expect(hits()).toEqual({ ok: true, value: {} });
+  });
+});
+
+const WEB: ServerServices = {
+  dns: { enabled: false, records: [] },
+  http: { enabled: true, indexHtml: '<h1>Web</h1>' },
+};
+
+/**
+ * PC1 192.168.1.10 and a web server 192.168.2.10, each behind its own port of `gateway`: router
+ * R1 with SW1 and SW2 between, or multilayer switch MLS routing between VLANs 10 and 20. The
+ * gateway is configured by typing `lines`.
+ */
+function webLab(gateway: 'router' | 'multilayer', lines: readonly string[]) {
+  const lab = labBuilder();
+  const pc = lab.host('pc', 'PC1', '192.168.1.10/24', '192.168.1.1');
+  const web = lab.host('server', 'Web', '192.168.2.10/24', '192.168.2.1');
+  lab.edit(web, (device) =>
+    device.kind === 'server' ? { ...device, config: { ...device.config, services: WEB } } : device,
+  );
+  let id: DeviceId;
+  if (gateway === 'router') {
+    const sw1 = lab.switch('SW1');
+    const sw2 = lab.switch('SW2');
+    id = lab.router('R1', {
+      'GigabitEthernet0/0': '192.168.1.1/24',
+      'GigabitEthernet0/1': '192.168.2.1/24',
+    });
+    lab.connect(pc, 'FastEthernet0', sw1, 'FastEthernet0/1');
+    lab.connect(sw1, 'GigabitEthernet0/1', id, 'GigabitEthernet0/0');
+    lab.connect(id, 'GigabitEthernet0/1', sw2, 'GigabitEthernet0/1');
+    lab.connect(web, 'FastEthernet0', sw2, 'FastEthernet0/1');
+  } else {
+    id = lab.switch('MLS', {}, 'switch-l3-24');
+    lab.connect(pc, 'FastEthernet0', id, 'FastEthernet0/1');
+    lab.connect(web, 'FastEthernet0', id, 'FastEthernet0/2');
+  }
+  const device = lab.topology.devices[id] as IosDevice;
+  const { config, errors } = applyLines(device, lines);
+  expect(errors).toEqual([]);
+  expect(config.unknownLines).toEqual([]);
+  const topology = expectOk(
+    updateConfig(lab.topology, toConfigUpdate({ ...device, config } as IosDevice)),
+  );
+
+  const engine = createEngine({ seed: 1, stacks: STACKS, linkDelay: ms(1) });
+  const sim = createSimService({ engine, frames: { now: () => 0, request: () => {} } });
+  sim.load(topology);
+  engine.runUntil(STP_CONVERGED);
+  /** PC1 loads http://192.168.2.10/ and runs until the load ends. Returns how it ended. */
+  const browse = () => {
+    const events: FetchEvent[] = [];
+    expectOk(sim.browse(pc, { host: '192.168.2.10', port: 80, path: '/' }, (e) => events.push(e)));
+    while (!events.some((e) => e.kind === 'response' || e.kind === 'failed')) engine.step();
+    return events.at(-1)!;
+  };
+  const ping = () => {
+    const events: PingEvent[] = [];
+    expectOk(
+      sim.ping(pc, ip('192.168.2.10'), { count: 4, timeoutMs: 1000 }, (e) => events.push(e)),
+    );
+    while (!events.some((e) => e.kind === 'summary')) engine.step();
+    return events.find((e) => e.kind === 'summary');
+  };
+  const hits = () =>
+    expectOk(engine.withModule(id, ipModule, (ctx) => Object.fromEntries(ctx.state.aclHits)));
+  return { engine, browse, ping, hits };
+}
+
+const NO_WEB = [
+  'access-list 101 deny tcp 192.168.1.0 0.0.0.255 192.168.2.0 0.0.0.255 eq www',
+  'access-list 101 permit ip any any',
+];
+
+describe('an extended list that blocks HTTP between two subnets', () => {
+  const R1 = [
+    'interface GigabitEthernet0/0',
+    ' ip address 192.168.1.1 255.255.255.0',
+    ' no shutdown',
+    'interface GigabitEthernet0/1',
+    ' ip address 192.168.2.1 255.255.255.0',
+    ' no shutdown',
+  ];
+
+  it('loads the page across the router while no list is applied', () => {
+    const { browse } = webLab('router', [...R1, ...NO_WEB]);
+    expect(browse()).toMatchObject({ kind: 'response', response: { status: 200 } });
+  });
+
+  it('stops PC1 browsing to the server, but lets its pings through', () => {
+    const { browse, ping, hits, engine } = webLab('router', [
+      ...R1,
+      ...NO_WEB,
+      'interface GigabitEthernet0/0',
+      ' ip access-group 101 in',
+    ]);
+    const mark = engine.log.lastId;
+
+    expect(browse()).toMatchObject({ kind: 'failed' });
+    const notes = engine.log.since(mark).flatMap((e) => (e.kind === 'note' ? [e.text] : []));
+    expect(notes).toContain(
+      'Dropped a packet for 192.168.2.10 from 192.168.1.10: access list 101 denied it in on GigabitEthernet0/0',
+    );
+    expect(ping()).toMatchObject({ sent: 4, received: 4 });
+    // The SYN matched the deny; the four echo requests matched the permit.
+    expect(hits()).toEqual({ '101': [1, 4] });
+  });
+
+  it('does the same on a multilayer switch routing between VLANs', () => {
+    const { browse, ping } = webLab('multilayer', [
+      'ip routing',
+      'vlan 10',
+      'vlan 20',
+      'interface FastEthernet0/1',
+      ' switchport access vlan 10',
+      'interface FastEthernet0/2',
+      ' switchport access vlan 20',
+      'interface Vlan10',
+      ' ip address 192.168.1.1 255.255.255.0',
+      ' ip access-group 101 in',
+      'interface Vlan20',
+      ' ip address 192.168.2.1 255.255.255.0',
+      ...NO_WEB,
+    ]);
+    expect(browse()).toMatchObject({ kind: 'failed' });
+    expect(ping()).toMatchObject({ received: 4 });
   });
 });

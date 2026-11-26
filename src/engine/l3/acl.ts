@@ -46,11 +46,12 @@ export type Flow = {
 export type Ports = { readonly srcPort: number; readonly dstPort: number };
 
 /**
- * The ports a packet's transport header carries. A payload's kind stands in for its IP protocol
- * number (see pdu.ts), so TCP (6) joins as one more case beside UDP (17).
+ * The ports a packet's transport header carries: TCP's (6) or UDP's (17). A payload's kind stands
+ * in for its IP protocol number (see pdu.ts).
  */
 export function transportPorts(payload: Ipv4Payload): Ports | undefined {
   switch (payload.kind) {
+    case 'tcp':
     case 'udp':
       return { srcPort: payload.srcPort, dstPort: payload.dstPort };
     default:

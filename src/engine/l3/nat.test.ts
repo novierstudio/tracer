@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import type { AccessList, DeviceId, NatConfig, PortId, RouterConfig } from '@/model';
-import type { PingEvent, TraceEvent } from '../api';
+import type { FetchEvent, PingEvent, TraceEvent } from '../api';
 import { after, ms, type SimDuration } from '../core/time';
 import { createEngine } from '../engine';
 import { createSimService } from '../service';
 import { STACKS } from '../stacks';
+import { TCP_WINDOW, type TcpSegment } from '../tcp';
 import { ip, labBuilder, staticRoute, STP_CONVERGED } from '../testing';
 import type { IpContext } from './context';
 import { ipModule } from './ip';
@@ -45,6 +46,20 @@ function natLab(nat: NatConfig) {
     [staticRoute('192.0.2.0/24', '203.0.113.1')],
   );
   const server = lab.host('server', 'Server', '198.51.100.10/24', '198.51.100.1');
+  lab.edit(server, (device) =>
+    device.kind === 'server'
+      ? {
+          ...device,
+          config: {
+            ...device.config,
+            services: {
+              dns: { enabled: false, records: [] },
+              http: { enabled: true, indexHtml: '<h1>Outside</h1>' },
+            },
+          },
+        }
+      : device,
+  );
   lab.connect(pc1, 'FastEthernet0', sw1, 'FastEthernet0/1');
   lab.connect(pc2, 'FastEthernet0', sw1, 'FastEthernet0/2');
   lab.connect(sw1, 'GigabitEthernet0/1', r1, 'GigabitEthernet0/0');
@@ -86,6 +101,12 @@ function natLab(nat: NatConfig) {
       (events) => events.some((e) => e.kind === 'summary'),
       (listen) => sim.ping(from, ip(target), { count: 4, timeoutMs: 1000 }, listen),
     ).find((e) => e.kind === 'summary');
+  /** Loads http://198.51.100.10/ from `from` and returns how the load ended. */
+  const browse = (from: DeviceId) =>
+    run<FetchEvent>(
+      (events) => events.some((e) => e.kind === 'response' || e.kind === 'failed'),
+      (listen) => sim.browse(from, { host: '198.51.100.10', port: 80, path: '/' }, listen),
+    ).at(-1);
   const trace = (from: DeviceId, target: string) =>
     run<TraceEvent>(
       (events) => events.some((e) => e.kind === 'done'),
@@ -98,7 +119,7 @@ function natLab(nat: NatConfig) {
     return result.value;
   };
   const translations = (): NatTranslationEntry[] => onR1(natTranslations);
-  return { engine, sim, ping, trace, later, translations, onR1, pc1, pc2, server };
+  return { engine, sim, ping, browse, trace, later, translations, onR1, pc1, pc2, server };
 }
 
 const NO_NAT: NatConfig = { pools: {}, statics: [], dynamic: [] };
@@ -136,6 +157,47 @@ describe('PAT', () => {
         outside: { address: '198.51.100.10', port: 1024 },
       },
     ]);
+  });
+
+  it('translates TCP: two PCs browse the server through one address on different ports', () => {
+    const { browse, translations, pc1, pc2 } = natLab(pat);
+
+    expect(browse(pc1)).toMatchObject({ kind: 'response', response: { status: 200 } });
+    expect(browse(pc2)).toMatchObject({ kind: 'response', response: { status: 200 } });
+
+    const tcp = translations().filter((t) => t.protocol === 6);
+    expect(tcp.map((t) => t.insideLocal.address)).toEqual(['10.0.0.10', '10.0.0.11']);
+    expect(tcp.every((t) => t.insideGlobal.address === '203.0.113.1')).toBe(true);
+    expect(tcp.every((t) => t.outside?.port === 80)).toBe(true);
+    expect(new Set(tcp.map((t) => t.insideGlobal.port)).size).toBe(2);
+  });
+
+  it('moves a TCP connection to port 1024 when another host already holds its port', () => {
+    const { engine, browse, translations, later, pc1, pc2 } = natLab(pat);
+    browse(pc1);
+    const [first] = translations().filter((t) => t.protocol === 6);
+    const port = first!.insideLocal.port!;
+    expect(first!.insideGlobal.port).toBe(port);
+
+    // PC2 opens a connection from the very port PC1's connection kept on 203.0.113.1.
+    const syn: TcpSegment = {
+      kind: 'tcp',
+      srcPort: port,
+      dstPort: 80,
+      seq: 1000,
+      ack: 0,
+      flags: { syn: true, ack: false, fin: false, rst: false, psh: false },
+      window: TCP_WINDOW,
+    };
+    engine.withModule(pc2, ipModule, (ctx) => originate(ctx, ip('198.51.100.10'), syn));
+    later(100);
+
+    expect(translations().filter((t) => t.protocol === 6)).toContainEqual({
+      protocol: 6,
+      insideGlobal: { address: '203.0.113.1', port: 1024 },
+      insideLocal: { address: '10.0.0.11', port },
+      outside: { address: '198.51.100.10', port: 80 },
+    });
   });
 
   it('translates UDP ports, and the ICMP errors routers send back about translated packets', () => {
