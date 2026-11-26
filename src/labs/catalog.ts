@@ -188,6 +188,23 @@ export const SAMPLE_LABS: readonly SampleLab[] = [
     ],
     load: () => import('./ipv6-slaac.tracer.json?raw').then(text),
   },
+  {
+    id: 'remote-management',
+    title: 'Remote management: console and SSH',
+    description:
+      'Manage a router three ways: over the console cable, by SSH with a local user, and onward by Telnet to a switch. R1 refuses Telnet, since its vty lines take SSH only.',
+    difficulty: 'intermediate',
+    devices: { router: 1, switch: 1, pc: 1 },
+    tryThis: [
+      'Open PC1’s Terminal app and click OK: the console cable reaches R1. Log in with the console password `cisco`',
+      'In that console, run `enable` with the secret `class`, then `show ip ssh`',
+      'From PC1’s Command Prompt, run `ssh -l admin 192.168.1.1` and log in with `cisco123`',
+      'Run `telnet 192.168.1.1` from PC1: R1 refuses, as its vty lines take SSH only',
+      'Over SSH on R1, run `telnet 192.168.1.2` to reach SW1 (password `cisco`), then `show users`',
+      'Switch to Simulation mode and log in again to see TCP to port 22, with the SSH data encrypted',
+    ],
+    load: () => import('./remote-management.tracer.json?raw').then(text),
+  },
 ];
 
 export const DIFFICULTY_LABELS: Record<Difficulty, string> = {
