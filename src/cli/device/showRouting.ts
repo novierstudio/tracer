@@ -21,7 +21,15 @@ const CODE: Record<Route['source'], string> = {
   static: 'S',
   rip: 'R',
   ospf: 'O',
+  eigrp: 'D',
 };
+
+/** A route's code, as `D`, `S*` or `D*EX`: the candidate default star goes after the first letter. */
+function codeOf(route: Route): string {
+  const star = isDefault(route) ? '*' : '';
+  if ('external' in route && route.external) return `${CODE[route.source]}${star || ' '}EX`;
+  return CODE[route.source] + star;
+}
 
 /** Where a route's text starts: after the code at the top level, further in under a header. */
 const TOP_COLUMN = 6;
@@ -83,13 +91,14 @@ function pathText(route: Route): string {
     }
     case 'rip':
     case 'ospf':
+    case 'eigrp':
       return `[${route.distance}/${route.metric}] via ${route.via}, ${routeAge(route.ageMs)}, ${route.interface}`;
   }
 }
 
 function routeLines(paths: readonly Route[], column: number): string[] {
   const [first] = paths as [Route, ...Route[]];
-  const code = CODE[first.source] + (isDefault(first) ? '*' : '');
+  const code = codeOf(first);
   const head = `${code.padEnd(column)}${prefixText(first)} `;
   return paths.map((route, i) => (i === 0 ? head : ' '.repeat(head.length)) + pathText(route));
 }

@@ -578,7 +578,7 @@ describe('an EIGRP packet', () => {
     ...plain,
     config: {
       ...plain.config,
-      eigrp: { asn, networks: [], passiveInterfaces: [], autoSummary: false, variance: 1 },
+      eigrp: { asn, networks: [], passiveInterfaces: [], variance: 1 },
     },
   });
   const toGroup = (packet: Parameters<typeof eigrpPacket>[0]) =>

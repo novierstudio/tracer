@@ -61,10 +61,13 @@ export type Ipv4Packet = {
 
 export type Ipv4Payload = IcmpMessage | UdpDatagram | OspfPacket | EigrpPacket | TcpSegment;
 
-export const IP_PROTOCOL = { icmp: 1, tcp: 6, udp: 17, eigrp: 88, ospf: 89 } as const satisfies Record<
-  Ipv4Payload['kind'],
-  number
->;
+export const IP_PROTOCOL = {
+  icmp: 1,
+  tcp: 6,
+  udp: 17,
+  eigrp: 88,
+  ospf: 89,
+} as const satisfies Record<Ipv4Payload['kind'], number>;
 
 /** The address a packet for every host on the local network goes to. Routers never forward it. */
 export const LIMITED_BROADCAST = '255.255.255.255' as Ipv4Address;

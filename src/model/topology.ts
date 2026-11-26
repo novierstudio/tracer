@@ -468,8 +468,6 @@ export const EigrpConfig = z.object({
   networks: z.array(EigrpNetwork).default(() => []),
   /** `passive-interface`: no hellos, so no neighbours, but its network is still advertised. */
   passiveInterfaces: z.array(InterfaceId).default(() => []),
-  /** `auto-summary`. Off by default since IOS 15. */
-  autoSummary: z.boolean().default(false),
   /** `redistribute static`. Absent means static routes stay out of EIGRP. */
   redistributeStatic: EigrpRedistribution.optional(),
   /** `variance`: a feasible successor within this many times the best metric shares the load. */

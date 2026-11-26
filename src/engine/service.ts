@@ -35,6 +35,7 @@ import { closeTerminal, closeVty, sendTerminal, startTerminal, terminalEnds } fr
 import { startTrace } from './l3/traceroute';
 import { ipv6Module, ipv6Status, startPing6, startTrace6, stopProbe6 } from './l3v6/ipv6';
 import type { ModuleContext, SimModule } from './module';
+import { eigrpModule, eigrpStatus } from './routing/eigrp/eigrp';
 import { ospfModule, ospfStatus } from './routing/ospf/ospf';
 import { ripModule, ripStatus } from './routing/rip';
 
@@ -395,8 +396,10 @@ export function createSimService({
     routingProtocols(device) {
       const rip = engine.withModule(device, ripModule, ripStatus);
       const ospf = engine.withModule(device, ospfModule, ospfStatus);
+      const eigrp = engine.withModule(device, eigrpModule, eigrpStatus);
       if (!rip.ok) return rip;
-      return ospf.ok ? ok({ rip: rip.value, ospf: ospf.value }) : ospf;
+      if (!ospf.ok) return ospf;
+      return eigrp.ok ? ok({ rip: rip.value, ospf: ospf.value, eigrp: eigrp.value }) : eigrp;
     },
     macTable: (device) =>
       engine.withModule(device, switchingModule, (ctx) => macTable(ctx.state, ctx.now)),

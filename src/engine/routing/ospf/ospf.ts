@@ -132,7 +132,6 @@ function plan(ctx: DeviceContext, device: Router, config: OspfConfig): Plan[] {
   });
 }
 
-
 // Sending
 
 function send(ctx: OspfContext, process: Process, iface: Iface, body: Body, to: Audience) {
