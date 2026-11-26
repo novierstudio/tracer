@@ -21,6 +21,7 @@ import {
 import { onDnsTimer, stopLookups } from './dnsResolver';
 import { matchAnswer, type EchoAnswer } from './echo';
 import { stopFetches } from './httpClient';
+import { stopTerminals } from './terminal';
 import {
   lanInterfaceFor,
   ownsAddress,
@@ -233,6 +234,7 @@ export const ipModule: SimModule<IpState> = {
     for (const id of [...ctx.state.probes.keys()]) stopProbe(ctx, id);
     abandonDhcp(ctx);
     stopFetches(ctx);
+    stopTerminals(ctx);
     stopLookups(ctx);
   },
 };

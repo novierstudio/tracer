@@ -28,10 +28,18 @@ export type TcpFlags = {
   readonly psh: boolean;
 };
 
-export type TcpPayload = HttpMessage;
+/**
+ * A line typed into a Telnet or SSH session. Telnet sends it in the clear; SSH sends only
+ * ciphertext, so its segments say how many bytes they carry and nothing more.
+ */
+export type TerminalData =
+  | { readonly kind: 'telnet'; readonly text: string }
+  | { readonly kind: 'ssh'; readonly bytes: number };
+
+export type TcpPayload = HttpMessage | TerminalData;
 
 /** Well-known TCP ports. */
-export const TCP_PORT = { http: 80 } as const;
+export const TCP_PORT = { http: 80, telnet: 23, ssh: 22 } as const;
 
 /** The window every segment offers: 64 KiB less one, the most without window scaling. */
 export const TCP_WINDOW = 65535;

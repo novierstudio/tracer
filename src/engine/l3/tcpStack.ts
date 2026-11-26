@@ -9,6 +9,7 @@ import { httpListening, onHttpRequest } from './httpServer';
 import { ownsAddress } from './interfaces';
 import { originate } from './output';
 import { nextHop } from './routes';
+import { onTerminalAborted, onTerminalClosed, onTerminalOpened, vtyListening } from './terminal';
 import { ephemeralPort, random32, type TcpConnection, type TcpOwner } from './transport';
 
 /** How long a connection waits to hear from its peer before it gives up. */
@@ -28,8 +29,19 @@ const flags = (...set: (keyof TcpFlags)[]): TcpFlags => {
 /** Sequence numbers wrap at 2^32. */
 const plus = (seq: number, count: number) => (seq + count) >>> 0;
 
-const dataLength = (payload: TcpPayload | undefined) =>
-  payload ? byteLength(httpText(payload)) : 0;
+function dataLength(payload: TcpPayload | undefined): number {
+  switch (payload?.kind) {
+    case undefined:
+      return 0;
+    case 'http':
+      return byteLength(httpText(payload));
+    case 'telnet':
+      // The line and the CR LF that ends it.
+      return byteLength(payload.text) + 2;
+    case 'ssh':
+      return payload.bytes;
+  }
+}
 
 /** The sequence space a segment takes: its data, and one each for a SYN and a FIN. */
 export const segmentLength = (segment: TcpSegment) =>
@@ -37,10 +49,20 @@ export const segmentLength = (segment: TcpSegment) =>
 
 /** Which application listens on a port of this device, if any. */
 const listenerOn = (ctx: IpContext, port: number): TcpOwner | undefined =>
-  httpListening(ctx, port) ? { kind: 'http-server' } : undefined;
+  httpListening(ctx, port) ? { kind: 'http-server' } : vtyListening(ctx, port);
 
-const touch = (ctx: IpContext, connection: TcpConnection) =>
-  ctx.setTimer(timerKey({ kind: 'tcp', id: connection.id }), TCP_TIMEOUT);
+/** A Telnet or SSH session sits idle for as long as its user does, once it is open. */
+const idles = (connection: TcpConnection) =>
+  (connection.owner.kind === 'vty' || connection.owner.kind === 'terminal') &&
+  connection.state !== 'syn-sent' &&
+  connection.state !== 'syn-received';
+
+/** Restarts the connection's silence timer, or stops it for a session that may sit idle. */
+function touch(ctx: IpContext, connection: TcpConnection) {
+  const key = timerKey({ kind: 'tcp', id: connection.id });
+  if (idles(connection)) ctx.clearTimer(key);
+  else ctx.setTimer(key, TCP_TIMEOUT);
+}
 
 function forget(ctx: IpContext, connection: TcpConnection) {
   ctx.state.transport.connections.delete(connection.id);
@@ -63,19 +85,23 @@ function send(ctx: IpContext, connection: TcpConnection, set: TcpFlags, payload?
 }
 
 function opened(ctx: IpContext, connection: TcpConnection) {
-  if (connection.owner.kind === 'fetch') onFetchConnected(ctx, connection.owner.fetch, connection);
+  const { owner } = connection;
+  if (owner.kind === 'fetch') onFetchConnected(ctx, owner.fetch, connection);
+  if (owner.kind === 'terminal') onTerminalOpened(ctx, owner.terminal, connection);
 }
 
+/** A vty line's CLI and a terminal's screen live outside the simulation, so they read nothing. */
 function received(ctx: IpContext, connection: TcpConnection, payload: TcpPayload) {
-  if (connection.owner.kind === 'fetch')
-    onFetchData(ctx, connection.owner.fetch, connection, payload);
-  else onHttpRequest(ctx, connection, payload);
+  const { owner } = connection;
+  if (owner.kind === 'fetch') onFetchData(ctx, owner.fetch, connection, payload);
+  if (owner.kind === 'http-server') onHttpRequest(ctx, connection, payload);
 }
 
 function aborted(ctx: IpContext, connection: TcpConnection, why: TcpAbort) {
   forget(ctx, connection);
-  if (connection.owner.kind === 'fetch')
-    onFetchAborted(ctx, connection.owner.fetch, connection, why);
+  const { owner } = connection;
+  if (owner.kind === 'fetch') onFetchAborted(ctx, owner.fetch, connection, why);
+  if (owner.kind === 'terminal') onTerminalAborted(ctx, owner.terminal, why);
 }
 
 /**
@@ -207,6 +233,7 @@ export function onTcpSegment(ctx: IpContext, packet: Ipv4Packet, segment: TcpSeg
     switch (connection.state) {
       case 'syn-received':
         connection.state = 'established';
+        touch(ctx, connection);
         break;
       case 'fin-wait-1':
         connection.state = 'fin-wait-2';
@@ -240,6 +267,9 @@ export function onTcpSegment(ctx: IpContext, packet: Ipv4Packet, segment: TcpSeg
         // Every application here closes as soon as its peer does.
         connection.state = 'close-wait';
         tcpClose(ctx, connection);
+        if (connection.owner.kind === 'terminal') {
+          onTerminalClosed(ctx, connection.owner.terminal);
+        }
         break;
       case 'fin-wait-1':
         connection.state = 'closing';

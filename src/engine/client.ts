@@ -15,7 +15,7 @@ export type SimClient = {
   /** Calls into the worker. Batches arrive through `onBatch`, which owns the worker's listener. */
   sim: Omit<
     Comlink.Remote<SimAPI>,
-    'subscribe' | 'ping' | 'traceroute' | 'dhcpRenew' | 'resolve' | 'browse'
+    'subscribe' | 'ping' | 'traceroute' | 'dhcpRenew' | 'resolve' | 'browse' | 'openTerminal'
   >;
   onBatch(listener: BatchListener): () => void;
   /** What each end of each link is doing, as of the latest batch, for listeners that join late. */
@@ -30,6 +30,10 @@ export type SimClient = {
   resolve(...args: Parameters<SimAPI['resolve']>): Promise<ReturnType<SimAPI['resolve']>>;
   /** SimAPI.browse, with the listener proxied to the worker. */
   browse(...args: Parameters<SimAPI['browse']>): Promise<ReturnType<SimAPI['browse']>>;
+  /** SimAPI.openTerminal, with the listener proxied to the worker. */
+  openTerminal(
+    ...args: Parameters<SimAPI['openTerminal']>
+  ): Promise<ReturnType<SimAPI['openTerminal']>>;
 };
 
 let started: Promise<SimClient> | undefined;
@@ -95,5 +99,7 @@ async function connect(source: TopologySource): Promise<SimClient> {
     resolve: (device, name, server, listener) =>
       sim.resolve(device, name, server, Comlink.proxy(listener)),
     browse: (device, target, listener) => sim.browse(device, target, Comlink.proxy(listener)),
+    openTerminal: (device, target, protocol, listener) =>
+      sim.openTerminal(device, target, protocol, Comlink.proxy(listener)),
   };
 }

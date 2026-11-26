@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Frame } from '@/engine/frame';
-import { httpText } from '@/engine/http';
+import { httpText, type HttpMessage } from '@/engine/http';
 import {
   ALL_D_ROUTERS,
   ALL_SPF_ROUTERS,
@@ -831,7 +831,7 @@ describe('dissect an HTTP message', () => {
     ]);
     expect(dissection.layers.at(-1)!.summary).toBe('GET / (Host www.lab.local)');
     const http = dissection.layers.at(-1)!.fields.flatMap((f) => bytesOf(dissection, f.id));
-    expect(text(http)).toBe(httpText(webSession[3]!.payload!));
+    expect(text(http)).toBe(httpText(webSession[3]!.payload! as HttpMessage));
     expect(field(dissection, 'ipv4.length')!.value).toBe(`${20 + 20 + 58} bytes`);
     expect(dissection.layers.at(-1)!.fields.map((f) => [f.label, f.value])).toEqual([
       ['Request line', 'GET / HTTP/1.1'],

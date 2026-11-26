@@ -1,7 +1,13 @@
 import { DNS_RCODE, type DnsMessage } from '@/engine/dns';
 import { httpText, type HttpMessage } from '@/engine/http';
 import { IP_PROTOCOL, UDP_PORT, type Ipv4Packet } from '@/engine/pdu';
-import { TCP_PORT, type TcpFlags, type TcpSegment } from '@/engine/tcp';
+import {
+  TCP_PORT,
+  type TcpFlags,
+  type TcpPayload,
+  type TcpSegment,
+  type TerminalData,
+} from '@/engine/tcp';
 import { formatSeconds, hex, internetChecksum, ipBytes, u16, u32, type Part } from './encode';
 
 /** Dissectors for what a browser sends: DNS to find the server, TCP to reach it, HTTP over TCP. */
@@ -11,6 +17,8 @@ const PORT_NAMES: Record<number, string> = {
   [UDP_PORT.dhcpServer]: 'DHCP server',
   [UDP_PORT.dhcpClient]: 'DHCP client',
   [TCP_PORT.http]: 'HTTP',
+  [TCP_PORT.telnet]: 'Telnet',
+  [TCP_PORT.ssh]: 'SSH',
   [UDP_PORT.rip]: 'RIP',
 };
 
@@ -54,7 +62,7 @@ export function tcpParts(
   packet: Ipv4Packet,
   segment: TcpSegment,
 ): { header: Part[]; data: Part[] } {
-  const data = segment.payload ? httpParts(segment.payload) : [];
+  const data = segment.payload ? payloadParts(segment.payload) : [];
   const dataBytes = data.flatMap((part) => part.bytes);
   const flags = flagByte(segment.flags);
   const length = DATA_OFFSET * 4 + dataBytes.length;
@@ -160,6 +168,45 @@ export function tcpParts(
     data,
   };
 }
+
+// Telnet and SSH
+
+/** `Telnet: show ip route` or `SSH: encrypted, 52 bytes`. */
+export function describeTerminal(data: TerminalData): string {
+  return data.kind === 'telnet' ? `Telnet: ${data.text}` : `SSH: encrypted, ${data.bytes} bytes`;
+}
+
+function terminalParts(data: TerminalData): Part[] {
+  if (data.kind === 'telnet') {
+    return [
+      {
+        id: 'telnet.data',
+        label: 'Data',
+        value: JSON.stringify(data.text),
+        explain:
+          'The line the user typed, and the CR LF that ends it. Telnet sends it as plain text, so anyone on the path can read it, passwords included.',
+        bytes: utf8(`${data.text}\r\n`),
+      },
+    ];
+  }
+  return [
+    {
+      id: 'ssh.encrypted',
+      label: 'Encrypted packet',
+      value: `${data.bytes} bytes`,
+      explain:
+        'SSH encrypts everything after the key exchange. Only the two ends hold the key, so the path sees noise of a cipher block’s length.',
+      bytes: Array.from({ length: data.bytes }, (_, i) => (i * 167 + 59) & 0xff),
+    },
+  ];
+}
+
+/** What a TCP segment carries: an HTTP message, or a line of a Telnet or SSH session. */
+export const describePayload = (payload: TcpPayload) =>
+  payload.kind === 'http' ? `HTTP ${describeHttp(payload)}` : describeTerminal(payload);
+
+const payloadParts = (payload: TcpPayload) =>
+  payload.kind === 'http' ? httpParts(payload) : terminalParts(payload);
 
 // HTTP
 

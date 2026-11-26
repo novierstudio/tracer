@@ -43,6 +43,8 @@ const palette: Palette = {
     dns: colour,
     tcp: colour,
     http: colour,
+    telnet: colour,
+    ssh: colour,
     rip: colour,
     ospf: colour,
     stp: colour,
