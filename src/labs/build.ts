@@ -104,6 +104,15 @@ function labBuilder(id: string) {
       });
     },
 
+    /** A PC with IPv6 on automatic and no IPv4 address: it forms its address by SLAAC. */
+    slaacPc(name: string, x: number, y: number) {
+      add(name, 'pc', x, y, (device) => {
+        if (device.kind !== 'pc') throw new Error(`${name} is not a PC`);
+        device.config.ipv4 = { mode: 'static' };
+        device.config.ipv6 = { mode: 'auto' };
+      });
+    },
+
     /** A PC that asks a DHCP server for its address. */
     dhcpPc(name: string, x: number, y: number) {
       add(name, 'pc', x, y, (device) => {
@@ -570,6 +579,47 @@ function patAcl() {
   return lab.topology;
 }
 
+function ipv6Slaac() {
+  const lab = labBuilder('ipv6-slaac');
+  lab.ios('R1', 'router-2g2s', 488, 40, [
+    'ipv6 unicast-routing',
+    'interface GigabitEthernet0/0',
+    ' ipv6 address FE80::1 link-local',
+    ' ipv6 address 2001:DB8:1::1/64',
+    ' no shutdown',
+    'interface GigabitEthernet0/1',
+    ' ipv6 address FE80::1 link-local',
+    ' ipv6 address 2001:DB8:2::1/64',
+    ' no shutdown',
+  ]);
+  lab.ios('SW1', 'switch-24', 232, 232, []);
+  lab.ios('SW2', 'switch-24', 744, 232, []);
+  lab.slaacPc('PC1', 72, 424);
+  lab.slaacPc('PC2', 392, 424);
+  lab.slaacPc('PC3', 584, 424);
+  lab.slaacPc('PC4', 904, 424);
+  lab.cable(['PC1', 'FastEthernet0'], ['SW1', 'FastEthernet0/1']);
+  lab.cable(['PC2', 'FastEthernet0'], ['SW1', 'FastEthernet0/2']);
+  lab.cable(['SW1', 'GigabitEthernet0/1'], ['R1', 'GigabitEthernet0/0']);
+  lab.cable(['R1', 'GigabitEthernet0/1'], ['SW2', 'GigabitEthernet0/1']);
+  lab.cable(['PC3', 'FastEthernet0'], ['SW2', 'FastEthernet0/1']);
+  lab.cable(['PC4', 'FastEthernet0'], ['SW2', 'FastEthernet0/2']);
+  lab.note(
+    'routing',
+    616,
+    -16,
+    'R1 has ipv6 unicast-routing, so it advertises each LAN’s /64 prefix, with FE80::1 as the router.',
+  );
+  lab.note(
+    'lanA',
+    136,
+    512,
+    'LAN A: 2001:DB8:1::/64. The PCs are set to Automatic: each forms its address from the prefix and its MAC (EUI-64).',
+  );
+  lab.note('lanB', 648, 512, 'LAN B: 2001:DB8:2::/64. Default gateway FE80::1, R1’s Gi0/1.');
+  return lab.topology;
+}
+
 export const BUILDERS: Record<string, () => Topology> = {
   'two-pcs-switch': twoPcsSwitch,
   'two-lans-router': twoLansRouter,
@@ -581,4 +631,5 @@ export const BUILDERS: Record<string, () => Topology> = {
   'ospf-three-routers': ospfThreeRouters,
   'dns-web-server': dnsWebServer,
   'pat-acl': patAcl,
+  'ipv6-slaac': ipv6Slaac,
 };
