@@ -44,4 +44,7 @@ export function createHostPromptRegistry(
   };
 }
 
-export const hostPrompts = createHostPromptRegistry(editorStore, engineBackend(editorStore));
+/** The app's one host backend, shared by every Command Prompt and Web Browser. */
+export const hostBackend = engineBackend(editorStore);
+
+export const hostPrompts = createHostPromptRegistry(editorStore, hostBackend);

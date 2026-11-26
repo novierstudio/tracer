@@ -5,7 +5,14 @@ import { buildOffice } from '@/features/inspector/testing';
 import type { Lease } from '@/engine/api';
 import type { SimTime } from '@/engine/core/time';
 import { Ipv4Address, type DeviceId, type MacAddress, type PrefixLength } from '@/model';
-import type { DhcpOutcome, HostAddressing, HostBackend, PingReply, TraceProbe } from './backend';
+import type {
+  DhcpOutcome,
+  DnsLookup,
+  HostAddressing,
+  HostBackend,
+  PingReply,
+  TraceProbe,
+} from './backend';
 import { formatReply, isHostDevice, type HostDevice } from './format';
 import { hostShell } from './shell';
 import { createHostTty, PROMPT } from './tty';
@@ -72,6 +79,8 @@ function scripted(
     hostIp: async () => ({ addressing: { kind: 'unassigned' }, now: 0 }),
     renewDhcp: async () => ({ kind: 'failed' }),
     releaseDhcp: async () => {},
+    nslookup: async () => ({ kind: 'no-server' }),
+    browse: async () => {},
   };
   return { backend, calls, cleared, signals };
 }
@@ -336,6 +345,8 @@ describe('the Command Prompt', () => {
       hostIp: () => Promise.reject(new Error('IPCONFIG: no engine')),
       renewDhcp: () => Promise.reject(new Error('IPCONFIG: no engine')),
       releaseDhcp: () => Promise.reject(new Error('IPCONFIG: no engine')),
+      nslookup: () => Promise.reject(new Error("*** Can't look up www.lab.local: no engine")),
+      browse: () => Promise.reject(new Error('no engine')),
     };
     const { run } = await prompt(failing);
     expect(await run('arp -a')).toEqual(['ARP: no engine', '']);
@@ -485,5 +496,82 @@ describe('DHCP in the Command Prompt', () => {
     const { run } = await prompt({ ...backend, ping: pinged.backend.ping }, { edit: asDhcp });
     const lines = await run('ping -n 1 192.168.1.1');
     expect(lines).toContain('Reply from 192.168.1.1: bytes=32 time=1ms TTL=255');
+  });
+});
+
+describe('nslookup in the Command Prompt', () => {
+  const SERVER = ip('192.168.1.20');
+
+  /** A backend that answers every lookup with `answer`, or never answers. */
+  function dns(answer: DnsLookup | 'hang') {
+    const asked: { name: string; server: string | undefined }[] = [];
+    const backend: HostBackend = {
+      ...scripted([]).backend,
+      nslookup: (_device, name, server) => {
+        asked.push({ name, server });
+        return answer === 'hang' ? new Promise(() => {}) : Promise.resolve(answer);
+      },
+    };
+    return { backend, asked };
+  }
+
+  it('prints the server and the answer as Windows does', async () => {
+    const { backend, asked } = dns({
+      kind: 'answer',
+      server: SERVER,
+      name: 'www.lab.local',
+      address: SERVER,
+    });
+    const { run } = await prompt(backend);
+    expect(await run('nslookup WWW.lab.local')).toEqual([
+      'Server:  UnKnown',
+      'Address:  192.168.1.20',
+      '',
+      'Name:    www.lab.local',
+      'Address:  192.168.1.20',
+      '',
+    ]);
+    expect(await run('nslookup www.lab.local 10.0.0.53')).toContain('Name:    www.lab.local');
+    expect(asked).toEqual([
+      { name: 'www.lab.local', server: undefined },
+      { name: 'www.lab.local', server: '10.0.0.53' },
+    ]);
+  });
+
+  it('says when the name does not exist, the server is silent or there is none', async () => {
+    const missing = await prompt(
+      dns({ kind: 'not-found', server: SERVER, name: 'www.x.local' }).backend,
+    );
+    expect((await missing.run('nslookup www.x.local')).slice(3)).toEqual([
+      "*** UnKnown can't find www.x.local: Non-existent domain",
+      '',
+    ]);
+    const silent = await prompt(dns({ kind: 'timeout', server: SERVER }).backend);
+    expect((await silent.run('nslookup www.lab.local')).slice(3)).toEqual([
+      'DNS request timed out.',
+      '    timeout was 2 seconds.',
+      '*** Request to UnKnown timed-out',
+      '',
+    ]);
+    const none = await prompt(dns({ kind: 'no-server' }).backend);
+    expect(await none.run('nslookup www.lab.local')).toEqual([
+      '*** Default servers are not available',
+      '',
+    ]);
+    const cancelled = await prompt(dns({ kind: 'cancelled' }).backend);
+    expect(await cancelled.run('nslookup www.lab.local')).toEqual(['*** Request cancelled', '']);
+  });
+
+  it('gives the prompt back on Ctrl+C while a lookup waits', async () => {
+    const { type, idle, screen } = await prompt(dns('hang').backend);
+    type('nslookup www.lab.local\r');
+    type('\x03');
+    await idle();
+    expect((await screen()).slice(-4)).toEqual([
+      `${PROMPT}nslookup www.lab.local`,
+      '^C',
+      '',
+      PROMPT,
+    ]);
   });
 });

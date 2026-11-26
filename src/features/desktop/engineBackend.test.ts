@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { PingEvent, TraceEvent } from '@/engine/api';
+import type { DnsLookup, FetchEvent, PingEvent, TraceEvent } from '@/engine/api';
 import { DeviceId, Ipv4Address } from '@/model';
 import { createEditorStore } from '@/model/store';
 import type { PingReply, TraceProbe } from './backend';
@@ -10,6 +10,8 @@ const client = vi.hoisted(() => ({
   ping: vi.fn(),
   traceroute: vi.fn(),
   dhcpRenew: vi.fn(),
+  resolve: vi.fn(),
+  browse: vi.fn(),
   onBatch: vi.fn(),
   sim: {
     arpTable: vi.fn(),
@@ -172,5 +174,92 @@ describe('the engine host backend and DHCP', () => {
   it('says why a device cannot release', async () => {
     client.sim.dhcpRelease.mockResolvedValue({ ok: false, error: 'powered-off' });
     await expect(backend.releaseDhcp(PC)).rejects.toThrow('IPCONFIG: the device is powered off.');
+  });
+});
+
+describe('the engine host backend, DNS and the web', () => {
+  const backend = engineBackend(createEditorStore());
+  const SERVER = ip('192.168.1.20');
+  const TARGET = { host: 'www.lab.local', port: 80, path: '/' };
+
+  it('resolves a lookup with what the resolver heard, or says why it could not ask', async () => {
+    const answer: DnsLookup = {
+      kind: 'answer',
+      server: SERVER,
+      name: 'www.lab.local',
+      address: SERVER,
+    };
+    client.resolve.mockImplementation(
+      async (_d: unknown, _n: unknown, _s: unknown, listener: (l: DnsLookup) => void) => {
+        setTimeout(() => listener(answer), 1);
+        return { ok: true, value: undefined };
+      },
+    );
+    expect(await backend.nslookup(PC, 'www.lab.local', undefined)).toEqual(answer);
+    expect(client.resolve).toHaveBeenCalledWith(
+      PC,
+      'www.lab.local',
+      undefined,
+      expect.any(Function),
+    );
+    client.resolve.mockResolvedValue({ ok: false, error: 'powered-off' });
+    await expect(backend.nslookup(PC, 'www.lab.local', SERVER)).rejects.toThrow(
+      "*** Can't look up www.lab.local: the device is powered off.",
+    );
+  });
+
+  /** A browse that plays `events` to its listener, a tick apart. */
+  const browsing = (events: readonly FetchEvent[]) =>
+    client.browse.mockImplementation(
+      async (_d: unknown, _t: unknown, listener: (event: FetchEvent) => void) => {
+        void (async () => {
+          for (const event of events) {
+            await new Promise((resolve) => setTimeout(resolve, 1));
+            listener(event);
+          }
+        })();
+        return { ok: true, value: undefined };
+      },
+    );
+
+  it('passes every step of a page load on and resolves after the last', async () => {
+    const steps: FetchEvent[] = [
+      { kind: 'resolving', name: 'www.lab.local', server: SERVER },
+      { kind: 'connecting', address: SERVER, port: 80 },
+      { kind: 'failed', failure: { kind: 'refused', address: SERVER, port: 80 } },
+    ];
+    browsing(steps);
+    const heard: FetchEvent[] = [];
+    await backend.browse(PC, TARGET, (event) => heard.push(event), new AbortController().signal);
+    expect(heard).toEqual(steps);
+    expect(client.browse).toHaveBeenCalledWith(PC, TARGET, expect.any(Function));
+  });
+
+  it('stops passing steps on once aborted, and resolves at once', async () => {
+    browsing([
+      { kind: 'resolving', name: 'www.lab.local', server: SERVER },
+      { kind: 'connecting', address: SERVER, port: 80 },
+    ]);
+    const controller = new AbortController();
+    const heard: FetchEvent[] = [];
+    const done = backend.browse(
+      PC,
+      TARGET,
+      (event) => {
+        heard.push(event);
+        controller.abort();
+      },
+      controller.signal,
+    );
+    await expect(done).resolves.toBeUndefined();
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(heard).toHaveLength(1);
+  });
+
+  it('says why a device cannot browse', async () => {
+    client.browse.mockResolvedValue({ ok: false, error: 'unsupported' });
+    await expect(
+      backend.browse(PC, TARGET, () => {}, new AbortController().signal),
+    ).rejects.toThrow('The page could not load: this device cannot do that.');
   });
 });

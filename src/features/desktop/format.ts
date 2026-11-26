@@ -6,7 +6,7 @@ import {
   type MacAddress,
   type Port,
 } from '@/model';
-import type { ArpTableEntry, HostAddressing, PingReply, TraceProbe } from './backend';
+import type { ArpTableEntry, DnsLookup, HostAddressing, PingReply, TraceProbe } from './backend';
 
 export type HostDevice = Extract<Device, { kind: 'pc' | 'server' }>;
 
@@ -246,4 +246,38 @@ export function tracertLines(probesPerHop: number) {
     /** Ends a line that a Ctrl+C cut short. */
     close: () => (open ? '\n' : ''),
   };
+}
+
+/** Windows names the server by its PTR record, which Tracer's DNS servers do not keep. */
+const serverLines = (server: Ipv4Address) => ['Server:  UnKnown', `Address:  ${server}`, ''];
+
+/** `nslookup`'s report for a lookup's outcome, as Windows words it. */
+export function formatNslookup(lookup: DnsLookup): string[] {
+  switch (lookup.kind) {
+    case 'answer':
+      return [
+        ...serverLines(lookup.server),
+        `Name:    ${lookup.name}`,
+        `Address:  ${lookup.address}`,
+        '',
+      ];
+    case 'not-found':
+      return [
+        ...serverLines(lookup.server),
+        `*** UnKnown can't find ${lookup.name}: Non-existent domain`,
+        '',
+      ];
+    case 'timeout':
+      return [
+        ...serverLines(lookup.server),
+        'DNS request timed out.',
+        '    timeout was 2 seconds.',
+        '*** Request to UnKnown timed-out',
+        '',
+      ];
+    case 'no-server':
+      return ['*** Default servers are not available', ''];
+    case 'cancelled':
+      return ['*** Request cancelled', ''];
+  }
 }

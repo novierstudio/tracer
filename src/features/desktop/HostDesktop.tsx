@@ -1,5 +1,6 @@
 import {
   ChevronLeftIcon,
+  GlobeIcon,
   NetworkIcon,
   PowerIcon,
   SquareTerminalIcon,
@@ -20,8 +21,10 @@ import { EmptyState } from '@/ui/empty-state';
 import { Kbd } from '@/ui/kbd';
 import { addressPort, configAddressing, type HostDevice } from './format';
 import { HostPrompt } from './HostPrompt';
+import { hostBackend } from './registry';
+import { WebBrowser } from './WebBrowser';
 
-type App = 'ip' | 'prompt';
+type App = 'ip' | 'prompt' | 'browser';
 
 const APPS: Record<App, { title: string; blurb: string; icon: LucideIcon; tile: string }> = {
   ip: {
@@ -35,6 +38,12 @@ const APPS: Record<App, { title: string; blurb: string; icon: LucideIcon; tile: 
     blurb: 'ping, tracert, ipconfig and arp',
     icon: SquareTerminalIcon,
     tile: 'bg-fg-1 text-surface-1',
+  },
+  browser: {
+    title: 'Web Browser',
+    blurb: 'Open pages from HTTP servers',
+    icon: GlobeIcon,
+    tile: 'bg-proto-icmp text-surface-1',
   },
 };
 
@@ -92,6 +101,8 @@ function Desktop({ device, focusPrompt }: Props) {
         <div className="px-3 py-3">
           <HostAddressForm device={device} />
         </div>
+      ) : app === 'browser' ? (
+        <WebBrowser device={device.id} backend={hostBackend} />
       ) : (
         <>
           <div className="min-h-0 flex-1 pt-2 pr-1 pb-2 pl-3">

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { HELP, parseCommand, PING_USAGE, TRACERT_USAGE } from './commands';
+import { HELP, NSLOOKUP_USAGE, parseCommand, PING_USAGE, TRACERT_USAGE } from './commands';
 
 const parsed = (line: string) => {
   const result = parseCommand(line);
@@ -92,6 +92,23 @@ describe('parseCommand', () => {
       error: expect.arrayContaining(['ARP -a']),
     });
     expect(parsed('arp')).toMatchObject({ error: expect.arrayContaining(['ARP -a']) });
+  });
+
+  it('reads nslookup with a name in any case, and an optional server', () => {
+    expect(parsed('nslookup WWW.Lab.Local')).toEqual({ kind: 'nslookup', name: 'www.lab.local' });
+    expect(parsed('NSLOOKUP www.lab.local 192.168.1.20')).toEqual({
+      kind: 'nslookup',
+      name: 'www.lab.local',
+      server: '192.168.1.20',
+    });
+    expect(parsed('nslookup')).toEqual({ error: NSLOOKUP_USAGE });
+    expect(parsed('nslookup -?')).toEqual({ error: NSLOOKUP_USAGE });
+    expect(parsed('nslookup a b c')).toEqual({ error: NSLOOKUP_USAGE });
+    expect(parsed('nslookup bad_name')).toEqual({ error: ['*** Invalid name: bad_name'] });
+    expect(parsed('nslookup www.lab.local dns.lab.local')).toEqual({
+      error: ["*** Can't find address for server dns.lab.local: Non-existent domain"],
+    });
+    expect(HELP.join('\n')).toContain('nslookup <name>');
   });
 
   it('reads help and cls, and refuses anything else', () => {
