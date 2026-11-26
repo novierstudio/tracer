@@ -392,7 +392,7 @@ type Hop = {
   to: string;
   sentAt: number;
   time?: number;
-  payload?: ArpPacket | Ipv4Packet;
+  payload?: ArpPacket | Ipv4Packet | Ipv6Packet;
 };
 
 /** A delivered Ethernet frame on the link between two devices, named by their ids. */
