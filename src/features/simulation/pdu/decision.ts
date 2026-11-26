@@ -7,11 +7,13 @@ import {
   ALL_D_ROUTERS,
   ALL_SPF_ROUTERS,
   BROADCAST_MAC,
+  EIGRP_GROUP,
   LIMITED_BROADCAST,
   multicastMac,
   RIP_GROUP,
   type ArpPacket,
   type DhcpMessage,
+  type EigrpPacket,
   type Ipv4Packet,
   type OspfPacket,
   type RipMessage,
@@ -37,6 +39,7 @@ import {
   type IpAddress,
   type Ipv6Address,
 } from '@/model/ipv6';
+import { eigrpType, type EigrpType } from './layers';
 
 /**
  * What the receiving device did with a frame, read from the frames it sent while it handled
@@ -74,6 +77,11 @@ export type Decision =
   | { kind: 'rip'; command: RipMessage['command']; version: RipVersion; out: readonly PortId[] }
   /** A router running OSPF read an OSPF packet. `sent` is the OSPF it sent while it did. */
   | { kind: 'ospf'; type: OspfType; from: Ipv4Address; sent: readonly OspfSent[] }
+  /**
+   * A router in the packet's AS read an EIGRP packet from `from`. `ack` is the packet's ack
+   * field, and `sent` the EIGRP it sent while it did.
+   */
+  | { kind: 'eigrp'; type: EigrpType; ack: number; from: Ipv4Address; sent: readonly EigrpSent[] }
   | { kind: 'dropped'; reason: DropReason; notified?: PortId }
   | { kind: 'ignored'; reason: IgnoreReason }
   | { kind: 'silent' };
@@ -109,6 +117,9 @@ type OspfType = OspfPacket['type'];
 /** An OSPF packet a router sent while it handled another, and the port it went out of. */
 export type OspfSent = { readonly type: OspfType; readonly port: PortId };
 
+/** An EIGRP packet a router sent while it handled another, and the port it went out of. */
+export type EigrpSent = { readonly type: EigrpType; readonly port: PortId };
+
 /** How a switch changed a frame's 802.1Q tag on its way out. */
 export type Retag =
   { kind: 'same' } | { kind: 'added'; vlan: VlanId } | { kind: 'removed'; vlan: VlanId };
@@ -141,6 +152,8 @@ export type IgnoreReason =
   | { kind: 'dhcp-not-server'; message: DhcpMessage['type'] }
   | { kind: 'no-rip' }
   | { kind: 'no-ospf' }
+  | { kind: 'no-eigrp' }
+  | { kind: 'eigrp-as'; asn: number; own: number }
   | { kind: 'rip-version'; version: RipVersion; accepts: RipVersion };
 
 const ipv4Of = (frame: Frame): Ipv4Packet | undefined =>
@@ -227,6 +240,45 @@ function decideOspf(device: Device, packet: OspfPacket, sent: readonly SentFrame
     sent: sent.flatMap((s) => {
       const out = ospfOf(s.frame);
       return out ? [{ type: out.type, port: s.port }] : [];
+    }),
+  };
+}
+
+const eigrpOf = (frame: Frame): EigrpPacket | undefined => {
+  const payload = ipv4Of(frame)?.payload;
+  return payload?.kind === 'eigrp' ? payload : undefined;
+};
+
+type EigrpArrival = { readonly from: Ipv4Address; readonly packet: EigrpPacket };
+
+/** The EIGRP packet in a frame and its sender, when it is for this device: to its group or one of its addresses. */
+function eigrpFor(device: Device, frame: Frame): EigrpArrival | undefined {
+  const packet = ipv4Of(frame);
+  if (packet?.payload.kind !== 'eigrp') return undefined;
+  const local = packet.dst === EIGRP_GROUP || ownAddresses(device).includes(packet.dst);
+  return local ? { from: packet.src, packet: packet.payload } : undefined;
+}
+
+const EIGRP_MAC = multicastMac(EIGRP_GROUP);
+
+function decideEigrp(
+  device: Device,
+  { from, packet }: EigrpArrival,
+  sent: readonly SentFrame[],
+): Decision {
+  const eigrp = device.kind === 'router' ? device.config.eigrp : undefined;
+  if (!eigrp) return { kind: 'ignored', reason: { kind: 'no-eigrp' } };
+  if (eigrp.asn !== packet.asn) {
+    return { kind: 'ignored', reason: { kind: 'eigrp-as', asn: packet.asn, own: eigrp.asn } };
+  }
+  return {
+    kind: 'eigrp',
+    type: eigrpType(packet),
+    ack: packet.ack,
+    from,
+    sent: sent.flatMap((s) => {
+      const out = eigrpOf(s.frame);
+      return out ? [{ type: eigrpType(out), port: s.port }] : [];
     }),
   };
 }
@@ -769,14 +821,21 @@ export function decide(event: FrameEvent, device: Device | undefined): Decision 
   if (packet6) return decideIpv6(device, frame, event.to.port, packet6, sent);
   const rip = ripFor(device, frame);
   const ospf = ospfFor(device, frame);
+  const eigrp = eigrpFor(device, frame);
   const local =
     frame.kind !== 'ethernet' || frame.dst === BROADCAST_MAC || ownMac(device, frame.dst);
-  // Every device sees the RIPv2 and OSPF groups' frames, so it can say whether it runs them.
-  if (!local && !(rip && frame.dst === RIP_MAC) && !(ospf && OSPF_MACS.includes(frame.dst))) {
+  // Every device sees the RIPv2, OSPF and EIGRP groups' frames, so it can say whether it runs them.
+  if (
+    !local &&
+    !(rip && frame.dst === RIP_MAC) &&
+    !(ospf && OSPF_MACS.includes(frame.dst)) &&
+    !(eigrp && frame.dst === EIGRP_MAC)
+  ) {
     return { kind: 'ignored', reason: { kind: 'other-mac', dst: frame.dst } };
   }
   if (rip) return decideRip(device, rip, sent);
   if (ospf) return decideOspf(device, ospf, sent);
+  if (eigrp) return decideEigrp(device, eigrp, sent);
   const arp = arpOf(frame);
   if (arp) return decideArp(device, arp, sent);
   const packet = ipv4Of(frame);
@@ -988,6 +1047,10 @@ function describeIgnore(name: string, reason: IgnoreReason) {
       return `${name} ignored it: it is a RIP message, and ${name} does not run RIP.`;
     case 'no-ospf':
       return `${name} ignored it: it is an OSPF packet, and ${name} does not run OSPF.`;
+    case 'no-eigrp':
+      return `${name} ignored it: it is an EIGRP packet, and ${name} does not run EIGRP.`;
+    case 'eigrp-as':
+      return `${name} ignored it: it is for EIGRP AS ${reason.asn}, and ${name} runs AS ${reason.own}.`;
     case 'rip-version':
       return `${name} ignored it: it is RIPv${reason.version}, and ${name} is set to RIP version ${reason.accepts} only.`;
   }
@@ -1049,6 +1112,30 @@ function describeOspf(name: string, { type, from, sent }: Extract<Decision, { ki
   return `${read} and sent ${what.join(' and ')}.`;
 }
 
+/** What a router sent, as in "sent an ack". */
+const EIGRP_SENT: Record<EigrpType, string> = {
+  hello: 'a hello',
+  ack: 'an ack',
+  update: 'an update',
+  query: 'a query',
+  reply: 'a reply',
+};
+
+function describeEigrp(
+  name: string,
+  { type, ack, from, sent }: Extract<Decision, { kind: 'eigrp' }>,
+) {
+  const read =
+    type === 'ack'
+      ? `${name} read the EIGRP ack from ${from}, which confirms ${name}'s packet ${ack} arrived`
+      : `${name} read the EIGRP ${type} from ${from}`;
+  if (sent.length === 0) return `${read}.`;
+  const byType = new Map<EigrpType, PortId[]>();
+  for (const s of sent) byType.set(s.type, [...(byType.get(s.type) ?? []), s.port]);
+  const what = [...byType].map(([sentType, ports]) => `${EIGRP_SENT[sentType]} out ${list(ports)}`);
+  return `${read} and sent ${what.join(' and ')}.`;
+}
+
 /** The decision as one sentence a student can read, with `name` the device's hostname. */
 export function describeDecision(decision: Decision, name: string): string {
   switch (decision.kind) {
@@ -1098,6 +1185,8 @@ export function describeDecision(decision: Decision, name: string): string {
       return describeRip(name, decision);
     case 'ospf':
       return describeOspf(name, decision);
+    case 'eigrp':
+      return describeEigrp(name, decision);
     case 'dropped':
       return describeDrop(name, decision);
     case 'ignored':

@@ -6,6 +6,7 @@ import {
   ALL_D_ROUTERS,
   ALL_SPF_ROUTERS,
   BROADCAST_MAC,
+  EIGRP_GROUP,
   multicastMac,
   RIP_GROUP,
   type EthernetFrame,
@@ -37,6 +38,11 @@ import {
   dnsNoSuchName,
   dnsQuery,
   echoRequest6,
+  eigrpAck,
+  eigrpHello,
+  eigrpPacket,
+  eigrpQuery,
+  eigrpUpdate,
   neighborAdvertisement,
   neighborSolicitation,
   ospfAck,
@@ -559,6 +565,96 @@ describe('an OSPF packet', () => {
 
   it('sent to another MAC is still ignored as another device’s frame', () => {
     expect(told(withOspf, 'R2', { ...hello, dst: mac(9) }, [])).toBe(
+      "R2 ignored it: it is addressed to 02:00:00:00:00:09, not to R2's MAC.",
+    );
+  });
+});
+
+describe('an EIGRP packet', () => {
+  const { lab, pc2, r1 } = routedLab();
+  const plain = lab.device(r1);
+  if (plain.kind !== 'router') throw new Error('R1 is not a router');
+  const inAs = (asn: number): Device => ({
+    ...plain,
+    config: {
+      ...plain.config,
+      eigrp: { asn, networks: [], passiveInterfaces: [], autoSummary: false, variance: 1 },
+    },
+  });
+  const toGroup = (packet: Parameters<typeof eigrpPacket>[0]) =>
+    ({
+      kind: 'ethernet',
+      src: mac(1),
+      dst: multicastMac(EIGRP_GROUP),
+      payload: eigrpPacket(packet),
+    }) satisfies EthernetFrame;
+  const hello = toGroup(eigrpHello);
+  const told = (device: Device, name: string, frame: EthernetFrame, sent: FrameEvent['sent']) => {
+    const port = device.kind === 'pc' ? 'FastEthernet0' : 'GigabitEthernet0/1';
+    const decision = decide(arrival(device.id, port, frame, sent), device)!;
+    return describeDecision(decision, name);
+  };
+  const out = (port: string, frame: EthernetFrame) => ({ port: PortId.parse(port), frame });
+  /** A packet to R1's own address on Gi0/1 and that port's MAC, as an ack is sent. */
+  const unicast = (packet: Parameters<typeof eigrpPacket>[0]): EthernetFrame => {
+    const own = plain.ports.find((port) => port.id === 'GigabitEthernet0/1')!;
+    return {
+      kind: 'ethernet',
+      src: mac(1),
+      dst: own.kind === 'serial' ? mac(9) : own.mac,
+      payload: eigrpPacket(packet, plain.config.interfaces[own.id]!.ipv4!.address),
+    };
+  };
+
+  it('is read by a router in the same AS, sent to the group', () => {
+    expect(told(inAs(1), 'R2', hello, [])).toBe('R2 read the EIGRP hello from 10.0.12.1.');
+    expect(told(inAs(1), 'R2', toGroup(eigrpQuery), [])).toBe(
+      'R2 read the EIGRP query from 10.0.12.1.',
+    );
+  });
+
+  it('reads an ack sent to the router’s own address and MAC, and says which packet it confirms', () => {
+    expect(told(inAs(1), 'R2', unicast(eigrpAck), [])).toBe(
+      "R2 read the EIGRP ack from 10.0.12.1, which confirms R2's packet 5 arrived.",
+    );
+  });
+
+  it('says what EIGRP the router sent back, and out of which ports', () => {
+    expect(
+      told(inAs(1), 'R2', toGroup(eigrpUpdate), [
+        out('GigabitEthernet0/1', unicast(eigrpAck)),
+        out('GigabitEthernet0/0', toGroup(eigrpUpdate)),
+        out('Serial0/0/0', toGroup(eigrpUpdate)),
+      ]),
+    ).toBe(
+      'R2 read the EIGRP update from 10.0.12.1 and sent an ack out Gi0/1 and an update out Gi0/0 and Se0/0/0.',
+    );
+    expect(
+      told(inAs(1), 'R2', toGroup(eigrpQuery), [
+        out('GigabitEthernet0/1', unicast({ ...eigrpQuery, opcode: 'reply' })),
+      ]),
+    ).toBe('R2 read the EIGRP query from 10.0.12.1 and sent a reply out Gi0/1.');
+  });
+
+  it('is ignored by a router in another AS, which says both numbers', () => {
+    const decision = decide(arrival(r1, 'GigabitEthernet0/1', hello, []), inAs(2))!;
+    expect(describeDecision(decision, 'R2')).toBe(
+      'R2 ignored it: it is for EIGRP AS 1, and R2 runs AS 2.',
+    );
+    expect(dropLabel(decision)).toBeUndefined();
+  });
+
+  it('is ignored by a PC or a router without EIGRP, which say they do not run EIGRP', () => {
+    expect(told(lab.device(pc2), 'PC2', hello, [])).toBe(
+      'PC2 ignored it: it is an EIGRP packet, and PC2 does not run EIGRP.',
+    );
+    expect(told(plain, 'R1', hello, [])).toBe(
+      'R1 ignored it: it is an EIGRP packet, and R1 does not run EIGRP.',
+    );
+  });
+
+  it('sent to another MAC is still ignored as another device’s frame', () => {
+    expect(told(inAs(1), 'R2', { ...hello, dst: mac(9) }, [])).toBe(
       "R2 ignored it: it is addressed to 02:00:00:00:00:09, not to R2's MAC.",
     );
   });

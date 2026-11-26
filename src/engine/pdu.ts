@@ -1,4 +1,4 @@
-import type { Ipv4Address, MacAddress, PrefixLength, VlanId } from '@/model';
+import type { Ipv4Address, Ipv4Cidr, MacAddress, PrefixLength, VlanId } from '@/model';
 import type { DnsMessage } from './dns';
 import type { Ipv6Packet } from './pdu6';
 import type { TcpSegment } from './tcp';
@@ -59,9 +59,9 @@ export type Ipv4Packet = {
   readonly payload: Ipv4Payload;
 };
 
-export type Ipv4Payload = IcmpMessage | UdpDatagram | OspfPacket | TcpSegment;
+export type Ipv4Payload = IcmpMessage | UdpDatagram | OspfPacket | EigrpPacket | TcpSegment;
 
-export const IP_PROTOCOL = { icmp: 1, tcp: 6, udp: 17, ospf: 89 } as const satisfies Record<
+export const IP_PROTOCOL = { icmp: 1, tcp: 6, udp: 17, eigrp: 88, ospf: 89 } as const satisfies Record<
   Ipv4Payload['kind'],
   number
 >;
@@ -432,3 +432,96 @@ export const OSPF_PACKET_TYPE = {
   lsu: 4,
   lsack: 5,
 } as const satisfies Record<OspfPacket['type'], number>;
+
+/** Every EIGRP router on a link listens to this group: hellos and multicast updates go here. */
+export const EIGRP_GROUP = '224.0.0.10' as Ipv4Address;
+
+/** The EIGRP header's version field. */
+export const EIGRP_VERSION = 2;
+
+/** The delay EIGRP advertises for a route that is gone: all ones, an infinite metric. */
+export const EIGRP_UNREACHABLE = 0xffffffff;
+
+/**
+ * A path's metric as EIGRP carries it, unscaled. The receiver adds its own interface: the lower
+ * bandwidth, the delays summed, one more hop. The composite metric comes from these fields.
+ */
+export type EigrpMetric = {
+  /** The slowest link on the path, in kbit/s. */
+  readonly bandwidth: number;
+  /** The path's total delay, in tens of microseconds. EIGRP_UNREACHABLE for a route that is gone. */
+  readonly delay: number;
+  /** Routers on the path. EIGRP drops a route 100 hops away. */
+  readonly hops: number;
+  /** 255 is a perfect link. */
+  readonly reliability: number;
+  /** 1 is an idle link, 255 a full one. */
+  readonly load: number;
+  /** The smallest MTU on the path, in bytes. */
+  readonly mtu: number;
+};
+
+/** Where a route redistributed into EIGRP came from. */
+export type EigrpExternal = {
+  /** The router ID of the router that redistributed it. */
+  readonly originRouter: Ipv4Address;
+  readonly originAs: number;
+  readonly protocol: 'static';
+  readonly externalMetric: number;
+};
+
+/** One destination in an update, query or reply. */
+export type EigrpRoute = {
+  readonly prefix: Ipv4Cidr;
+  readonly metric: EigrpMetric;
+  /** Present on an external route: one redistributed into EIGRP. */
+  readonly external?: EigrpExternal;
+};
+
+/** The K-values that weigh bandwidth, load, delay and reliability. Neighbours must agree on them. */
+export type EigrpKValues = readonly [k1: number, k2: number, k3: number, k4: number, k5: number];
+
+/** What every EIGRP packet's header says. */
+type EigrpHeader = {
+  readonly kind: 'eigrp';
+  /** The autonomous system number. Only routers in the same AS become neighbours. */
+  readonly asn: number;
+  /** 0 on an unreliable packet: a hello or an ack. */
+  readonly sequence: number;
+  /** The sequence number of the reliable packet from the receiver this acknowledges, or 0. */
+  readonly ack: number;
+};
+
+/**
+ * Finds and keeps neighbours. A hello with no parameters is an ack: it carries only the sequence
+ * number it acknowledges, unicast to the neighbour that sent the reliable packet.
+ */
+export type EigrpHello = EigrpHeader & {
+  readonly opcode: 'hello';
+  /** Absent on an ack. */
+  readonly parameters?: {
+    readonly kValues: EigrpKValues;
+    /** Seconds the receiver waits for the next hello before it drops the sender. */
+    readonly holdTime: number;
+  };
+};
+
+/**
+ * Carries routes, reliably: the receiver acks each one. An update tells news, a query asks every
+ * neighbour for a way to a destination the sender lost, and a reply answers a query.
+ */
+export type EigrpRouting = EigrpHeader & {
+  readonly opcode: 'update' | 'query' | 'reply';
+  /** The INIT flag, on the first update to a new neighbour, which asks for its whole table. */
+  readonly init: boolean;
+  readonly routes: readonly EigrpRoute[];
+};
+
+export type EigrpPacket = EigrpHello | EigrpRouting;
+
+export const EIGRP_OPCODE = {
+  update: 1,
+  query: 3,
+  reply: 4,
+  hello: 5,
+} as const satisfies Record<EigrpPacket['opcode'], number>;

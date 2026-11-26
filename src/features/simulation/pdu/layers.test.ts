@@ -5,6 +5,7 @@ import {
   ALL_D_ROUTERS,
   ALL_SPF_ROUTERS,
   BROADCAST_MAC,
+  EIGRP_GROUP,
   LIMITED_BROADCAST,
   multicastMac,
   PVST_MAC,
@@ -12,6 +13,7 @@ import {
   UNKNOWN_MAC,
   UNSPECIFIED_ADDRESS,
   type DhcpMessage,
+  type EigrpPacket,
   type Ipv4Packet,
   type OspfPacket,
 } from '@/engine/pdu';
@@ -23,6 +25,11 @@ import {
   dnsNoSuchName,
   dnsQuery,
   echoRequest6,
+  eigrpAck,
+  eigrpHello,
+  eigrpPacket,
+  eigrpQuery,
+  eigrpUpdate,
   httpOk,
   neighborAdvertisement,
   neighborSolicitation,
@@ -184,6 +191,14 @@ const ospfFrame = (packet: OspfPacket, dst: Ipv4Address = ALL_SPF_ROUTERS): Fram
   payload: ospfPacket(packet, dst),
 });
 
+/** An EIGRP packet in an untagged Ethernet frame: to its group's MAC, or to 10.0.12.2's. */
+const eigrpFrame = (packet: EigrpPacket, dst: Ipv4Address = EIGRP_GROUP): Frame => ({
+  kind: 'ethernet',
+  dst: dst === EIGRP_GROUP ? multicastMac(EIGRP_GROUP) : mac(2),
+  src: mac(1),
+  payload: eigrpPacket(packet, dst),
+});
+
 /** A DNS message or TCP segment between PC1 and PC2, in an untagged Ethernet frame. */
 const webFrame = (payload: Parameters<typeof webPacket>[0]): Frame => ({
   kind: 'ethernet',
@@ -265,6 +280,11 @@ const FRAMES: Record<string, Frame> = {
   'OSPF LS request': ospfFrame(ospfLsr, '10.0.12.2' as Ipv4Address),
   'OSPF LS update': ospfFrame(ospfLsu, ALL_D_ROUTERS),
   'OSPF LS ack': ospfFrame(ospfAck),
+  'EIGRP hello': eigrpFrame(eigrpHello),
+  'EIGRP ack': eigrpFrame(eigrpAck, ip('10.0.12.2')),
+  'EIGRP update': eigrpFrame(eigrpUpdate),
+  'EIGRP init update': eigrpFrame({ ...eigrpUpdate, init: true, routes: [] }, ip('10.0.12.2')),
+  'HDLC EIGRP query': { kind: 'hdlc', payload: eigrpPacket(eigrpQuery) },
   'TCP SYN': webFrame(webSession[0]!),
   'TCP RST': webFrame(tcpRefusal(webSession[0]!)),
   'HTTP GET': webFrame(webSession[3]!),
@@ -756,6 +776,166 @@ describe('dissect an OSPF packet', () => {
     expect(field(update, 'ethernet.dst')!.value).toBe('01:00:5e:00:00:06');
     expect(field(update, 'ethernet.dst')!.explain).toMatch(/DR and BDR only/);
     expect(field(update, 'ipv4.dst')!.explain).toMatch(/only the DR and BDR/);
+  });
+});
+
+/** Where EIGRP starts in an untagged Ethernet frame: after 14 bytes of Ethernet and 20 of IPv4. */
+const EIGRP_START = 34;
+
+/** The EIGRP packet's bytes, by the IPv4 total length: EIGRP's header has no length of its own. */
+function eigrpBytesOf({ bytes }: Dissection, start = EIGRP_START) {
+  const total = (bytes[start - 18]! << 8) | bytes[start - 17]!;
+  return [...bytes.slice(start, start + total - 20)];
+}
+
+/** The header but its checksum: version 2, the opcode, flags, sequence, ack, virtual router 0 and AS 1. */
+const eigrpHeader = (opcode: number, flags: number, sequence: number, ack: number) => [
+  2,
+  opcode,
+  ...[0, 0, 0, flags],
+  ...[0, 0, 0, sequence],
+  ...[0, 0, 0, ack],
+  ...[0, 0],
+  ...[0, 1],
+];
+const withoutChecksum = (eigrp: readonly number[]) => [...eigrp.slice(0, 2), ...eigrp.slice(4, 20)];
+
+describe('dissect an EIGRP packet', () => {
+  const hello = dissect(FRAMES['EIGRP hello']!);
+  const update = dissect(FRAMES['EIGRP update']!);
+
+  it('stacks EIGRP at layer 3 over IPv4 protocol 88', () => {
+    expect(hello.layers.map((layer) => [layer.name, layer.osi])).toEqual([
+      ['Ethernet II', 2],
+      ['IPv4', 3],
+      ['EIGRP', 3],
+    ]);
+    expect(field(hello, 'ipv4.protocol')!.value).toBe('88 (EIGRP)');
+    expect(bytesOf(hello, 'ipv4.protocol')).toEqual([88]);
+    expect(field(hello, 'ipv4.ttl')!.value).toBe('2');
+    expect(hello.layers.at(-1)!.summary).toBe('Hello, AS 1, hold 15 s');
+  });
+
+  it('writes a checksum over the whole EIGRP packet', () => {
+    for (const name of ['EIGRP hello', 'EIGRP ack', 'EIGRP update', 'EIGRP init update']) {
+      const eigrp = eigrpBytesOf(dissect(FRAMES[name]!));
+      expect(eigrp.slice(2, 4)).not.toEqual([0, 0]);
+      expect(internetChecksum(eigrp)).toBe(0);
+    }
+  });
+
+  it('lays out a hello: the header, then the Parameters and Software Version TLVs', () => {
+    const eigrp = eigrpBytesOf(hello);
+    expect(withoutChecksum(eigrp)).toEqual(eigrpHeader(5, 0, 0, 0));
+    expect(eigrp.slice(20)).toEqual([
+      ...[0, 1, 0, 12],
+      ...[1, 0, 1, 0, 0],
+      0,
+      ...[0, 15],
+      ...[0, 4, 0, 8],
+      ...[15, 1, 2, 0],
+    ]);
+    expect(field(hello, 'eigrp.opcode')!.value).toBe('5 (Hello)');
+    expect(field(hello, 'eigrp.asn')!.value).toBe('AS 1');
+    expect(field(hello, 'eigrp.kValues')!.value).toBe('K1 1, K2 0, K3 1, K4 0, K5 0');
+    expect(field(hello, 'eigrp.holdTime')!.value).toBe('15 s');
+    expect(field(hello, 'eigrp.release')!.value).toBe('IOS 15.1, EIGRP 2.0');
+  });
+
+  it('lays out an ack as a bare header carrying the sequence it acknowledges', () => {
+    const ack = dissect(FRAMES['EIGRP ack']!);
+    const eigrp = eigrpBytesOf(ack);
+    expect(eigrp).toHaveLength(20);
+    expect(withoutChecksum(eigrp)).toEqual(eigrpHeader(5, 0, 0, 5));
+    expect(field(ack, 'eigrp.opcode')!.value).toBe('5 (Hello, used as an ack)');
+    expect(field(ack, 'ipv4.dst')!.value).toBe('10.0.12.2');
+    expect(ack.layers.at(-1)!.summary).toBe('Ack 5');
+  });
+
+  it('sets the INIT flag on the first update to a new neighbour', () => {
+    const init = dissect(FRAMES['EIGRP init update']!);
+    const eigrp = eigrpBytesOf(init);
+    expect(withoutChecksum(eigrp)).toEqual(eigrpHeader(1, 1, 6, 0));
+    expect(field(init, 'eigrp.flags')!.value).toBe('0x00000001 (INIT)');
+    expect(init.layers.at(-1)!.summary).toBe('Update, 0 routes (init)');
+  });
+
+  it('lays out an internal and an external route, with delay and bandwidth scaled as IOS does', () => {
+    const eigrp = eigrpBytesOf(update);
+    expect(withoutChecksum(eigrp)).toEqual(eigrpHeader(1, 0, 6, 0));
+    const internal = eigrp.slice(20, 48);
+    const external = eigrp.slice(48);
+    expect(internal).toEqual([
+      ...[0x01, 0x02, 0, 28],
+      ...[0, 0, 0, 0],
+      // Delay 1 ten of µs, times 256.
+      ...[0, 0, 0x01, 0x00],
+      // 10^7 / 1000000 kbit/s = 10, times 256 = 2560.
+      ...[0, 0, 0x0a, 0x00],
+      ...[0, 0x05, 0xdc],
+      ...[0, 255, 1, 0, 0],
+      24,
+      ...[192, 168, 1],
+    ]);
+    expect(external).toEqual([
+      ...[0x01, 0x03, 0, 47],
+      ...[0, 0, 0, 0],
+      ...[1, 1, 1, 1],
+      ...[0, 0, 0, 1],
+      ...[0, 0, 0, 0],
+      ...[0, 0, 0, 0],
+      ...[0, 0],
+      3,
+      0,
+      // Delay 2001 tens of µs, times 256 = 512256.
+      ...[0, 0x07, 0xd1, 0x00],
+      // 10^7 / 1544 kbit/s = 6476, times 256 = 1657856.
+      ...[0, 0x19, 0x4c, 0x00],
+      ...[0, 0x05, 0xdc],
+      ...[1, 255, 1, 0, 0],
+      16,
+      ...[172, 16],
+    ]);
+    expect(field(update, 'eigrp.route.1.tlv')!.value).toBe('0x0102 (IPv4 internal), 28 bytes');
+    expect(field(update, 'eigrp.route.1.delay')!.value).toBe('256 (1 ten of µs = 10 µs)');
+    expect(field(update, 'eigrp.route.1.bandwidth')!.value).toBe('2560 (1000000 kbit/s)');
+    expect(field(update, 'eigrp.route.1.destination')!.value).toBe('192.168.1.0/24');
+    expect(field(update, 'eigrp.route.2.tlv')!.value).toBe('0x0103 (IPv4 external), 47 bytes');
+    expect(field(update, 'eigrp.route.2.originRouter')!.value).toBe('1.1.1.1');
+    expect(field(update, 'eigrp.route.2.protocol')!.value).toBe('3 (static)');
+    expect(field(update, 'eigrp.route.2.delay')!.value).toBe('512256 (2001 tens of µs = 20010 µs)');
+    expect(field(update, 'eigrp.route.2.bandwidth')!.value).toBe('1657856 (1544 kbit/s)');
+    expect(update.layers.at(-1)!.summary).toBe('Update, 2 routes');
+  });
+
+  it('marks an unreachable route with a delay of all ones, on a serial link too', () => {
+    const query = dissect(FRAMES['HDLC EIGRP query']!);
+    // A flag byte and HDLC's 4-byte header, then 20 bytes of IPv4.
+    const eigrp = eigrpBytesOf(query, 25);
+    expect(internetChecksum(eigrp)).toBe(0);
+    expect(withoutChecksum(eigrp)).toEqual(eigrpHeader(3, 0, 7, 0));
+    expect(bytesOf(query, 'eigrp.route.1.delay')).toEqual([0xff, 0xff, 0xff, 0xff]);
+    expect(field(query, 'eigrp.route.1.delay')!.value).toBe('0xFFFFFFFF (unreachable)');
+    expect(query.layers.at(-1)!.summary).toBe('Query, 1 route');
+  });
+
+  it('sends one zero byte for the destination of a default route', () => {
+    const [route] = eigrpUpdate.routes;
+    const defaultRoute = {
+      ...route!,
+      prefix: { address: ip('0.0.0.0'), prefixLength: 0 as PrefixLength },
+    };
+    const reply = dissect(eigrpFrame({ ...eigrpUpdate, opcode: 'reply', routes: [defaultRoute] }));
+    const eigrp = eigrpBytesOf(reply);
+    expect(eigrp.slice(20, 24)).toEqual([0x01, 0x02, 0, 26]);
+    expect(eigrp.slice(-2)).toEqual([0, 0]);
+    expect(bytesOf(reply, 'eigrp.route.1.destination')).toEqual([0]);
+  });
+
+  it('names the EIGRP group in the MAC and IPv4 destinations', () => {
+    expect(field(hello, 'ethernet.dst')!.value).toBe('01:00:5e:00:00:0a');
+    expect(field(hello, 'ethernet.dst')!.explain).toMatch(/224\.0\.0\.10, all EIGRP routers/);
+    expect(field(hello, 'ipv4.dst')!.explain).toMatch(/every EIGRP router/);
   });
 });
 

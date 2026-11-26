@@ -4,6 +4,7 @@ import type {
   ArpPacket,
   Bpdu,
   DhcpMessage,
+  EigrpPacket,
   IcmpMessage,
   Ipv4Packet,
   OspfPacket,
@@ -29,6 +30,7 @@ export type ProtocolId =
   | 'ssh'
   | 'rip'
   | 'ospf'
+  | 'eigrp'
   | 'stp'
   | 'hello';
 
@@ -47,6 +49,7 @@ export const PROTOCOLS: Record<ProtocolId, { label: string; token: `--proto-${st
   ssh: { label: 'SSH', token: '--proto-tcp' },
   rip: { label: 'RIP', token: '--proto-routing' },
   ospf: { label: 'OSPF', token: '--proto-routing' },
+  eigrp: { label: 'EIGRP', token: '--proto-routing' },
   stp: { label: 'STP', token: '--proto-stp' },
   hello: { label: 'Hello', token: '--proto-stp' },
 };
@@ -62,6 +65,8 @@ function ipProtocol(packet: Ipv4Packet): ProtocolId {
       return packet.payload.payload.kind;
     case 'ospf':
       return 'ospf';
+    case 'eigrp':
+      return 'eigrp';
     case 'tcp':
       // A segment that carries data shows as its application; a bare SYN, ACK, FIN or RST as TCP.
       return packet.payload.payload?.kind ?? 'tcp';
@@ -180,6 +185,14 @@ function describeOspf(packet: OspfPacket): string {
   }
 }
 
+function describeEigrp(packet: EigrpPacket): string {
+  if (packet.opcode === 'hello') {
+    return packet.parameters ? `EIGRP hello, AS ${packet.asn}` : `EIGRP ack ${packet.ack}`;
+  }
+  const text = `EIGRP ${packet.opcode}, ${count(packet.routes.length, 'route')}`;
+  return packet.init ? `${text} (init)` : text;
+}
+
 function describeUdp(packet: Ipv4Packet, datagram: UdpDatagram): string {
   switch (datagram.payload.kind) {
     case 'dhcp':
@@ -203,6 +216,8 @@ function describePacket(packet: Ipv4Packet): string {
       return describeUdp(packet, payload);
     case 'ospf':
       return describeOspf(payload);
+    case 'eigrp':
+      return describeEigrp(payload);
     case 'tcp':
       return describeSegment(payload);
   }

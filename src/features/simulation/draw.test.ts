@@ -47,6 +47,7 @@ const palette: Palette = {
     ssh: colour,
     rip: colour,
     ospf: colour,
+    eigrp: colour,
     stp: colour,
     hello: colour,
   },

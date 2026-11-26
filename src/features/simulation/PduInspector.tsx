@@ -51,6 +51,7 @@ const DECISION_LOOK: Record<Decision['kind'], { icon: LucideIcon; tone: Tone; la
     web: { icon: ReplyIcon, tone: 'accent', layer: ['http', 'dns', 'tcp'] },
     rip: { icon: RouteIcon, tone: 'accent', layer: ['rip'] },
     ospf: { icon: RouteIcon, tone: 'accent', layer: ['ospf'] },
+    eigrp: { icon: RouteIcon, tone: 'accent', layer: ['eigrp'] },
     dropped: {
       icon: CircleXIcon,
       tone: 'err',
@@ -59,7 +60,7 @@ const DECISION_LOOK: Record<Decision['kind'], { icon: LucideIcon; tone: Tone; la
     ignored: {
       icon: EyeOffIcon,
       tone: 'muted',
-      layer: ['arp', 'dhcp', 'rip', 'ospf', 'icmpv6', 'ipv4', 'ipv6', 'bpdu', 'ethernet'],
+      layer: ['arp', 'dhcp', 'rip', 'ospf', 'eigrp', 'icmpv6', 'ipv4', 'ipv6', 'bpdu', 'ethernet'],
     },
     silent: { icon: MinusIcon, tone: 'muted', layer: [] },
   };
