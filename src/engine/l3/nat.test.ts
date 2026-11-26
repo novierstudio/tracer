@@ -296,7 +296,8 @@ describe('dynamic NAT', () => {
     ).toContain('Dropped a packet from 10.0.0.11: NAT pool OUT has no address or port left');
   });
 
-  it('frees the address once the binding times out', () => {
+  // A day of simulated time, with every router and switch advertising CDP every 5 s.
+  it('frees the address once the binding times out', { timeout: 20_000 }, () => {
     const { ping, later, translations, pc1, pc2 } = natLab(onePool);
     ping(pc1, '198.51.100.10');
 

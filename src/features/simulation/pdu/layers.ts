@@ -35,6 +35,7 @@ import {
   type EigrpPacket,
   type EigrpRoute,
   type EthernetFrame,
+  type HdlcFrame,
   type IcmpEcho,
   type IcmpMessage,
   type Ipv4Packet,
@@ -2387,8 +2388,12 @@ function ethernetLayers(wire: Wire, frame: EthernetFrame): Layer[] {
 
 // HDLC
 
-function hdlcLayers(wire: Wire, packet: Ipv4Packet | Ipv6Packet): Layer[] {
-  const name = ETHER_TYPE_NAMES[packet.kind];
+function hdlcLayers(wire: Wire, packet: HdlcFrame['payload']): Layer[] {
+  // Cisco HDLC names CDP by its SNAP protocol ID, and IP by its EtherType.
+  const [code, name] =
+    packet.kind === 'cdp'
+      ? [SNAP.cdp.pid, SNAP.cdp.name]
+      : [ETHER_TYPE[packet.kind], ETHER_TYPE_NAMES[packet.kind]];
   const flag = (id: string) =>
     wire.field(id, 'Flag', hex(0x7e, 2), 'Marks where an HDLC frame begins and ends.', [0x7e]);
   const fields = [
@@ -2404,12 +2409,13 @@ function hdlcLayers(wire: Wire, packet: Ipv4Packet | Ipv6Packet): Layer[] {
     wire.field(
       'hdlc.protocol',
       'Protocol',
-      `${hex(ETHER_TYPE[packet.kind], 4)} (${name})`,
+      `${hex(code, 4)} (${name})`,
       'Names what the frame carries, as an EtherType does on Ethernet.',
-      u16(ETHER_TYPE[packet.kind]),
+      u16(code),
     ),
   ];
-  const inner = ipLayers(wire, packet);
+  const inner =
+    packet.kind === 'cdp' ? [placeSection(wire, controlSection(packet))] : ipLayers(wire, packet);
   const fcs = crc16(wire.data.slice(1));
   fields.push(
     wire.field(

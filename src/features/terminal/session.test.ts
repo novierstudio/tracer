@@ -245,9 +245,15 @@ describe('a console reading live state', () => {
     const mark = engine.log.lastId;
     engine.runUntil(simTime(engine.now + 10_000));
 
+    // CDP keeps advertising; nothing else leaves R1.
     const sent = engine.log
       .since(mark)
-      .filter((event) => event.kind === 'frame' && event.from.device === r1Id);
+      .filter(
+        (event) =>
+          event.kind === 'frame' &&
+          event.from.device === r1Id &&
+          !(event.frame.kind === 'ethernet' && event.frame.payload.kind === 'cdp'),
+      );
     expect(sent).toEqual([]);
     expect((await rows(r1)).slice(-2)).toEqual([
       expect.stringMatching(/^Success rate is 100 percent \(3\/3\)/),

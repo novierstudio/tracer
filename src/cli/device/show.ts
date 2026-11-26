@@ -6,6 +6,8 @@ import {
   type DhcpServerConfig,
   formatVlans,
   INTERFACE_TYPES,
+  IOS_SOFTWARE,
+  IOS_VERSION,
   normalizeVlans,
   parentPort,
   VTY_LINE_COUNT,
@@ -37,7 +39,6 @@ import { sshLines, usernameLines } from './remote';
 import { eigrpLines } from './eigrpConfig';
 import { accessListLines, natLines } from './showAclNat';
 
-export const IOS_VERSION = '15.1';
 export const UNSUPPORTED_MARKER = '! unsupported in Tracer';
 
 export type InterfaceEntry =
@@ -508,7 +509,7 @@ export function showVersion(device: IosDevice): string[] {
   for (const port of device.ports) counts.set(port.kind, (counts.get(port.kind) ?? 0) + 1);
   const hardware = [...counts].map(([kind, n]) => `${n} ${PORT_LABEL[kind][n === 1 ? 0 : 1]}`);
   return [
-    `Tracer IOS Software, Version ${IOS_VERSION}, RELEASE SOFTWARE`,
+    IOS_SOFTWARE,
     '',
     `${device.config.hostname} uptime is 0 minutes`,
     'System returned to ROM by power-on',

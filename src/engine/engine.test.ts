@@ -618,13 +618,16 @@ describe('determinism', () => {
 
     expect(first.events.at(-1)).toMatchObject({ kind: 'summary', sent: 4, received: 4 });
     // Four echo round trips of 8 hops, and two ARP exchanges of 4: PC1 for R1, R1 for PC2.
-    const data = frames(first.trace).filter(
-      (event) => !(event.frame.kind === 'ethernet' && event.frame.payload.kind === 'bpdu'),
-    );
-    expect(data).toHaveLength(40);
+    const control = (kind: 'bpdu' | 'cdp') =>
+      frames(first.trace).filter(
+        (event) => event.frame.kind === 'ethernet' && event.frame.payload.kind === kind,
+      ).length;
+    expect(frames(first.trace).length - control('bpdu') - control('cdp')).toBe(40);
     // Each switch is its own root and sends a hello out of both its ports every 2 s.
     const hellos = (STP_CONVERGED + 10_000) / 2_000;
-    expect(frames(first.trace).length - data.length).toBe(hellos * 2 * 2);
+    expect(control('bpdu')).toBe(hellos * 2 * 2);
+    // Both ports of each switch and of R1 send CDP at 0, 5 and 10 s on the fast timers.
+    expect(control('cdp')).toBe(6 * 3);
     expect(second).toEqual(first);
     for (const clock of clocks) expect(clock).not.toHaveBeenCalled();
   });

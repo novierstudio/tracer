@@ -49,6 +49,8 @@ export type LldpNeighbor = {
   readonly systemDescription: string;
   readonly capabilities: readonly DeviceCapability[];
   readonly managementAddress?: Ipv4Address;
+  /** The neighbour's port VLAN, as `show lldp neighbors detail` prints it. */
+  readonly vlan?: VlanId;
 };
 
 export type LldpStatus = {

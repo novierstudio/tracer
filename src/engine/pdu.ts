@@ -337,6 +337,8 @@ export type LldpPacket = {
   /** What the sender can do, and what it has enabled: IOS enables what it can. */
   readonly capabilities: readonly DeviceCapability[];
   readonly managementAddress?: Ipv4Address;
+  /** The sending port's VLAN ID (802.1 TLV): a switchport's access or native VLAN, else 1. */
+  readonly vlan?: VlanId;
 };
 
 /** One end of an LACP conversation: the system and port, and the key its channel group gives. */
@@ -368,7 +370,10 @@ export type PagpPdu = {
 };
 
 /** A frame on a serial link. Cisco HDLC needs no addresses: the link has one peer. */
-export type HdlcFrame = { readonly kind: 'hdlc'; readonly payload: Ipv4Packet | Ipv6Packet };
+export type HdlcFrame = {
+  readonly kind: 'hdlc';
+  readonly payload: Ipv4Packet | Ipv6Packet | CdpPacket;
+};
 
 /** Every OSPF router on a link listens to this group: hellos go here. */
 export const ALL_SPF_ROUTERS = '224.0.0.5' as Ipv4Address;

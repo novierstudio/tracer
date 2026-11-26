@@ -7,6 +7,12 @@ import type {
   PortSecurityViolation,
 } from './topology';
 
+/** The IOS release routers and switches run, as `show version` and the running-config give it. */
+export const IOS_VERSION = '15.1';
+
+/** The first line of `show version`, which CDP and LLDP also advertise as the software. */
+export const IOS_SOFTWARE = `Tracer IOS Software, Version ${IOS_VERSION}, RELEASE SOFTWARE`;
+
 /** CDP's IOS defaults: an advertisement every 60 s, which neighbours keep for 180 s. */
 export const DEFAULT_CDP_TIMER = 60;
 export const DEFAULT_CDP_HOLDTIME = 180;

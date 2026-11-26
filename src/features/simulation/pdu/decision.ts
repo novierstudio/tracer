@@ -888,7 +888,8 @@ export function decide(event: FrameEvent, device: Device | undefined): Decision 
   if (frame.kind === 'hello') return { kind: 'link-test' };
   if (!device) return undefined;
   const sent = event.sent ?? [];
-  if (frame.kind === 'ethernet' && isLinkControl(frame.payload)) {
+  // CDP crosses serial links too, inside Cisco HDLC.
+  if (isLinkControl(frame.payload)) {
     return decideLinkControl(device, event.to.port, frame.payload, sent);
   }
   if (device.kind === 'switch' && !reachesIpStack(device, event)) {

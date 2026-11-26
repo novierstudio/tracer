@@ -98,6 +98,7 @@ export function protocolOf(frame: Frame): ProtocolId {
     case 'hello':
       return 'hello';
     case 'hdlc':
+      if (frame.payload.kind === 'cdp') return 'cdp';
       return frame.payload.kind === 'ipv6'
         ? ipv6Protocol(frame.payload)
         : ipProtocol(frame.payload);
@@ -338,7 +339,11 @@ export function describeFrame({ frame, outcome }: Pick<FrameEvent, 'frame' | 'ou
       break;
     case 'hdlc':
       text =
-        frame.payload.kind === 'ipv6' ? describeIpv6(frame.payload) : describePacket(frame.payload);
+        frame.payload.kind === 'cdp'
+          ? describeEthernetPayload(frame.payload)
+          : frame.payload.kind === 'ipv6'
+            ? describeIpv6(frame.payload)
+            : describePacket(frame.payload);
       break;
     case 'ethernet': {
       const body = describeEthernetPayload(frame.payload);
