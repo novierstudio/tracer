@@ -2,13 +2,20 @@ import { describe, expect, it } from 'vitest';
 import { ms } from '@/engine/core/time';
 import { createEngine } from '@/engine/engine';
 import type { FrameEvent } from '@/engine/events';
-import { BROADCAST_MAC, type ConfigBpdu, type EthernetFrame } from '@/engine/pdu';
+import {
+  BROADCAST_MAC,
+  CDP_MAC,
+  LLDP_MAC,
+  SLOW_PROTOCOLS_MAC,
+  type ConfigBpdu,
+  type EthernetFrame,
+} from '@/engine/pdu';
 import { createSimService } from '@/engine/service';
 import { STACKS } from '@/engine/stacks';
 import { ip, routedLab, STP_CONVERGED } from '@/engine/testing';
 import type { DeviceId, MacAddress, Topology } from '@/model';
 import { decide, dropLabel } from './pdu/decision';
-import { arpRequest, hop } from './testing';
+import { arpRequest, cdpAdvertisement, hop, lacpPdu, lldpAdvertisement, pagpPdu } from './testing';
 import { CHIP_CAP, createTraffic, DROP_LINGER_MS, RING_MS, travelMs } from './traffic';
 
 const starts = (traffic: ReturnType<typeof createTraffic>, at: number) =>
@@ -254,6 +261,25 @@ describe('fan-out rings', () => {
         hop({ id: 2, from: 'R1', to: 'SW1', sentAt: 0, payload: arpRequest }),
         sentTo('02:00:00:00:00:09', elsewhere),
       ],
+      0,
+    );
+    expect(rings(traffic, 10)).toEqual([]);
+  });
+
+  it('leave alone CDP, LLDP, LACP and PAgP, which a device sends out each port on its own', () => {
+    const traffic = createTraffic();
+    const everyPort = [
+      [CDP_MAC, cdpAdvertisement],
+      [LLDP_MAC, lldpAdvertisement],
+      [SLOW_PROTOCOLS_MAC, lacpPdu],
+      [CDP_MAC, pagpPdu],
+    ] as const;
+    traffic.addRealtime(
+      everyPort.flatMap(([dst, payload], index) =>
+        ['R1', 'SW2'].map((to, copy) =>
+          sentTo(dst, hop({ id: index * 2 + copy + 1, from: 'SW1', to, sentAt: 0, payload })),
+        ),
+      ),
       0,
     );
     expect(rings(traffic, 10)).toEqual([]);

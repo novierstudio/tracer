@@ -7,6 +7,7 @@ import { currentFrames, receiveBatch, simulationStore, type SimulationState } fr
 import {
   arpRequest,
   batch,
+  cdpAdvertisement,
   dnsAnswer,
   dnsNoSuchName,
   dnsQuery,
@@ -18,6 +19,8 @@ import {
   eigrpQuery,
   eigrpUpdate,
   hop,
+  lacpPdu,
+  lldpAdvertisement,
   neighborAdvertisement,
   neighborSolicitation,
   ospfAck,
@@ -26,6 +29,7 @@ import {
   ospfLsr,
   ospfLsu,
   ospfPacket,
+  pagpPdu,
   PC1_IPV6,
   R1_IPV6,
   ripPacket,
@@ -94,6 +98,35 @@ describe('protocol filters', () => {
     expect(describeFrame(arp(1))).toBe('Who has 192.168.1.1? Tell 192.168.1.10');
     expect(describeFrame(icmp(1))).toBe('Echo request 192.168.1.10 → 192.168.2.10, seq 1, TTL 128');
     expect(describeFrame({ ...icmp(1), outcome: 'link-down' })).toMatch(/^Lost, link down: Echo/);
+  });
+
+  it('classifies CDP, LLDP, LACP and PAgP, and says who sent each from which port', () => {
+    const frame = (payload: Parameters<typeof hop>[0]['payload']) =>
+      hop({ id: 1, from: 'SW1', to: 'SW2', sentAt: 0, payload });
+    const payloads = [cdpAdvertisement, lldpAdvertisement, lacpPdu, pagpPdu];
+    expect(payloads.map((payload) => protocolOf(frame(payload).frame))).toEqual([
+      'cdp',
+      'lldp',
+      'lacp',
+      'pagp',
+    ]);
+    expect(payloads.map((payload) => describeFrame(frame(payload)))).toEqual([
+      'CDP from SW1 Fa0/1 (holdtime 180)',
+      'LLDP from R1 Gi0/0 (TTL 120)',
+      'LACP from 02:00:00:00:00:21 port 2: active, partner 02:00:00:00:00:22 port 3',
+      'PAgP from 02:00:00:00:00:21 port 2: desirable, group 1, no partner yet',
+    ]);
+    expect(
+      describeFrame(
+        frame({ ...lacpPdu, actor: { ...lacpPdu.actor, active: false }, partner: undefined }),
+      ),
+    ).toBe('LACP from 02:00:00:00:00:21 port 2: passive, no partner yet');
+    expect(payloads.map((payload) => PROTOCOLS[payload.kind].label)).toEqual([
+      'CDP',
+      'LLDP',
+      'LACP',
+      'PAgP',
+    ]);
   });
 
   it('classifies RIP and says what each RIP message carries', () => {
