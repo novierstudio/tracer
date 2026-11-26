@@ -1,6 +1,7 @@
 import type { FrameEvent, SentFrame } from '@/engine/events';
 import type { Frame } from '@/engine/frame';
 import { ingressVlan } from '@/engine/l2/switching';
+import { routesPackets } from '@/engine/l3/interfaces';
 import {
   ALL_D_ROUTERS,
   ALL_SPF_ROUTERS,
@@ -77,7 +78,6 @@ export type IgnoreReason =
   | { kind: 'arp-for-other'; target: Ipv4Address }
   | { kind: 'other-ip'; dst: Ipv4Address }
   | { kind: 'bpdu' }
-  | { kind: 'own-mac' }
   | { kind: 'dhcp-for-other'; client: MacAddress }
   | { kind: 'dhcp-not-server'; message: DhcpMessage['type'] }
   | { kind: 'no-rip' }
@@ -209,6 +209,22 @@ const isForwardOf = (packet: Ipv4Packet, next: Ipv4Packet) =>
   next.id === packet.id &&
   next.ttl === packet.ttl - 1;
 
+/**
+ * A switch's IP stack takes what arrives on a routed port, and what its VLAN interfaces answer
+ * and route: frames for the switch's own MAC, and ARP requests for its own addresses. It bridges
+ * the rest.
+ */
+function reachesIpStack(device: Extract<Device, { kind: 'switch' }>, event: FrameEvent): boolean {
+  const { frame } = event;
+  if (frame.kind !== 'ethernet' || frame.payload.kind === 'bpdu') return false;
+  const arp = arpOf(frame);
+  return (
+    !device.config.interfaces[event.to.port]?.switchport ||
+    ownMac(device, frame.dst) ||
+    (arp?.op === 'request' && ownAddresses(device).includes(arp.targetIp))
+  );
+}
+
 function decideSwitch(
   device: Extract<Device, { kind: 'switch' }>,
   event: FrameEvent,
@@ -228,7 +244,6 @@ function decideSwitch(
             reason: { kind: 'vlan-not-allowed', vlan: frame.tag?.vlan ?? switchport.nativeVlan },
           };
     }
-    if (ownMac(device, frame.dst)) return { kind: 'ignored', reason: { kind: 'own-mac' } };
     if (vlan !== undefined) return { kind: 'dropped', reason: { kind: 'no-port', vlan } };
     return { kind: 'silent' };
   }
@@ -388,7 +403,7 @@ function decideIp(
         return { kind: 'dropped', reason: { kind: 'no-route-back', dst: packet.src } };
     }
   }
-  if (device.kind === 'router') {
+  if (routesPackets(device)) {
     // A router tells nobody about a lost ICMP error, so errors cannot loop.
     return packet.ttl <= 1
       ? { kind: 'dropped', reason: { kind: 'ttl-expired' } }
@@ -404,7 +419,9 @@ export function decide(event: FrameEvent, device: Device | undefined): Decision 
   if (frame.kind === 'hello') return { kind: 'link-test' };
   if (!device) return undefined;
   const sent = event.sent ?? [];
-  if (device.kind === 'switch') return decideSwitch(device, event, sent);
+  if (device.kind === 'switch' && !reachesIpStack(device, event)) {
+    return decideSwitch(device, event, sent);
+  }
   if (frame.kind === 'ethernet' && frame.payload.kind === 'bpdu') {
     return { kind: 'ignored', reason: { kind: 'bpdu' } };
   }
@@ -539,8 +556,6 @@ function describeIgnore(name: string, reason: IgnoreReason) {
       return `${name} ignored it: the request asks for ${reason.target}, which is not ${name}'s address.`;
     case 'other-ip':
       return `${name} ignored it: it is for ${reason.dst}, and ${name} does not route.`;
-    case 'own-mac':
-      return `${name} kept it: it is addressed to ${name} itself.`;
     case 'bpdu':
       return `${name} ignored it: only switches run spanning tree.`;
     case 'dhcp-for-other':

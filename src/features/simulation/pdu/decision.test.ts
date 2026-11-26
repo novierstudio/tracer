@@ -9,7 +9,7 @@ import {
   type EthernetFrame,
   type Ipv4Packet,
 } from '@/engine/pdu';
-import { access, ip, labBuilder, routedLab, trunk } from '@/engine/testing';
+import { access, cidr, ip, labBuilder, routedLab, trunk } from '@/engine/testing';
 import { ms, simTime } from '@/engine/core/time';
 import { createEngine } from '@/engine/engine';
 import { createSimService } from '@/engine/service';
@@ -17,6 +17,7 @@ import { STACKS } from '@/engine/stacks';
 import {
   DhcpServerConfig,
   PortId,
+  VirtualInterfaceId,
   type Device,
   type DeviceId,
   type MacAddress,
@@ -79,6 +80,44 @@ describe('the decision sentence', () => {
       'SW1 switched it out Fa0/1, toward the destination MAC.',
       'The echo reply reached PC1: the ping succeeded.',
     ]);
+  });
+
+  it('tells each hop of a ping a multilayer switch routes between two VLANs', () => {
+    const lab = labBuilder();
+    const switchports = { 'FastEthernet0/1': access(10), 'FastEthernet0/2': access(20) };
+    const mls = lab.switch('MLS', switchports, 'switch-l3-24');
+    const pc1 = lab.host('pc', 'PC1', '192.168.10.10/24', '192.168.10.1');
+    const pc2 = lab.host('pc', 'PC2', '192.168.20.10/24', '192.168.20.1');
+    lab.connect(pc1, 'FastEthernet0', mls, 'FastEthernet0/1');
+    lab.connect(pc2, 'FastEthernet0', mls, 'FastEthernet0/2');
+    const svi = (address: string) => ({ shutdown: false, ipv4: cidr(address) });
+    lab.edit(mls, (device) =>
+      device.kind === 'switch'
+        ? {
+            ...device,
+            config: {
+              ...device.config,
+              ipRouting: true,
+              virtualInterfaces: {
+                [VirtualInterfaceId.parse('Vlan10')]: svi('192.168.10.1/24'),
+                [VirtualInterfaceId.parse('Vlan20')]: svi('192.168.20.1/24'),
+              },
+            },
+          }
+        : device,
+    );
+
+    const told = sentences(lab.topology, pingFrames(lab.topology, pc1, '192.168.20.10'));
+    const byMls = told.filter((sentence) => sentence?.startsWith('MLS'));
+    expect(byMls).toEqual([
+      'MLS owns the address asked for, so it sent an ARP reply with its MAC out Fa0/1.',
+      'MLS needs the MAC of next hop 192.168.20.10, so it held the packet and sent an ARP request out Fa0/2.',
+      expect.stringMatching(
+        /^MLS learned that 192\.168\.20\.10 is at .+ and sent the waiting packet out Fa0\/2\.$/,
+      ),
+      'MLS forwarded it out Fa0/1 and lowered the TTL from 128 to 127.',
+    ]);
+    expect(told.at(-1)).toBe('The echo reply reached PC1: the ping succeeded.');
   });
 
   it('tells what switches and hosts do with a BPDU', () => {
