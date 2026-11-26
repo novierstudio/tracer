@@ -9,6 +9,7 @@ import { ipInterfaces, type IpInterface } from './interfaces';
 import type { PingSession } from './ping';
 import { routingTable, type Route } from './routes';
 import type { TraceSession } from './traceroute';
+import type { Transport } from './transport';
 
 export type ArpEntry = {
   readonly mac: MacAddress;
@@ -42,6 +43,8 @@ export type IpState = {
   readonly dhcpWaiters: DhcpListener[];
   /** A router's DHCP server: the addresses it has offered or leased, by client MAC. */
   readonly bindings: Map<MacAddress, DhcpBinding>;
+  /** TCP connections, DNS queries and page loads in flight. */
+  readonly transport: Transport;
 };
 
 /** Something that sends echo requests and waits on their answers. */
@@ -55,14 +58,21 @@ export type IpTimer =
   | { readonly kind: 'probe'; readonly id: number }
   | { readonly kind: 'loopback' }
   /** The DHCP client's one pending step: a retry, a renewal, or the lease running out. */
-  | { readonly kind: 'dhcp' };
+  | { readonly kind: 'dhcp' }
+  /** A TCP connection that has heard nothing for too long. */
+  | { readonly kind: 'tcp'; readonly id: number }
+  /** A DNS query, by the port it went from, that has had no answer. */
+  | { readonly kind: 'dns'; readonly port: number };
 
 export function timerKey(timer: IpTimer): string {
   switch (timer.kind) {
     case 'arp':
       return `arp ${timer.address}`;
     case 'probe':
-      return `probe ${timer.id}`;
+    case 'tcp':
+      return `${timer.kind} ${timer.id}`;
+    case 'dns':
+      return `dns ${timer.port}`;
     case 'loopback':
     case 'dhcp':
       return timer.kind;
@@ -75,7 +85,10 @@ export function parseTimer(key: string): IpTimer | undefined {
     case 'arp':
       return { kind, address: value as Ipv4Address };
     case 'probe':
+    case 'tcp':
       return { kind, id: Number(value) };
+    case 'dns':
+      return { kind, port: Number(value) };
     case 'loopback':
     case 'dhcp':
       return { kind };

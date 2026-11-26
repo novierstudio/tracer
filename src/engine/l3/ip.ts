@@ -17,7 +17,9 @@ import {
   reconcileDhcp,
   takeDhcpReply,
 } from './dhcpClient';
+import { onDnsTimer, stopLookups } from './dnsResolver';
 import { matchAnswer, type EchoAnswer } from './echo';
+import { stopFetches } from './httpClient';
 import {
   lanInterfaceFor,
   ownsAddress,
@@ -28,7 +30,9 @@ import {
 import { originate, reportError, transmit } from './output';
 import { finishPing, onPingAnswer, onPingTimer } from './ping';
 import { nextHop } from './routes';
+import { onTcpSegment, onTcpTimer } from './tcpStack';
 import { finishTrace, onTraceAnswer } from './traceroute';
+import { emptyTransport } from './transport';
 import { deliverUdp } from './udp';
 
 function onProbeAnswer(ctx: IpContext, probe: Probe, answer: EchoAnswer) {
@@ -51,6 +55,10 @@ function deliver(ctx: IpContext, packet: Ipv4Packet, arrival?: IpInterface) {
   const message = packet.payload;
   if (message.kind === 'udp') {
     deliverUdp(ctx, packet, message, arrival);
+    return;
+  }
+  if (message.kind === 'tcp') {
+    onTcpSegment(ctx, packet, message);
     return;
   }
   // OSPF runs in a module of its own, which reads its packets from the frames it sees.
@@ -102,6 +110,7 @@ function receive(ctx: IpContext, packet: Ipv4Packet, arrival: IpInterface) {
  * IPv4 on a router or an end host: ARP, forwarding, ICMP, ping and traceroute in one module, since
  * every part reads the same ARP cache and the module boundary keeps state private. So do UDP and
  * DHCP: a host's DHCP lease is its address, and a router's DHCP server answers on its interfaces.
+ * So do TCP, DNS and HTTP, which send through the same routes and ARP cache.
  * The device's interfaces and routing table are derived from its config, its lease and its link
  * state on each use, so a change takes effect on the next packet with nothing to invalidate.
  */
@@ -119,6 +128,7 @@ export const ipModule: SimModule<IpState> = {
       dhcp: DHCP_STOPPED,
       dhcpWaiters: [],
       bindings: new Map(),
+      transport: emptyTransport(),
     };
   },
   onFrame(ctx, port, frame) {
@@ -160,6 +170,12 @@ export const ipModule: SimModule<IpState> = {
       case 'dhcp':
         onDhcpTimer(ctx);
         return;
+      case 'tcp':
+        onTcpTimer(ctx, timer.id);
+        return;
+      case 'dns':
+        onDnsTimer(ctx, timer.port);
+        return;
       case undefined:
         return;
     }
@@ -178,5 +194,7 @@ export const ipModule: SimModule<IpState> = {
   onStop(ctx) {
     for (const id of [...ctx.state.probes.keys()]) stopProbe(ctx, id);
     abandonDhcp(ctx);
+    stopFetches(ctx);
+    stopLookups(ctx);
   },
 };
