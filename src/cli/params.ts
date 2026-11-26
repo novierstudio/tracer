@@ -7,6 +7,7 @@ import {
   type VlanId,
   type VlanRange,
 } from '../model';
+import { readIpv6, readIpv6Cidr, type Ipv6Address, type Ipv6Cidr } from '../model/ipv6';
 import {
   expandInterfaceRange,
   INTERFACE_TYPES,
@@ -147,6 +148,16 @@ export function mask<N extends string>(name: N, help: string): Param<N, PrefixLe
     help,
     singleToken('mask', 'A.B.C.D', (text) => SubnetMask.safeParse(text).data),
   );
+}
+
+/** An IPv6 address in any text form, such as `2001:db8::1`, read as its canonical form. */
+export function ipv6<N extends string>(name: N, help: string): Param<N, Ipv6Address> {
+  return param(name, help, singleToken('ipv6', 'X:X:X:X::X', readIpv6));
+}
+
+/** An IPv6 address and prefix length, such as `2001:db8:1::1/64`. The host bits stay. */
+export function ipv6Prefix<N extends string>(name: N, help: string): Param<N, Ipv6Cidr> {
+  return param(name, help, singleToken('ipv6-prefix', 'X:X:X:X::X/<0-128>', readIpv6Cidr));
 }
 
 /**
