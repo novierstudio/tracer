@@ -3,6 +3,7 @@ import { Switch } from 'radix-ui';
 import { useId, useState, type ReactNode } from 'react';
 import type { HostAddressing } from '@/engine/api';
 import { HostDesktop } from '@/features/desktop/HostDesktop';
+import { hostBackend } from '@/features/desktop/registry';
 import { useHostAddressing } from '@/features/simulation/hostAddresses';
 import { DeviceTerminal } from '@/features/terminal/Terminal';
 import type { Device, Topology } from '@/model';
@@ -14,6 +15,7 @@ import { Tooltip } from '@/ui/tooltip';
 import { deleteItems } from './actions';
 import { IosConfigTab } from './config/ConfigTab';
 import { HostAddressForm } from './HostAddressForm';
+import { HostIpv6Form } from './HostIpv6Form';
 import { HostnameField } from './HostnameField';
 import { InterfacesTab } from './InterfacesTab';
 import { ServicesTab } from './ServicesTab';
@@ -283,8 +285,13 @@ function ConfigTab({ device, rows }: { device: Device; rows: PortRow[] }) {
     return <IosConfigTab key={device.id} device={device} rows={rows} />;
   }
   return (
-    <Section title="IP configuration">
-      <HostAddressForm key={device.id} device={device} />
-    </Section>
+    <>
+      <Section title="IP configuration">
+        <HostAddressForm key={device.id} device={device} />
+      </Section>
+      <Section title="IPv6 configuration">
+        <HostIpv6Form key={device.id} device={device} ipv6Status={hostBackend.ipv6Status} />
+      </Section>
+    </>
   );
 }

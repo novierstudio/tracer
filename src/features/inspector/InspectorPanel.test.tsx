@@ -289,8 +289,10 @@ describe('InspectorPanel', () => {
 });
 
 describe('host IP configuration', () => {
-  const field = (label: string) => screen.getByLabelText(label);
-  const apply = () => fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+  // The IPv6 form below has fields and an Apply button of its own.
+  const ipv4Form = () => within(screen.getByRole('form', { name: 'IP configuration' }));
+  const field = (label: string) => ipv4Form().getByLabelText(label);
+  const apply = () => fireEvent.click(ipv4Form().getByRole('button', { name: 'Apply' }));
   const hostIpv4 = () => {
     const pc = deviceIn(lab.pc.id);
     if (pc?.kind !== 'pc') throw new Error('expected a PC');
