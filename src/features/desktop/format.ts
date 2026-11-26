@@ -7,8 +7,24 @@ import {
   type MacAddress,
   type Port,
 } from '@/model';
-import type { IpAddress } from '@/model/ipv6';
-import type { ArpTableEntry, DnsLookup, HostAddressing, PingReply, TraceProbe } from './backend';
+import {
+  iosAddress,
+  iosIpv6,
+  iosIpv6Cidr,
+  isIpv6,
+  linkLocalOf,
+  type IpAddress,
+  type Ipv6Address,
+  type Ipv6Cidr,
+} from '@/model/ipv6';
+import type {
+  ArpTableEntry,
+  DnsLookup,
+  HostAddressing,
+  Ipv6Status,
+  PingReply,
+  TraceProbe,
+} from './backend';
 
 export type HostDevice = Extract<Device, { kind: 'pc' | 'server' }>;
 
@@ -48,6 +64,38 @@ export function configAddressing(device: HostDevice): HostAddressing {
   return { kind: 'static', address, gateway, dns: dns ? [dns] : [] };
 }
 
+/** A host's IPv6 as `ipconfig` and `ipv6config` show it. */
+export type HostIpv6View = {
+  readonly linkLocal: Ipv6Address;
+  readonly address?: Ipv6Cidr;
+  readonly gateway?: Ipv6Address;
+};
+
+/** What the host's config alone says its IPv6 is: a SLAAC host has its link-local address only. */
+export function configIpv6(device: HostDevice, port: EthernetPort): HostIpv6View {
+  const { ipv6 } = device.config;
+  const linkLocal = linkLocalOf(port.mac);
+  if (ipv6?.mode !== 'static') return { linkLocal };
+  return {
+    linkLocal,
+    ...(ipv6.address && { address: ipv6.address }),
+    ...(ipv6.gateway && { gateway: ipv6.gateway }),
+  };
+}
+
+/** The host's IPv6 as the simulation runs it: its port's addresses, and the gateway it uses. */
+export function liveIpv6(status: Ipv6Status, port: EthernetPort): HostIpv6View {
+  const own = status.interfaces[0];
+  const [address] = own?.addresses ?? [];
+  return {
+    linkLocal: own?.linkLocal ?? linkLocalOf(port.mac),
+    ...(address && { address }),
+    ...(status.gateway && { gateway: status.gateway }),
+  };
+}
+
+const UNSET_IPV6 = '::';
+
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const MONTHS = [
   'January',
@@ -72,10 +120,14 @@ export function windowsDate(date: Date): string {
   return `${DAYS[date.getDay()]}, ${MONTHS[date.getMonth()]} ${date.getDate()}, ${date.getFullYear()} ${time}`;
 }
 
-/** A host's live addressing for `ipconfig`, and the date each simulated time falls on. */
+/**
+ * A host's live addressing for `ipconfig`, and the date each simulated time falls on. Without
+ * `ipv6`, the host's IPv6 is its config's.
+ */
 export type IpconfigView = {
   readonly addressing: HostAddressing;
   readonly dateOf: (time: number) => Date;
+  readonly ipv6?: HostIpv6View;
 };
 
 /**
@@ -111,6 +163,7 @@ export function formatIpconfig(
     ];
   }
   const address = addressOf(addressing);
+  const ipv6 = live?.ipv6 ?? configIpv6(device, port);
   const [dns, ...moreDns] =
     addressing.kind === 'static' || addressing.kind === 'leased' ? addressing.dns : [];
   const lease =
@@ -130,14 +183,47 @@ export function formatIpconfig(
     ...adapter,
     DNS_SUFFIX,
     ...hardware,
+    entry('Link-local IPv6 Address', iosIpv6(ipv6.linkLocal)),
+    entry('IPv6 Address', ipv6.address ? iosIpv6(ipv6.address.address) : UNSET_IPV6),
     addressing.kind === 'autoconfigured'
       ? entry('Autoconfiguration IPv4 Address', addressing.address.address)
       : entry('IPv4 Address', address?.address ?? '0.0.0.0'),
     entry('Subnet Mask', address ? formatSubnetMask(address.prefixLength) : '0.0.0.0'),
     ...lease,
-    entry('Default Gateway', gatewayOf(addressing)),
+    entry('Default Gateway', ipv6.gateway ? iosIpv6(ipv6.gateway) : UNSET_IPV6),
+    continued(gatewayOf(addressing) ?? '0.0.0.0'),
     ...(all && addressing.kind === 'leased' ? [entry('DHCP Server', addressing.server)] : []),
     ...(all ? [entry('DNS Servers', dns), ...moreDns.map(continued)] : []),
+    '',
+  ];
+}
+
+/**
+ * `ipv6config`, and with `all`, `ipv6config /all`: Packet Tracer's IPv6 counterpart of
+ * `ipconfig`, in the same layout. `ipv6` is the host's IPv6 now.
+ */
+export function formatIpv6config(
+  device: HostDevice,
+  connected: boolean,
+  all: boolean,
+  ipv6?: HostIpv6View,
+): string[] {
+  const port = addressPort(device);
+  if (!port) return ['', 'No network adapters.', ''];
+  const adapter = ['', `Ethernet adapter ${port.id}:`, ''];
+  const physical = all ? [entry('Physical Address', windowsMac(port.mac))] : [];
+  if (!connected) {
+    return [...adapter, entry('Media State', 'Media disconnected'), DNS_SUFFIX, ...physical, ''];
+  }
+  const { linkLocal, address, gateway } = ipv6 ?? configIpv6(device, port);
+  return [
+    ...adapter,
+    DNS_SUFFIX,
+    ...physical,
+    entry('Link-local IPv6 Address', iosIpv6(linkLocal)),
+    entry('IPv6 Address', address ? iosIpv6Cidr(address) : UNSET_IPV6),
+    entry('Default Gateway', gateway ? iosIpv6(gateway) : UNSET_IPV6),
+    ...(all ? [entry('DNS Servers', UNSET_IPV6)] : []),
     '',
   ];
 }
@@ -159,28 +245,33 @@ export function formatArp(
   ];
 }
 
-export const pingHeader = (target: Ipv4Address) => [
+/** The target as typed, in canonical form: Packet Tracer upper-cases IPv6 only in what follows. */
+export const pingHeader = (target: IpAddress) => [
   '',
   `Pinging ${target} with 32 bytes of data:`,
   '',
 ];
 
-/** Windows names a network or a host. Like Packet Tracer, it reports an access list's denial as host. */
-const unreachable = (code: UnreachableCode) => (code === 'network' ? 'net' : 'host');
+/**
+ * Windows names a network or a host. Like Packet Tracer, it reports an access list's denial as
+ * host, and every IPv6 unreachable too.
+ */
+const unreachable = (from: IpAddress, code: UnreachableCode) =>
+  code === 'network' && !isIpv6(from) ? 'net' : 'host';
 
 export function formatReply(reply: PingReply): string {
   switch (reply.kind) {
     case 'reply': {
       const time = reply.timeMs < 1 ? '<1ms' : `=${Math.round(reply.timeMs)}ms`;
-      return `Reply from ${reply.from}: bytes=${reply.bytes} time${time} TTL=${reply.ttl}`;
+      return `Reply from ${iosAddress(reply.from)}: bytes=${reply.bytes} time${time} TTL=${reply.ttl}`;
     }
     case 'timeout':
       return 'Request timed out.';
     case 'unreachable': {
-      return `Reply from ${reply.from}: Destination ${unreachable(reply.code)} unreachable.`;
+      return `Reply from ${iosAddress(reply.from)}: Destination ${unreachable(reply.from, reply.code)} unreachable.`;
     }
     case 'ttl-expired':
-      return `Reply from ${reply.from}: TTL expired in transit.`;
+      return `Reply from ${iosAddress(reply.from)}: TTL expired in transit.`;
   }
 }
 
@@ -188,14 +279,14 @@ export function formatReply(reply: PingReply): string {
  * The statistics block. As in the engine's summary and unlike Windows, only echo replies count as
  * received, so the numbers say what a student means by "it worked".
  */
-export function pingSummary(target: Ipv4Address, replies: readonly PingReply[]): string[] {
+export function pingSummary(target: IpAddress, replies: readonly PingReply[]): string[] {
   const times = replies.flatMap((r) => (r.kind === 'reply' ? [Math.round(r.timeMs)] : []));
   const sent = replies.length;
   const lost = sent - times.length;
   const loss = sent === 0 ? 0 : Math.floor((lost * 100) / sent);
   const lines = [
     '',
-    `Ping statistics for ${target}:`,
+    `Ping statistics for ${iosAddress(target)}:`,
     `    Packets: Sent = ${sent}, Received = ${times.length}, Lost = ${lost} (${loss}% loss),`,
   ];
   if (times.length === 0) return lines;
@@ -207,7 +298,7 @@ export function pingSummary(target: Ipv4Address, replies: readonly PingReply[]):
   ];
 }
 
-export const tracertHeader = (target: Ipv4Address, maxHops: number) => [
+export const tracertHeader = (target: IpAddress, maxHops: number) => [
   '',
   `Tracing route to ${target} over a maximum of ${maxHops} hops`,
   '',
@@ -232,7 +323,7 @@ export function tracertLines(probesPerHop: number) {
       }
       if (probe.kind === 'unreachable') {
         open = false;
-        return `${text}  ${probe.from}  reports: Destination ${unreachable(probe.code)} unreachable.\n`;
+        return `${text}  ${iosAddress(probe.from)}  reports: Destination ${unreachable(probe.from, probe.code)} unreachable.\n`;
       }
       if (probe.kind === 'timeout') {
         text += '     *   ';
@@ -243,7 +334,7 @@ export function tracertLines(probesPerHop: number) {
       }
       if (probe.probe < probesPerHop) return text;
       open = false;
-      return `${text}  ${from ?? 'Request timed out.'}\n`;
+      return `${text}  ${from ? iosAddress(from) : 'Request timed out.'}\n`;
     },
     /** Ends a line that a Ctrl+C cut short. */
     close: () => (open ? '\n' : ''),

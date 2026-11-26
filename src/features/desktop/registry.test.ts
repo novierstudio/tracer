@@ -20,6 +20,13 @@ function setup() {
     arpTable: async () => [],
     clearArp: async () => 0,
     hostIp: async () => ({ addressing: { kind: 'unassigned' }, now: 0 }),
+    ipv6Status: async () => ({
+      routing: false,
+      interfaces: [],
+      routes: [],
+      neighbors: [],
+      ports: {},
+    }),
     renewDhcp: async () => ({ kind: 'failed' }),
     releaseDhcp: async () => {},
     nslookup: async () => ({ kind: 'no-server' }),

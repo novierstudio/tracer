@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DnsLookup, FetchEvent, PingEvent, TraceEvent } from '@/engine/api';
-import { DeviceId, Ipv4Address } from '@/model';
+import { DeviceId, Ipv4Address, Ipv6Address } from '@/model';
 import { createEditorStore } from '@/model/store';
 import type { PingReply, TraceProbe } from './backend';
 import { engineBackend } from './engineBackend';
@@ -18,6 +18,7 @@ const client = vi.hoisted(() => ({
     clearArp: vi.fn(),
     cancel: vi.fn(),
     hostIp: vi.fn(),
+    ipv6Status: vi.fn(),
     dhcpRelease: vi.fn(),
   },
 }));
@@ -122,6 +123,13 @@ describe('the engine host backend', () => {
     expect(client.traceroute).toHaveBeenCalledWith(PC, '10.0.0.1', options, expect.any(Function));
   });
 
+  it('pings an IPv6 address', async () => {
+    const target = Ipv6Address.parse('2001:db8:1::2');
+    client.ping.mockImplementation(plays([{ kind: 'summary', target, sent: 0, received: 0 }]));
+    await backend.ping(PC, target, OPTIONS, () => {}, new AbortController().signal);
+    expect(client.ping).toHaveBeenCalledWith(PC, '2001:db8:1::2', OPTIONS, expect.any(Function));
+  });
+
   it('cancels a traceroute aborted before it started', async () => {
     client.traceroute.mockImplementation(plays([]));
     const controller = new AbortController();
@@ -138,6 +146,15 @@ describe('the engine host backend', () => {
     await expect(backend.arpTable(PC)).rejects.toThrow(
       'ARP: this device is not in the simulation yet.',
     );
+  });
+
+  it('reads the host’s IPv6 status from the worker, or says why it cannot', async () => {
+    const status = { routing: false, interfaces: [], routes: [], neighbors: [], ports: {} };
+    client.sim.ipv6Status.mockResolvedValue({ ok: true, value: status });
+    await expect(backend.ipv6Status(PC)).resolves.toEqual(status);
+    expect(client.sim.ipv6Status).toHaveBeenCalledWith(PC);
+    client.sim.ipv6Status.mockResolvedValue({ ok: false, error: 'powered-off' });
+    await expect(backend.ipv6Status(PC)).rejects.toThrow('IPV6CONFIG: the device is powered off.');
   });
 
   it('clears the ARP cache in the worker', async () => {

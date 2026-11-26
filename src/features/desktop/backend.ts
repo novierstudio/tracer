@@ -7,12 +7,14 @@ import type {
   FetchFailure,
   HostAddressing,
   HttpResponse,
+  Ipv6Status,
   PingOptions,
   PingReply,
   TraceOptions,
   TraceProbe,
 } from '@/engine/api';
 import type { DeviceId, Ipv4Address } from '@/model';
+import type { IpAddress } from '@/model/ipv6';
 
 export type {
   ArpTableEntry,
@@ -23,6 +25,7 @@ export type {
   FetchFailure,
   HostAddressing,
   HttpResponse,
+  Ipv6Status,
   PingOptions,
   PingReply,
   TraceOptions,
@@ -45,7 +48,7 @@ export interface HostBackend {
    */
   ping(
     device: DeviceId,
-    target: Ipv4Address,
+    target: IpAddress,
     options: PingOptions,
     onReply: (reply: PingReply) => void,
     signal: AbortSignal,
@@ -56,7 +59,7 @@ export interface HostBackend {
    */
   traceroute(
     device: DeviceId,
-    target: Ipv4Address,
+    target: IpAddress,
     options: TraceOptions,
     onProbe: (probe: TraceProbe) => void,
     signal: AbortSignal,
@@ -66,6 +69,8 @@ export interface HostBackend {
   clearArp(device: DeviceId, address?: Ipv4Address): Promise<number>;
   /** What the host's address is now, which for a DHCP host only the simulation knows. */
   hostIp(device: DeviceId): Promise<LiveAddressing>;
+  /** The host's IPv6 as it runs now: its link-local address, SLAAC addresses and gateway. */
+  ipv6Status(device: DeviceId): Promise<Ipv6Status>;
   /** `ipconfig /renew`: resolves with the lease, or word that none came. */
   renewDhcp(device: DeviceId): Promise<DhcpOutcome>;
   /** `ipconfig /release`: the host gives its lease back. */

@@ -83,6 +83,42 @@ describe('parseCommand', () => {
     });
   });
 
+  it('pings and traces an IPv6 address, in its canonical form', () => {
+    expect(parsed('ping 2001:DB8:1:0::2')).toEqual({
+      kind: 'ping',
+      target: '2001:db8:1::2',
+      count: 4,
+    });
+    expect(parsed('ping -n 2 fe80::1')).toEqual({ kind: 'ping', target: 'fe80::1', count: 2 });
+    expect(parsed('tracert -h 5 2001:db8:1:4::A')).toEqual({
+      kind: 'tracert',
+      target: '2001:db8:1:4::a',
+      maxHops: 5,
+      timeoutMs: 4000,
+    });
+    expect(parsed('ping 2001:db8::1::2')).toEqual({
+      error: [
+        'Ping request could not find host 2001:db8::1::2. Please check the name and try again.',
+      ],
+    });
+    expect(parsed('tracert 2001:db8:g::1')).toEqual({
+      error: ['Unable to resolve target system name 2001:db8:g::1.'],
+    });
+  });
+
+  it('reads ipv6config and ipv6config /all', () => {
+    expect(parsed('ipv6config')).toEqual({ kind: 'ipv6config', all: false });
+    expect(parsed('IPV6CONFIG /ALL')).toEqual({ kind: 'ipv6config', all: true });
+    expect(parsed('ipv6config /renew')).toMatchObject({
+      error: expect.arrayContaining(['Error: unrecognized or incomplete command line.']),
+    });
+    expect(parsed('ipv6config /all /all')).toMatchObject({
+      error: expect.arrayContaining(['Error: unrecognized or incomplete command line.']),
+    });
+    expect(parsed('ipv6config /?')).toMatchObject({ error: expect.arrayContaining(['USAGE:']) });
+    expect(HELP.join('\n')).toContain('ipv6config /all');
+  });
+
   it('reads arp -a and arp -d', () => {
     expect(parsed('arp -a')).toEqual({ kind: 'arp-show' });
     expect(parsed('arp -d')).toEqual({ kind: 'arp-clear' });
