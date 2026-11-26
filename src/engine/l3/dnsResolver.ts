@@ -4,6 +4,7 @@ import type { DnsMessage } from '../dns';
 import { UDP_PORT } from '../pdu';
 import { hostAddressingOf, timerKey, type IpContext } from './context';
 import { onFetchResolved } from './httpClient';
+import { onMailResolved } from './mail';
 import { originate } from './output';
 import { ephemeralPort, type DnsWaiter, type PendingQuery } from './transport';
 import { udp } from './udp';
@@ -80,6 +81,7 @@ function settle(ctx: IpContext, query: PendingQuery, outcome: DnsLookup) {
   ctx.state.transport.queries.delete(query.port);
   ctx.clearTimer(timerKey({ kind: 'dns', port: query.port }));
   if (query.waiter.kind === 'lookup') query.waiter.listener(outcome);
+  else if (query.waiter.kind === 'mail') onMailResolved(ctx, query.waiter.job, outcome);
   else onFetchResolved(ctx, query.waiter.fetch, outcome);
 }
 

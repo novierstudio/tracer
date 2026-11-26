@@ -1,4 +1,5 @@
 import type { Ipv4Address, Ipv4Cidr, MacAddress, PrefixLength, VlanId } from '@/model';
+import type { AppUdpPayload } from './apps';
 import type { DnsMessage } from './dns';
 import type { Ipv6Packet } from './pdu6';
 import type { TcpSegment } from './tcp';
@@ -111,7 +112,7 @@ export type UdpDatagram = {
   readonly payload: UdpPayload;
 };
 
-export type UdpPayload = DhcpMessage | RipMessage | DnsMessage | HsrpMessage;
+export type UdpPayload = DhcpMessage | RipMessage | DnsMessage | HsrpMessage | AppUdpPayload;
 
 /** Well-known ports. RIP sends from and to 520. */
 export const UDP_PORT = { dns: 53, dhcpServer: 67, dhcpClient: 68, rip: 520, hsrp: 1985 } as const;

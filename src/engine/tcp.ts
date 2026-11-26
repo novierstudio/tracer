@@ -1,3 +1,4 @@
+import type { AppTcpPayload } from './apps';
 import type { HttpMessage } from './http';
 
 /**
@@ -36,7 +37,7 @@ export type TerminalData =
   | { readonly kind: 'telnet'; readonly text: string }
   | { readonly kind: 'ssh'; readonly bytes: number };
 
-export type TcpPayload = HttpMessage | TerminalData;
+export type TcpPayload = HttpMessage | TerminalData | AppTcpPayload;
 
 /** Well-known TCP ports. */
 export const TCP_PORT = { http: 80, telnet: 23, ssh: 22 } as const;

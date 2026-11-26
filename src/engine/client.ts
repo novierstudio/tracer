@@ -15,7 +15,16 @@ export type SimClient = {
   /** Calls into the worker. Batches arrive through `onBatch`, which owns the worker's listener. */
   sim: Omit<
     Comlink.Remote<SimAPI>,
-    'subscribe' | 'ping' | 'traceroute' | 'dhcpRenew' | 'resolve' | 'browse' | 'openTerminal'
+    | 'subscribe'
+    | 'ping'
+    | 'traceroute'
+    | 'dhcpRenew'
+    | 'resolve'
+    | 'browse'
+    | 'openTerminal'
+    | 'tftp'
+    | 'ftpOpen'
+    | 'mail'
   >;
   onBatch(listener: BatchListener): () => void;
   /** What each end of each link is doing, as of the latest batch, for listeners that join late. */
@@ -34,6 +43,12 @@ export type SimClient = {
   openTerminal(
     ...args: Parameters<SimAPI['openTerminal']>
   ): Promise<ReturnType<SimAPI['openTerminal']>>;
+  /** SimAPI.tftp, with the listener proxied to the worker. */
+  tftp(...args: Parameters<SimAPI['tftp']>): Promise<ReturnType<SimAPI['tftp']>>;
+  /** SimAPI.ftpOpen, with the listener proxied to the worker. */
+  ftpOpen(...args: Parameters<SimAPI['ftpOpen']>): Promise<ReturnType<SimAPI['ftpOpen']>>;
+  /** SimAPI.mail, with the listener proxied to the worker. */
+  mail(...args: Parameters<SimAPI['mail']>): Promise<ReturnType<SimAPI['mail']>>;
 };
 
 let started: Promise<SimClient> | undefined;
@@ -101,5 +116,8 @@ async function connect(source: TopologySource): Promise<SimClient> {
     browse: (device, target, listener) => sim.browse(device, target, Comlink.proxy(listener)),
     openTerminal: (device, target, protocol, listener) =>
       sim.openTerminal(device, target, protocol, Comlink.proxy(listener)),
+    tftp: (device, request, listener) => sim.tftp(device, request, Comlink.proxy(listener)),
+    ftpOpen: (device, server, listener) => sim.ftpOpen(device, server, Comlink.proxy(listener)),
+    mail: (device, request, listener) => sim.mail(device, request, Comlink.proxy(listener)),
   };
 }

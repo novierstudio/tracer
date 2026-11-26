@@ -42,7 +42,7 @@ export type FetchListener = (event: FetchEvent) => void;
 const DOTTED = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
 
 /** The host as an address, when it is one rather than a name to resolve. */
-function asAddress(host: string): Ipv4Address | undefined {
+export function asAddress(host: string): Ipv4Address | undefined {
   const octets = DOTTED.exec(host)?.slice(1).map(Number);
   return octets?.every((octet) => octet <= 255) ? (octets.join('.') as Ipv4Address) : undefined;
 }

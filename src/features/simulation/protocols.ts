@@ -23,6 +23,7 @@ import { shortPortName } from '@/features/canvas/cables';
 import type { PortId } from '@/model';
 import { formatIpv6Cidr, UNSPECIFIED_IPV6 } from '@/model/ipv6';
 import type { ControlPdu } from './pdu/control';
+import { describeApp } from './pdu/apps';
 import { describeDns, describePayload, describeTcp } from './pdu/web';
 
 /** The protocol a frame shows as: the innermost one the engine models. */
@@ -47,7 +48,14 @@ export type ProtocolId =
   | 'pagp'
   | 'vtp'
   | 'hsrp'
-  | 'hello';
+  | 'hello'
+  | 'tftp'
+  | 'ntp'
+  | 'syslog'
+  | 'ftp'
+  | 'ftp-data'
+  | 'smtp'
+  | 'pop3';
 
 /** Each protocol's short label and colour token. The label means colour is never the only cue. */
 export const PROTOCOLS: Record<ProtocolId, { label: string; token: `--proto-${string}` }> = {
@@ -75,6 +83,14 @@ export const PROTOCOLS: Record<ProtocolId, { label: string; token: `--proto-${st
   // HSRP keeps a LAN's gateway up, so it shares the routing protocols' colour.
   hsrp: { label: 'HSRP', token: '--proto-routing' },
   hello: { label: 'Hello', token: '--proto-stp' },
+  // The server services over UDP share DNS's colour, and those over TCP share TCP's.
+  tftp: { label: 'TFTP', token: '--proto-dns' },
+  ntp: { label: 'NTP', token: '--proto-dns' },
+  syslog: { label: 'Syslog', token: '--proto-dns' },
+  ftp: { label: 'FTP', token: '--proto-tcp' },
+  'ftp-data': { label: 'FTP-DATA', token: '--proto-tcp' },
+  smtp: { label: 'SMTP', token: '--proto-tcp' },
+  pop3: { label: 'POP3', token: '--proto-tcp' },
 };
 
 export const PROTOCOL_IDS = Object.keys(PROTOCOLS) as ProtocolId[];
@@ -304,6 +320,8 @@ function describeUdp(packet: Ipv4Packet, datagram: UdpDatagram): string {
       const { opcode, group, state, priority } = datagram.payload;
       return `HSRP ${opcode} from ${packet.src}, group ${group}, ${state}, priority ${priority}`;
     }
+    default:
+      return describeApp(datagram.payload);
   }
 }
 

@@ -1,4 +1,12 @@
-import type { DeviceId, Endpoint, LinkId, MacAddress, PortId, VlanDatabase } from '@/model';
+import type {
+  DeviceId,
+  Endpoint,
+  LinkId,
+  MacAddress,
+  PortId,
+  StoredFile,
+  VlanDatabase,
+} from '@/model';
 import type { SimTime } from './core/time';
 import type { Frame } from './frame';
 
@@ -71,8 +79,25 @@ export type VlanDatabaseEvent = {
   database: VlanDatabase;
 };
 
+/** A server's TFTP or FTP files changed, as an upload changes them, which belongs in its config. */
+export type ServerFilesEvent = {
+  kind: 'server-files';
+  id: EventId;
+  time: SimTime;
+  device: DeviceId;
+  service: 'tftp' | 'ftp';
+  /** Every file the service now keeps, in order. */
+  files: readonly StoredFile[];
+};
+
 export type SimEvent =
-  FrameEvent | LinkEvent | NoteEvent | SyslogEvent | StickyMacEvent | VlanDatabaseEvent;
+  | FrameEvent
+  | LinkEvent
+  | NoteEvent
+  | SyslogEvent
+  | StickyMacEvent
+  | VlanDatabaseEvent
+  | ServerFilesEvent;
 
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
 

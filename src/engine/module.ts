@@ -6,12 +6,16 @@ import type {
   LabSettings,
   MacAddress,
   PortId,
+  StoredFile,
   VlanDatabase,
   VlanId,
 } from '@/model';
 import type { SimDuration, SimTime } from './core/time';
 import type { Frame } from './frame';
 import type { LearnedRoute } from './l3/routes';
+
+/** A server service that keeps files. */
+export type FileService = 'tftp' | 'ftp';
 
 /** What a module can see and do on the device it runs on. */
 export interface DeviceContext {
@@ -45,6 +49,11 @@ export interface DeviceContext {
   learnSticky(port: PortId, mac: MacAddress): void;
   /** Stores a VTP update's VLANs and revision in the switch's config, as IOS writes vlan.dat. */
   storeVlans(database: VlanDatabase): void;
+  /**
+   * A server's TFTP or FTP files changed, as an upload changes them: they belong in its config,
+   * so they show in its Services tab and save with the lab.
+   */
+  learnFiles(service: FileService, files: readonly StoredFile[]): void;
   /** A module's `disablesPort` answer changed: bring the device's links in line with it. */
   relink(): void;
   /** The routes every module on the device offers now, for its routing table. See `routes`. */
@@ -94,6 +103,8 @@ export interface SimModule<S = unknown> {
    * on them.
    */
   onConfigChange?(ctx: ModuleContext<S>): void;
+  /** The device logged a console message, as `syslog` does, for example to send it to a server. */
+  onSyslog?(ctx: ModuleContext<S>, text: string): void;
   /**
    * The device is powering off or leaving the simulation, and this instance is about to be
    * dropped. Settle what waits on it. It must not send or set timers, and the device may be gone.

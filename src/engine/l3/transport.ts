@@ -27,7 +27,22 @@ export type TcpOwner =
   | { readonly kind: 'http-server' }
   | { readonly kind: 'fetch'; readonly fetch: number }
   | { readonly kind: 'vty'; readonly protocol: RemoteProtocol; readonly line: number }
-  | { readonly kind: 'terminal'; readonly terminal: number };
+  | { readonly kind: 'terminal'; readonly terminal: number }
+  /** One of the server applications or their clients: see `appRouter.ts`. */
+  | { readonly kind: 'app'; readonly app: TcpApp; readonly id: number };
+
+/**
+ * The TCP applications beyond HTTP and the terminals. A server end's `id` is its control
+ * connection's for FTP data, and unused otherwise; a client end's is its own job's.
+ */
+export type TcpApp =
+  | 'ftp-server'
+  | 'ftp-data-server'
+  | 'ftp-client'
+  | 'ftp-data-client'
+  | 'smtp-server'
+  | 'pop3-server'
+  | 'mail-client';
 
 export type TcpConnection = {
   readonly id: number;
@@ -46,7 +61,9 @@ export type TcpConnection = {
 /** What waits on a DNS answer: an `nslookup`, or a page load that needs the address. */
 export type DnsWaiter =
   | { readonly kind: 'lookup'; readonly listener: DnsListener }
-  | { readonly kind: 'fetch'; readonly fetch: number };
+  | { readonly kind: 'fetch'; readonly fetch: number }
+  /** An email client that named its server rather than giving its address. */
+  | { readonly kind: 'mail'; readonly job: number };
 
 /** A query sent and not yet answered, by the port it went from. */
 export type PendingQuery = {

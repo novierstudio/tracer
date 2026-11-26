@@ -3,6 +3,15 @@ import { ms } from '../core/time';
 import { byteLength, httpText } from '../http';
 import { LIMITED_BROADCAST, UNSPECIFIED_ADDRESS, type Ipv4Packet } from '../pdu';
 import { TCP_WINDOW, type TcpFlags, type TcpPayload, type TcpSegment } from '../tcp';
+import {
+  appAborted,
+  appAccepted,
+  appClosed,
+  appIdles,
+  appListening,
+  appOpened,
+  appReceived,
+} from './appRouter';
 import { routesOf, timerKey, type IpContext } from './context';
 import { onFetchAborted, onFetchConnected, onFetchData } from './httpClient';
 import { httpListening, onHttpRequest } from './httpServer';
@@ -40,6 +49,13 @@ function dataLength(payload: TcpPayload | undefined): number {
       return byteLength(payload.text) + 2;
     case 'ssh':
       return payload.bytes;
+    case 'ftp':
+    case 'smtp':
+    case 'pop3':
+      // The command or reply, and the CR LF that ends it.
+      return byteLength(payload.text) + 2;
+    case 'ftp-data':
+      return byteLength(payload.text);
   }
 }
 
@@ -49,11 +65,15 @@ export const segmentLength = (segment: TcpSegment) =>
 
 /** Which application listens on a port of this device, if any. */
 const listenerOn = (ctx: IpContext, port: number): TcpOwner | undefined =>
-  httpListening(ctx, port) ? { kind: 'http-server' } : vtyListening(ctx, port);
+  httpListening(ctx, port)
+    ? { kind: 'http-server' }
+    : (vtyListening(ctx, port) ?? appListening(ctx, port));
 
 /** A Telnet or SSH session sits idle for as long as its user does, once it is open. */
 const idles = (connection: TcpConnection) =>
-  (connection.owner.kind === 'vty' || connection.owner.kind === 'terminal') &&
+  (connection.owner.kind === 'vty' ||
+    connection.owner.kind === 'terminal' ||
+    (connection.owner.kind === 'app' && appIdles(connection.owner))) &&
   connection.state !== 'syn-sent' &&
   connection.state !== 'syn-received';
 
@@ -88,6 +108,7 @@ function opened(ctx: IpContext, connection: TcpConnection) {
   const { owner } = connection;
   if (owner.kind === 'fetch') onFetchConnected(ctx, owner.fetch, connection);
   if (owner.kind === 'terminal') onTerminalOpened(ctx, owner.terminal, connection);
+  if (owner.kind === 'app') appOpened(ctx, owner, connection);
 }
 
 /** A vty line's CLI and a terminal's screen live outside the simulation, so they read nothing. */
@@ -95,6 +116,7 @@ function received(ctx: IpContext, connection: TcpConnection, payload: TcpPayload
   const { owner } = connection;
   if (owner.kind === 'fetch') onFetchData(ctx, owner.fetch, connection, payload);
   if (owner.kind === 'http-server') onHttpRequest(ctx, connection, payload);
+  if (owner.kind === 'app') appReceived(ctx, owner, connection, payload);
 }
 
 function aborted(ctx: IpContext, connection: TcpConnection, why: TcpAbort) {
@@ -102,6 +124,7 @@ function aborted(ctx: IpContext, connection: TcpConnection, why: TcpAbort) {
   const { owner } = connection;
   if (owner.kind === 'fetch') onFetchAborted(ctx, owner.fetch, connection, why);
   if (owner.kind === 'terminal') onTerminalAborted(ctx, owner.terminal, why);
+  if (owner.kind === 'app') appAborted(ctx, owner, connection, why);
 }
 
 /**
@@ -234,6 +257,7 @@ export function onTcpSegment(ctx: IpContext, packet: Ipv4Packet, segment: TcpSeg
       case 'syn-received':
         connection.state = 'established';
         touch(ctx, connection);
+        if (connection.owner.kind === 'app') appAccepted(ctx, connection.owner, connection);
         break;
       case 'fin-wait-1':
         connection.state = 'fin-wait-2';
@@ -270,6 +294,7 @@ export function onTcpSegment(ctx: IpContext, packet: Ipv4Packet, segment: TcpSeg
         if (connection.owner.kind === 'terminal') {
           onTerminalClosed(ctx, connection.owner.terminal);
         }
+        if (connection.owner.kind === 'app') appClosed(ctx, connection.owner, connection);
         break;
       case 'fin-wait-1':
         connection.state = 'closing';
