@@ -89,7 +89,9 @@ function describeIcmp(packet: Ipv4Packet, message: IcmpMessage): string {
     case 'echo-reply':
       return `Echo reply ${route}, seq ${message.seq}, TTL ${packet.ttl}`;
     case 'destination-unreachable':
-      return `Destination ${message.code} unreachable ${route}`;
+      return message.code === 'admin-prohibited'
+        ? `Destination unreachable, administratively prohibited ${route}`
+        : `Destination ${message.code} unreachable ${route}`;
     case 'time-exceeded':
       return `TTL expired in transit ${route}`;
   }

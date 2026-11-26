@@ -1,4 +1,5 @@
 import { addressOf, gatewayOf } from '@/engine/l3/hostAddress';
+import type { UnreachableCode } from '@/engine/pdu';
 import {
   formatSubnetMask,
   type Device,
@@ -163,6 +164,9 @@ export const pingHeader = (target: Ipv4Address) => [
   '',
 ];
 
+/** Windows names a network or a host. Like Packet Tracer, it reports an access list's denial as host. */
+const unreachable = (code: UnreachableCode) => (code === 'network' ? 'net' : 'host');
+
 export function formatReply(reply: PingReply): string {
   switch (reply.kind) {
     case 'reply': {
@@ -172,8 +176,7 @@ export function formatReply(reply: PingReply): string {
     case 'timeout':
       return 'Request timed out.';
     case 'unreachable': {
-      const what = reply.code === 'network' ? 'net' : 'host';
-      return `Reply from ${reply.from}: Destination ${what} unreachable.`;
+      return `Reply from ${reply.from}: Destination ${unreachable(reply.code)} unreachable.`;
     }
     case 'ttl-expired':
       return `Reply from ${reply.from}: TTL expired in transit.`;
@@ -208,8 +211,6 @@ export const tracertHeader = (target: Ipv4Address, maxHops: number) => [
   `Tracing route to ${target} over a maximum of ${maxHops} hops`,
   '',
 ];
-
-const unreachable = (code: 'network' | 'host') => (code === 'network' ? 'net' : 'host');
 
 /**
  * Windows tracert's hop lines, a column at a time as each probe settles: the hop number, a 9

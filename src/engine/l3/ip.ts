@@ -1,5 +1,6 @@
 import type { SimModule } from '../module';
 import { BROADCAST_MAC, isMulticast, LIMITED_BROADCAST, type Ipv4Packet } from '../pdu';
+import { deniedBy, forgetRemovedLists, type Direction } from './acl';
 import { forgetPort, onArp, onArpTimer } from './arp';
 import {
   interfacesOf,
@@ -27,6 +28,7 @@ import {
   serialOn,
   type IpInterface,
 } from './interfaces';
+import { emptyNatTable, natIn, natOut } from './nat';
 import { originate, reportError, transmit } from './output';
 import { finishPing, onPingAnswer, onPingTimer } from './ping';
 import { nextHop } from './routes';
@@ -73,11 +75,41 @@ function deliver(ctx: IpContext, packet: Ipv4Packet, arrival?: IpInterface) {
 }
 
 /**
+ * Whether the interface's access list in `direction` drops the packet. Its sender hears
+ * Destination Unreachable, administratively prohibited, about `original`: the packet as it
+ * arrived, before NAT rewrote it.
+ */
+function filtered(
+  ctx: IpContext,
+  iface: IpInterface,
+  direction: Direction,
+  packet: Ipv4Packet,
+  original = packet,
+): boolean {
+  const list = deniedBy(ctx, iface, direction, packet);
+  if (list === undefined) return false;
+  ctx.note(
+    `Dropped a packet for ${packet.dst} from ${packet.src}: access list ${list} denied it ${direction} on ${iface.name}`,
+  );
+  reportError(ctx, {
+    kind: 'icmp',
+    type: 'destination-unreachable',
+    code: 'admin-prohibited',
+    original,
+  });
+  return true;
+}
+
+/**
  * A packet arrived on a working interface. One for this device, or for every host on the
  * network, is delivered. A router, or a switch with `ip routing`, forwards the rest with the TTL
- * decremented, or tells the sender why it cannot. A host or a layer 2 switch drops them.
+ * decremented, or tells the sender why it cannot. A host or a layer 2 switch drops them. On the
+ * way through, as on IOS: the arrival interface's inbound access list, NAT from outside to
+ * inside, routing, NAT from inside to outside, then the exit interface's outbound access list.
  */
-function receive(ctx: IpContext, packet: Ipv4Packet, arrival: IpInterface) {
+function receive(ctx: IpContext, arrived: Ipv4Packet, arrival: IpInterface) {
+  if (filtered(ctx, arrival, 'in', arrived)) return;
+  const packet = natIn(ctx, arrived, arrival);
   const { interfaces, routes } = routesOf(ctx);
   if (packet.dst === LIMITED_BROADCAST || ownsAddress(interfaces, packet.dst)) {
     deliver(ctx, packet, arrival);
@@ -103,7 +135,9 @@ function receive(ctx: IpContext, packet: Ipv4Packet, arrival: IpInterface) {
     });
     return;
   }
-  transmit(ctx, hop, { ...packet, ttl: packet.ttl - 1 });
+  const forwarded = natOut(ctx, { ...packet, ttl: packet.ttl - 1 }, arrival, hop.interface);
+  if (!forwarded || filtered(ctx, hop.interface, 'out', forwarded, arrived)) return;
+  transmit(ctx, hop, forwarded);
 }
 
 /**
@@ -129,6 +163,8 @@ export const ipModule: SimModule<IpState> = {
       dhcpWaiters: [],
       bindings: new Map(),
       transport: emptyTransport(),
+      aclHits: new Map(),
+      nat: emptyNatTable(),
     };
   },
   onFrame(ctx, port, frame) {
@@ -186,6 +222,7 @@ export const ipModule: SimModule<IpState> = {
   },
   onConfigChange(ctx) {
     reconcileDhcp(ctx);
+    forgetRemovedLists(ctx);
   },
   /**
    * The device is going away: every ping and traceroute it runs ends with what it got so far,

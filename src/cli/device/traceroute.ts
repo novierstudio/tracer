@@ -1,8 +1,11 @@
 import type { TraceEvent } from '../../engine/api';
 import type { TraceStream } from './query';
 
-/** IOS marks a probe a router refused with `!N` for an unreachable network, `!H` for a host. */
-const UNREACHABLE = { network: '!N', host: '!H' } as const;
+/**
+ * IOS marks a probe a router refused with `!N` for an unreachable network, `!H` for a host, and
+ * `!A` for one an access list denied.
+ */
+const UNREACHABLE = { network: '!N', host: '!H', 'admin-prohibited': '!A' } as const;
 
 /**
  * IOS `traceroute` output, a piece at a time: the header, then a line per hop that grows as its

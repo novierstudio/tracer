@@ -11,6 +11,7 @@ import {
 import { interfacesOf, routesOf, timerKey, type IpContext } from './context';
 import { isLan, routesPackets, sendOnLan, type LanInterface } from './interfaces';
 import { compareAddresses, inPrefix } from './ipv4';
+import { answersArpFor } from './nat';
 import { nextHop } from './routes';
 
 /** How long a learned address is trusted: 4 hours on IOS, about 2 minutes on a Windows host. */
@@ -147,7 +148,9 @@ export function onArp(ctx: IpContext, iface: LanInterface, port: PortId, arp: Ar
   if (forUs || ctx.state.arp.has(arp.senderIp)) {
     learn(ctx, iface, port, arp.senderIp, arp.senderMac);
   }
-  if (arp.op !== 'request' || !(forUs || proxies(ctx, iface, arp.targetIp))) return;
+  const answers =
+    forUs || proxies(ctx, iface, arp.targetIp) || answersArpFor(ctx, iface, arp.targetIp);
+  if (arp.op !== 'request' || !answers) return;
   const { mac } = iface.medium;
   const reply: ArpPacket = {
     kind: 'arp',

@@ -206,8 +206,11 @@ export type IcmpEcho = {
   readonly seq: number;
 };
 
-/** ICMP codes 0 and 1. Protocol and port unreachable arrive with the transport layer. */
-export type UnreachableCode = 'network' | 'host';
+/**
+ * ICMP codes 0, 1 and 13. Protocol and port unreachable arrive with the transport layer. A router
+ * sends administratively prohibited for a packet an access list denies.
+ */
+export type UnreachableCode = 'network' | 'host' | 'admin-prohibited';
 
 export type IcmpDestinationUnreachable = {
   readonly kind: 'icmp';
@@ -234,6 +237,7 @@ export const ICMP_TYPE = {
 export const UNREACHABLE_CODE = {
   network: 0,
   host: 1,
+  'admin-prohibited': 13,
 } as const satisfies Record<UnreachableCode, number>;
 
 /** Where Cisco PVST+ sends its BPDUs, one per VLAN, tagged on a trunk like the VLAN's frames. */
