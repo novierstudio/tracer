@@ -38,7 +38,10 @@ function r1(staticRoutes = [] as ReturnType<typeof staticRoute>[]) {
     staticRoutes,
   );
   const device = lab.device(id);
-  return { device, interfaces: ipInterfaces(device, () => true, undefined) };
+  return {
+    device,
+    interfaces: ipInterfaces(device, { portUp: () => true, forwards: () => true }, undefined),
+  };
 }
 
 const toward = (routes: ReturnType<typeof routingTable>, prefix: string) =>
@@ -93,7 +96,8 @@ describe('routingTable', () => {
 
   it('drops a learned route out of an interface that is down', () => {
     const { device } = r1();
-    const up = ipInterfaces(device, (port) => port !== 'GigabitEthernet0/1', undefined);
+    const portUp = (port: string) => port !== 'GigabitEthernet0/1';
+    const up = ipInterfaces(device, { portUp, forwards: portUp }, undefined);
 
     const table = routingTable(device, up, undefined, [
       learned('rip', '192.168.9.0/24', '10.0.12.2', 1),

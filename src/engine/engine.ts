@@ -177,6 +177,9 @@ export function createEngine({
           return settings;
         },
         portUp: (port) => portLinks.get(endpointKey({ device: id, port }))?.up ?? false,
+        forwards: (port, vlan) =>
+          slot.ctx.portUp(port) &&
+          !(running.get(id) ?? []).some((other) => other.module.holdsVlan?.(other.ctx, port, vlan)),
         send: (port, frame) => send({ device: id, port }, frame),
         setTimer: (key, delay) => {
           const pending = slot.timers.get(key);

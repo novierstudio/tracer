@@ -9,7 +9,7 @@ import {
   type Ipv4Packet,
 } from '../pdu';
 import { interfacesOf, routesOf, timerKey, type IpContext } from './context';
-import { isLan, sendOnLan, type LanInterface } from './interfaces';
+import { isLan, routesPackets, sendOnLan, type LanInterface } from './interfaces';
 import { compareAddresses, inPrefix } from './ipv4';
 import { nextHop } from './routes';
 
@@ -132,7 +132,7 @@ function learn(
 
 /** IOS answers for an address it routes out another interface (`ip proxy-arp`, on by default). */
 function proxies(ctx: IpContext, iface: LanInterface, target: Ipv4Address): boolean {
-  if (ctx.device.kind !== 'router' || inPrefix(iface.cidr, target)) return false;
+  if (!routesPackets(ctx.device) || inPrefix(iface.cidr, target)) return false;
   const { interfaces, routes } = routesOf(ctx);
   const hop = nextHop(routes, interfaces, target);
   return hop !== undefined && hop.interface.name !== iface.name;

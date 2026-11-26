@@ -1,4 +1,4 @@
-import type { Device, Ipv4Address, MacAddress, PortId } from '@/model';
+import type { Ipv4Address, MacAddress, PortId } from '@/model';
 import type { Frame } from '../frame';
 import { isLan, lanInterfaceFor, sendOnLan, serialOn, type IpInterface } from '../l3/interfaces';
 import type { DeviceContext } from '../module';
@@ -32,7 +32,7 @@ export const packetIn = (frame: Frame): Ipv4Packet | undefined =>
  * of one of the multicast `groups` the protocol joined.
  */
 export function arrival(
-  device: Device,
+  ctx: DeviceContext,
   interfaces: readonly IpInterface[],
   port: PortId,
   frame: Frame,
@@ -43,7 +43,7 @@ export function arrival(
     return iface && { iface, packet: frame.payload };
   }
   if (frame.kind !== 'ethernet' || frame.payload.kind !== 'ipv4') return undefined;
-  const iface = lanInterfaceFor(device, interfaces, port, frame);
+  const iface = lanInterfaceFor(ctx, interfaces, port, frame);
   if (!iface) return undefined;
   const packet = frame.payload;
   const joined = groups.some((group) => packet.dst === group && frame.dst === multicastMac(group));

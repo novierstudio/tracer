@@ -89,11 +89,11 @@ export const hostAddressingOf = (ctx: IpContext): HostAddressing | undefined =>
   isHost(ctx.device) ? hostAddressing(ctx.device, ctx.state.dhcp) : undefined;
 
 export const interfacesOf = (ctx: IpContext): IpInterface[] =>
-  ipInterfaces(ctx.device, (port) => ctx.portUp(port), hostAddressingOf(ctx));
+  ipInterfaces(ctx.device, ctx, hostAddressingOf(ctx));
 
 export function routesOf(ctx: IpContext): { interfaces: IpInterface[]; routes: Route[] } {
   const host = hostAddressingOf(ctx);
-  const interfaces = ipInterfaces(ctx.device, (port) => ctx.portUp(port), host);
+  const interfaces = ipInterfaces(ctx.device, ctx, host);
   const routes = routingTable(ctx.device, interfaces, host, ctx.learnedRoutes());
   return { interfaces, routes };
 }

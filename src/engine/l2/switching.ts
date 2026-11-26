@@ -202,6 +202,7 @@ export const switchingModule: SimModule<SwitchState> = {
     sync(ctx, ctx.state);
   },
   holdsPort: (ctx, port) => isHeld(ctx.state.stp, port),
+  holdsVlan: (ctx, port, vlan) => portState(ctx.state.stp, vlan, port) !== 'forwarding',
 };
 
 /** The addresses the switch knows now, by VLAN then MAC, as `show mac address-table` lists them. */

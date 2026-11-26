@@ -1,4 +1,4 @@
-import type { Device, DeviceKind, LabSettings, PortId } from '@/model';
+import type { Device, DeviceKind, LabSettings, PortId, VlanId } from '@/model';
 import type { SimDuration, SimTime } from './core/time';
 import type { Frame } from './frame';
 import type { LearnedRoute } from './l3/routes';
@@ -11,6 +11,11 @@ export interface DeviceContext {
   /** The lab-wide settings the simulation last received. */
   readonly settings: LabSettings;
   portUp(port: PortId): boolean;
+  /**
+   * Whether the port is up and forwards `vlan`'s frames: no module holds it back in that VLAN, as
+   * spanning tree does on a port that is not forwarding. A switch's VLAN interface uses only these.
+   */
+  forwards(port: PortId, vlan: VlanId): boolean;
   /** Sends a frame out of a port. A port with no cable sends nothing. */
   send(port: PortId, frame: Frame): void;
   /** Fires `onTimer(key)` after `delay`. Setting a key again replaces its pending timer. */
@@ -59,6 +64,8 @@ export interface SimModule<S = unknown> {
    * the port forwards. The port's end of its link shows as held while any module says so.
    */
   holdsPort?(ctx: ModuleContext<S>, port: PortId): boolean;
+  /** Whether the module holds an up port back from forwarding `vlan`'s frames. See `forwards`. */
+  holdsVlan?(ctx: ModuleContext<S>, port: PortId, vlan: VlanId): boolean;
   /**
    * The routes the module has learned and offers the device's routing table now, as a routing
    * protocol does. The table weighs them against connected and static routes, and against each
