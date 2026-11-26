@@ -85,6 +85,7 @@ import { natCommands } from './nat';
 import { ospfCommands } from './ospf';
 import { remoteCommands } from './remote';
 import { ripCommands } from './rip';
+import { servicesCommands } from './services';
 
 const EXEC = ['user-exec', 'priv-exec'] as const;
 const PRIV = ['priv-exec'] as const;
@@ -339,6 +340,7 @@ export const commonCommands = [
   ...execCommands,
   ...remoteCommands,
   ...discoveryCommands,
+  ...servicesCommands,
   // EXEC
   command({
     modes: EXEC,
