@@ -54,7 +54,7 @@ const ping = (page: Page, from: string, to: string) =>
       new Promise<number>((resolve) => {
         const { tracerSim } = window as unknown as DevWindow;
         void tracerSim.ping(from, to, { count: 2, timeoutMs: 1000 }, (event) => {
-          if (event.kind === 'summary') resolve(event.received);
+          if (event.kind === 'summary') resolve(event.received ?? 0);
         });
       }),
     { from, to },

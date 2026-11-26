@@ -452,24 +452,32 @@ export function onChannelTimer(
 
 /** Every channel group, as `show etherchannel` reports it. */
 export function etherchannelStatus(device: Switch, state: ChannelState): EtherChannelStatus[] {
-  return [...channelGroups(device)].map(([group, ports]) => {
-    const members: ChannelMember[] = ports.map((port) => {
-      const mode = device.config.interfaces[port]!.channelGroup!.mode;
-      const bundledAt = state.bundledAt.get(port);
+  const groups = channelGroups(device);
+  // A port-channel whose members all left still lists, empty.
+  for (const id of Object.keys(device.config.portChannels ?? {})) {
+    const group = Number(id.slice('Port-channel'.length));
+    if (!groups.has(group)) groups.set(group, []);
+  }
+  return [...groups]
+    .sort(([a], [b]) => a - b)
+    .map(([group, ports]) => {
+      const members: ChannelMember[] = ports.map((port) => {
+        const mode = device.config.interfaces[port]!.channelGroup!.mode;
+        const bundledAt = state.bundledAt.get(port);
+        return {
+          port,
+          mode,
+          flag: state.flags.get(port) ?? 'D',
+          ...(bundledAt !== undefined && { bundledAt }),
+        };
+      });
+      const upSince = state.upSince.get(group);
       return {
-        port,
-        mode,
-        flag: state.flags.get(port) ?? 'D',
-        ...(bundledAt !== undefined && { bundledAt }),
+        group,
+        protocol: members[0] && channelProtocol(members[0].mode),
+        inUse: upSince !== undefined,
+        ...(upSince !== undefined && { upSince }),
+        members,
       };
     });
-    const upSince = state.upSince.get(group);
-    return {
-      group,
-      protocol: channelProtocol(members[0]!.mode),
-      inUse: upSince !== undefined,
-      ...(upSince !== undefined && { upSince }),
-      members,
-    };
-  });
 }
