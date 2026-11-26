@@ -1,7 +1,9 @@
 import { Trash2Icon } from 'lucide-react';
 import { Switch } from 'radix-ui';
 import { useId, useState, type ReactNode } from 'react';
+import type { HostAddressing } from '@/engine/api';
 import { HostDesktop } from '@/features/desktop/HostDesktop';
+import { useHostAddressing } from '@/features/simulation/hostAddresses';
 import { DeviceTerminal } from '@/features/terminal/Terminal';
 import type { Device, Topology } from '@/model';
 import { editorStore } from '@/model/store';
@@ -147,6 +149,7 @@ function PowerSwitch({ device }: { device: Device }) {
 
 function Overview({ device, rows }: { device: Device; rows: PortRow[] }) {
   const connected = rows.filter((row) => row.peer);
+  const leased = useHostAddressing(device.id);
   return (
     <>
       <Section title="Device">
@@ -155,7 +158,7 @@ function Overview({ device, rows }: { device: Device; rows: PortRow[] }) {
             ['Kind', KIND_LABELS[device.kind].one],
             ['Model', describeModel(device).name],
             ['Ports', `${connected.length} of ${rows.length} connected`],
-            ...hostAddressFacts(device),
+            ...hostAddressFacts(device, leased),
           ]}
         />
       </Section>
@@ -183,11 +186,32 @@ function Overview({ device, rows }: { device: Device; rows: PortRow[] }) {
   );
 }
 
-function hostAddressFacts(device: Device): [string, ReactNode][] {
+/** A host's address and gateway. A DHCP host's come from the simulation's `leased`. */
+function hostAddressFacts(
+  device: Device,
+  leased: HostAddressing | undefined,
+): [string, ReactNode][] {
   if (device.kind !== 'pc' && device.kind !== 'server') return [];
   const { ipv4 } = device.config;
-  if (ipv4.mode === 'dhcp') return [['IP address', 'DHCP']];
   const notSet = <span className="text-fg-3">Not set</span>;
+  if (ipv4.mode === 'dhcp') {
+    if (leased?.kind !== 'leased' && leased?.kind !== 'autoconfigured') {
+      return [['IP address', <span className="text-fg-3">DHCP, none yet</span>]];
+    }
+    const source = leased.kind === 'leased' ? 'DHCP' : 'APIPA';
+    return [
+      [
+        'IP address',
+        <span>
+          <Mono>{formatCidr(leased.address)}</Mono> <span className="text-fg-3">{source}</span>
+        </span>,
+      ],
+      [
+        'Gateway',
+        leased.kind === 'leased' && leased.gateway ? <Mono>{leased.gateway}</Mono> : notSet,
+      ],
+    ];
+  }
   return [
     ['IP address', ipv4.address ? <Mono>{formatCidr(ipv4.address)}</Mono> : notSet],
     ['Gateway', ipv4.gateway ? <Mono>{ipv4.gateway}</Mono> : notSet],

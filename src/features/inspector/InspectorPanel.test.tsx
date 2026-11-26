@@ -1,5 +1,7 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { HostAddressing } from '@/engine/api';
+import { hostAddresses } from '@/features/simulation/hostAddresses';
 import type { DeviceId, LinkId } from '@/model';
 import { editorStore } from '@/model/store';
 import { TooltipProvider } from '@/ui/tooltip';
@@ -351,8 +353,36 @@ describe('host IP configuration', () => {
     expect(hostIpv4()).toMatchObject({ gateway: '192.168.1.1' });
   });
 
-  it('keeps DHCP off until there are DHCP servers', () => {
-    expect(screen.getByRole('radio', { name: 'DHCP' })).toBeDisabled();
-    expect(screen.getByText(/DHCP arrives with DHCP servers/)).toBeVisible();
+  it('switches to DHCP, and then waits for what the server gives', () => {
+    fireEvent.click(screen.getByRole('radio', { name: 'DHCP' }));
+    expect(screen.getByText(/will come from a DHCP server/)).toBeVisible();
+    apply();
+    expect(hostIpv4()).toEqual({ mode: 'dhcp' });
+    expect(screen.getByRole('status', { name: 'DHCP status' })).toHaveTextContent(
+      'Requesting an address from a DHCP server…',
+    );
+  });
+
+  it('shows the lease a DHCP host holds', () => {
+    fireEvent.click(screen.getByRole('radio', { name: 'DHCP' }));
+    apply();
+    act(() =>
+      hostAddresses.setState({
+        [lab.pc.id]: {
+          kind: 'leased',
+          address: { address: '192.168.1.11', prefixLength: 24 },
+          gateway: '192.168.1.1',
+          dns: [],
+          server: '192.168.1.1',
+          via: '02:00:00:00:00:01',
+          obtainedAt: 0,
+        } as unknown as HostAddressing,
+      }),
+    );
+    const status = screen.getByRole('status', { name: 'DHCP status' });
+    expect(status).toHaveTextContent('DHCP request successful.');
+    expect(status).toHaveTextContent('192.168.1.11');
+    expect(status).toHaveTextContent('255.255.255.0');
+    act(() => hostAddresses.setState({}, true));
   });
 });

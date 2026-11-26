@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { editorStore } from '@/model/store';
 import { connectSimulation } from './controller';
 import { exposeSimClient } from './devHandle';
+import { trackHostAddresses } from './hostAddresses';
 import { trackLinkStates } from './linkState';
 
 export type EngineState = 'starting' | 'ready' | 'failed';
@@ -17,6 +18,7 @@ export function useEngine(): EngineState {
   useEffect(() => {
     let active = true;
     let stopTracking: (() => void) | undefined;
+    let stopAddresses: (() => void) | undefined;
     let disconnect: (() => void) | undefined;
     import('@/engine/client')
       .then(({ startEngine }) => startEngine(editorStore))
@@ -24,6 +26,7 @@ export function useEngine(): EngineState {
         (client) => {
           if (!active) return;
           stopTracking = trackLinkStates(client);
+          stopAddresses = trackHostAddresses(client, editorStore);
           disconnect = connectSimulation(client);
           exposeSimClient(client);
           setState('ready');
@@ -36,6 +39,7 @@ export function useEngine(): EngineState {
     return () => {
       active = false;
       stopTracking?.();
+      stopAddresses?.();
       disconnect?.();
     };
   }, []);
