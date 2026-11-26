@@ -4,13 +4,25 @@ import { DomainName, Ipv4Address, serverServices, type Device, type ServerServic
 import { editorStore } from '@/model/store';
 import { Button } from '@/ui/button';
 import { cn } from '@/ui/cn';
-import { ConfigSection, inputClass, SettingRow, Toggle } from './config/controls';
+import { useServerStatus } from '@/features/simulation/serverStatus';
+import { ConfigSection, inputClass } from './config/controls';
+import { MailDomain, MailUsers } from './services/Email';
+import { FileList } from './services/FileList';
+import { FtpUsers } from './services/FtpUsers';
+import { NtpClock } from './services/NtpClock';
+import { firstIssue, onOff, ServiceSwitch } from './services/parts';
+import { SyslogTable } from './services/SyslogTable';
 
 type Server = Extract<Device, { kind: 'server' }>;
 
-/** A server's DNS and HTTP services. Every change is one undo step in the server's config. */
+/**
+ * A server's services, in Packet Tracer's order. Every change is one undo step in the server's
+ * config. Syslog messages and mailbox counts are live state, from the simulation.
+ */
 export function ServicesTab({ device }: { device: Server }) {
   const services = serverServices(device.config);
+  const { tftp, ftp, email, ntp } = services;
+  const status = useServerStatus(device.id);
   const write = (next: ServerServices) =>
     editorStore.getState().updateConfig({
       device: device.id,
@@ -19,18 +31,7 @@ export function ServicesTab({ device }: { device: Server }) {
     });
   return (
     <>
-      <ConfigSection title="DNS" summary={services.dns.enabled ? 'On' : 'Off'}>
-        <ServiceSwitch
-          label="DNS service"
-          checked={services.dns.enabled}
-          onChange={(enabled) => write({ ...services, dns: { ...services.dns, enabled } })}
-        />
-        <DnsRecords
-          services={services}
-          onChange={(records) => write({ ...services, dns: { ...services.dns, records } })}
-        />
-      </ConfigSection>
-      <ConfigSection title="HTTP" summary={services.http.enabled ? 'On' : 'Off'}>
+      <ConfigSection title="HTTP" summary={onOff(services.http.enabled)}>
         <ServiceSwitch
           label="HTTP service"
           checked={services.http.enabled}
@@ -42,31 +43,92 @@ export function ServicesTab({ device }: { device: Server }) {
           onSave={(indexHtml) => write({ ...services, http: { ...services.http, indexHtml } })}
         />
       </ConfigSection>
+      <ConfigSection title="TFTP" summary={onOff(tftp.enabled)}>
+        <ServiceSwitch
+          label="TFTP service"
+          checked={tftp.enabled}
+          onChange={(enabled) => write({ ...services, tftp: { ...tftp, enabled } })}
+        />
+        <FileList
+          label="TFTP files"
+          testId="tftp-files"
+          files={tftp.files}
+          onChange={(files) => write({ ...services, tftp: { ...tftp, files } })}
+        />
+      </ConfigSection>
+      <ConfigSection title="DNS" summary={onOff(services.dns.enabled)}>
+        <ServiceSwitch
+          label="DNS service"
+          checked={services.dns.enabled}
+          onChange={(enabled) => write({ ...services, dns: { ...services.dns, enabled } })}
+        />
+        <DnsRecords
+          services={services}
+          onChange={(records) => write({ ...services, dns: { ...services.dns, records } })}
+        />
+      </ConfigSection>
+      <ConfigSection title="SYSLOG" summary={onOff(services.syslog.enabled)}>
+        <ServiceSwitch
+          label="Syslog service"
+          checked={services.syslog.enabled}
+          onChange={(enabled) => write({ ...services, syslog: { enabled } })}
+        />
+        <SyslogTable entries={status?.syslog ?? []} />
+      </ConfigSection>
+      <ConfigSection title="NTP" summary={onOff(ntp.enabled)}>
+        <ServiceSwitch
+          label="NTP service"
+          checked={ntp.enabled}
+          onChange={(enabled) => write({ ...services, ntp: { ...ntp, enabled } })}
+        />
+        <NtpClock
+          epoch={ntp.epoch}
+          onSet={(epoch) => write({ ...services, ntp: { ...ntp, epoch } })}
+        />
+      </ConfigSection>
+      <ConfigSection title="EMAIL" summary={onOff(email.smtp || email.pop3)}>
+        <ServiceSwitch
+          label="SMTP service"
+          rowLabel="SMTP Service"
+          checked={email.smtp}
+          onChange={(smtp) => write({ ...services, email: { ...email, smtp } })}
+        />
+        <ServiceSwitch
+          label="POP3 service"
+          rowLabel="POP3 Service"
+          checked={email.pop3}
+          onChange={(pop3) => write({ ...services, email: { ...email, pop3 } })}
+        />
+        <MailDomain
+          domain={email.domain}
+          onSet={(domain) => write({ ...services, email: { ...email, domain } })}
+        />
+        <MailUsers
+          users={email.users}
+          mailboxes={status?.mailboxes}
+          onChange={(users) => write({ ...services, email: { ...email, users } })}
+        />
+      </ConfigSection>
+      <ConfigSection title="FTP" summary={onOff(ftp.enabled)}>
+        <ServiceSwitch
+          label="FTP service"
+          checked={ftp.enabled}
+          onChange={(enabled) => write({ ...services, ftp: { ...ftp, enabled } })}
+        />
+        <FtpUsers
+          users={ftp.users}
+          onChange={(users) => write({ ...services, ftp: { ...ftp, users } })}
+        />
+        <FileList
+          label="FTP files"
+          testId="ftp-files"
+          files={ftp.files}
+          onChange={(files) => write({ ...services, ftp: { ...ftp, files } })}
+        />
+      </ConfigSection>
     </>
   );
 }
-
-function ServiceSwitch({
-  label,
-  checked,
-  onChange,
-}: {
-  label: string;
-  checked: boolean;
-  onChange: (checked: boolean) => void;
-}) {
-  return (
-    <SettingRow label="Service">
-      <span className="flex h-7 items-center gap-2 text-xs text-fg-2">
-        <Toggle label={label} checked={checked} onChange={onChange} />
-        <span aria-hidden="true">{checked ? 'On' : 'Off'}</span>
-      </span>
-    </SettingRow>
-  );
-}
-
-const firstIssue = (error: { issues: readonly { message: string }[] }) =>
-  error.issues[0]?.message ?? 'Invalid value';
 
 type RecordErrors = { name?: string; address?: string };
 
