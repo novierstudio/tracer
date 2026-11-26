@@ -220,6 +220,8 @@ export const SAMPLE_LABS: readonly SampleLab[] = [
       'Switch to Simulation mode and log in again to see TCP to port 22, with the SSH data encrypted',
     ],
     load: () => import('./remote-management.tracer.json?raw').then(text),
+  },
+  {
     id: 'etherchannel',
     title: 'EtherChannel between switches',
     description:

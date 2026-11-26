@@ -58,6 +58,7 @@ import {
   showVersion,
 } from './show';
 import { showArp, showIpRoute, showSwitchIpRoute } from './showRouting';
+import { discoveryCommands } from './cdp';
 import { spanningTreeCommands } from './spanningTree';
 import {
   enterPortChannel,
@@ -335,6 +336,7 @@ const VTY_LAST = 15;
 export const commonCommands = [
   ...execCommands,
   ...remoteCommands,
+  ...discoveryCommands,
   // EXEC
   command({
     modes: EXEC,
