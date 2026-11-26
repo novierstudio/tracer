@@ -2,7 +2,18 @@ import { describe, expect, it } from 'vitest';
 import type { EventId, FrameEvent } from '@/engine/events';
 import type { EthernetFrame, Ipv4Packet } from '@/engine/pdu';
 import { access, ip, labBuilder, routedLab, trunk } from '@/engine/testing';
-import { PortId, type Device, type DeviceId, type MacAddress, type Topology } from '@/model';
+import { ms, simTime } from '@/engine/core/time';
+import { createEngine } from '@/engine/engine';
+import { createSimService } from '@/engine/service';
+import { STACKS } from '@/engine/stacks';
+import {
+  DhcpServerConfig,
+  PortId,
+  type Device,
+  type DeviceId,
+  type MacAddress,
+  type Topology,
+} from '@/model';
 import { pingFrames } from '../testing';
 import { decide, describeDecision, dropLabel } from './decision';
 
@@ -179,5 +190,84 @@ describe('a decision read from hand-made frames', () => {
       "PC2 ignored it: it is addressed to 02:00:00:00:00:09, not to PC2's MAC.",
     );
     expect(dropLabel(decision)).toBeUndefined();
+  });
+});
+
+describe('the decision sentence for DHCP', () => {
+  /** R1 serving 192.168.1.0/24 to PC1 and PC2 on SW1, and every frame until both have leases. */
+  function doraFrames() {
+    const lab = labBuilder();
+    const r1 = lab.router('R1', { 'GigabitEthernet0/0': '192.168.1.1/24' });
+    lab.edit(r1, (device) =>
+      device.kind === 'router'
+        ? {
+            ...device,
+            config: {
+              ...device.config,
+              dhcp: DhcpServerConfig.parse({
+                pools: { LAN: { network: { address: '192.168.1.0', prefixLength: 24 } } },
+                excluded: [{ first: '192.168.1.1', last: '192.168.1.10' }],
+              }),
+            },
+          }
+        : device,
+    );
+    const sw1 = lab.switch('SW1');
+    const pc1 = lab.dhcpHost('pc', 'PC1');
+    const pc2 = lab.host('pc', 'PC2', '192.168.1.200/24');
+    lab.connect(pc1, 'FastEthernet0', sw1, 'FastEthernet0/1');
+    lab.connect(pc2, 'FastEthernet0', sw1, 'FastEthernet0/2');
+    lab.connect(sw1, 'GigabitEthernet0/1', r1, 'GigabitEthernet0/0');
+    const engine = createEngine({ seed: 1, stacks: STACKS, linkDelay: ms(1) });
+    const sim = createSimService({ engine, frames: { now: () => 0, request: () => {} } });
+    sim.load(lab.topology);
+    engine.runUntil(simTime(20_000));
+    const frames = engine.log
+      .since(0 as EventId)
+      .filter(
+        (event): event is FrameEvent =>
+          event.kind === 'frame' &&
+          event.outcome === 'delivered' &&
+          event.frame.kind === 'ethernet' &&
+          event.frame.payload.kind === 'ipv4',
+      );
+    return { lab, frames, pc1Mac: macOf(lab.device(pc1), 'FastEthernet0')! };
+  }
+
+  it('tells each step of a DORA, at the server, the client and a bystander', () => {
+    const { lab, frames, pc1Mac } = doraFrames();
+    const told = sentences(lab.topology, frames);
+    expect(told).toEqual(
+      expect.arrayContaining([
+        "R1's DHCP server offered 192.168.1.11 and sent the Offer out Gi0/0.",
+        'PC1 took the offer of 192.168.1.11 and broadcast a Request for it out Fa0.',
+        "R1's DHCP server leased 192.168.1.11 to the client and sent an Ack out Gi0/0.",
+        'PC1 now has 192.168.1.11: the DHCP server confirmed the lease.',
+        'PC2 ignored it: only a DHCP server answers a Discover.',
+        `PC2 ignored it: it is for DHCP client ${pc1Mac}, not PC2.`,
+      ]),
+    );
+    // SW1 drops the Discovers that come before spanning tree forwards; R1 answers the rest.
+    const drops = frames.map((event) => dropLabel(decide(event, lab.device(event.to.device))));
+    expect(new Set(drops.filter(Boolean))).toEqual(new Set(['Nowhere to send']));
+  });
+
+  it('marks a Discover a server could not answer as a drop', () => {
+    const { lab, frames } = doraFrames();
+    const discoverAtR1 = frames.find((event) => {
+      const packet = event.frame.kind === 'ethernet' ? event.frame.payload : undefined;
+      return (
+        packet?.kind === 'ipv4' &&
+        packet.payload.kind === 'udp' &&
+        packet.payload.payload.type === 'discover' &&
+        lab.device(event.to.device).kind === 'router'
+      );
+    })!;
+    const unanswered = { ...discoverAtR1, sent: [] };
+    const decision = decide(unanswered, lab.device(discoverAtR1.to.device));
+    expect(dropLabel(decision)).toBe('No offer');
+    expect(describeDecision(decision!, 'R1')).toBe(
+      'R1 sent no offer: it has no DHCP pool for this network, or no free address left in it.',
+    );
   });
 });

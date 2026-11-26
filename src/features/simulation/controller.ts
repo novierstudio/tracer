@@ -1,8 +1,10 @@
 import type { PingEvent, SimMode } from '@/engine/api';
 import type { SimClient } from '@/engine/client';
 import type { EventId, FrameEvent } from '@/engine/events';
+import { addressOf } from '@/engine/l3/hostAddress';
 import type { Device, DeviceId, Ipv4Address } from '@/model';
 import { editorStore } from '@/model/store';
+import { hostAddresses } from './hostAddresses';
 import { protocolOf, type ProtocolId } from './protocols';
 import {
   currentFrames,
@@ -90,12 +92,19 @@ function playAt(speed: PlaySpeed) {
   void client?.sim.play(STEPS_PER_SECOND * speed);
 }
 
-/** The first IPv4 address a device answers on, which the PDU tool sends to. */
+/**
+ * The first IPv4 address a device answers on, which the PDU tool sends to. A DHCP host's is the
+ * one the simulation says it holds.
+ */
 export function deviceAddress(device: Device): Ipv4Address | undefined {
   switch (device.kind) {
     case 'pc':
-    case 'server':
-      return device.config.ipv4.mode === 'static' ? device.config.ipv4.address?.address : undefined;
+    case 'server': {
+      const { ipv4 } = device.config;
+      if (ipv4.mode === 'static') return ipv4.address?.address;
+      const leased = hostAddresses.getState()[device.id];
+      return leased && addressOf(leased)?.address;
+    }
     case 'router':
       return Object.values(device.config.interfaces).find((iface) => iface?.ipv4 && !iface.shutdown)
         ?.ipv4?.address;
