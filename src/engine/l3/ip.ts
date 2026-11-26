@@ -47,6 +47,8 @@ function deliver(ctx: IpContext, packet: Ipv4Packet, arrival?: IpInterface) {
     deliverUdp(ctx, packet, message, arrival);
     return;
   }
+  // OSPF runs in a module of its own, which reads its packets from the frames it sees.
+  if (message.kind === 'ospf') return;
   if (message.type === 'echo-request') {
     const reply = { kind: 'icmp', type: 'echo-reply', id: message.id, seq: message.seq } as const;
     originate(ctx, packet.src, reply, { src: packet.dst });

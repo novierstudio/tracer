@@ -82,8 +82,23 @@ const interfaceFields = {
 /** `ip helper-address`: where a router relays the DHCP broadcasts it hears on an interface. */
 const helperAddresses = z.array(Ipv4Address).min(1).optional();
 
+/** `ip ospf cost`: what sending out of the interface adds to an OSPF path, 1 to 65535. */
+export const OspfCost = z.int().min(1).max(65535);
+
+/** `ip ospf priority`: who becomes DR on a multi-access network. 0 never does. */
+export const OspfPriority = z.int().min(0).max(255);
+
+/** Interface settings that OSPF reads. Absent means the defaults. */
+const ospfInterfaceFields = {
+  /** Absent means the cost of the interface's bandwidth: 100 Mbit/s divided by it, at least 1. */
+  ospfCost: OspfCost.optional(),
+  /** Absent means 1. */
+  ospfPriority: OspfPriority.optional(),
+};
+
 export const RoutedInterface = z.object({
   ...interfaceFields,
+  ...ospfInterfaceFields,
   ipv4: Ipv4Cidr.optional(),
   /** Bit/s a serial port clocks when its end of the cable is DCE. */
   clockRate: z.int().positive().optional(),
@@ -149,6 +164,7 @@ export type Dot1q = z.infer<typeof Dot1q>;
 
 /** A router subinterface. It has no speed, duplex or clock of its own: those belong to its port. */
 export const Subinterface = z.object({
+  ...ospfInterfaceFields,
   shutdown: z.boolean(),
   description: z.string().optional(),
   /** IOS refuses an address until the subinterface has an encapsulation. */
@@ -263,6 +279,30 @@ export const RipConfig = z.object({
 });
 export type RipConfig = z.infer<typeof RipConfig>;
 
+/**
+ * `network <address> <wildcard> area <id>`: an interface whose address matches, bit for bit where
+ * the wildcard has a 0, runs OSPF in that area.
+ */
+export const OspfNetwork = z.object({
+  address: Ipv4Address,
+  wildcard: Ipv4Address,
+  area: z.int().min(0).max(4294967295),
+});
+export type OspfNetwork = z.infer<typeof OspfNetwork>;
+
+/** `router ospf <process-id>`. Tracer runs one process per router, in a single area. */
+export const OspfConfig = z.object({
+  /** Local to the router, 1 to 65535. Neighbours need not agree on it. */
+  processId: z.int().min(1).max(65535),
+  /** `router-id`. Absent means the highest loopback address, else the highest interface address. */
+  routerId: Ipv4Address.optional(),
+  /** In the order entered: the first that matches an interface puts it in its area. */
+  networks: z.array(OspfNetwork).default(() => []),
+  /** `passive-interface`: no hellos, so no neighbours, but its network is still advertised. */
+  passiveInterfaces: z.array(InterfaceId).default(() => []),
+});
+export type OspfConfig = z.infer<typeof OspfConfig>;
+
 export const DEFAULT_ROUTER_HOSTNAME = Hostname.parse('Router');
 export const DEFAULT_SWITCH_HOSTNAME = Hostname.parse('Switch');
 
@@ -312,6 +352,8 @@ export const RouterConfig = z.object({
   dhcp: DhcpServerConfig.optional(),
   /** Absent until `router rip`. */
   rip: RipConfig.optional(),
+  /** Absent until `router ospf`. */
+  ospf: OspfConfig.optional(),
 });
 export type RouterConfig = z.infer<typeof RouterConfig>;
 
@@ -454,7 +496,7 @@ export type StpTimers = z.infer<typeof StpTimers>;
 
 /**
  * How fast routing protocols talk. `fast` gets a lab converged in seconds; `ios` runs the real
- * IOS timers, such as RIP's 30 s updates.
+ * IOS timers, such as RIP's 30 s updates and OSPF's 10 s hellos.
  */
 export const RoutingTimers = z.enum(['fast', 'ios']);
 export type RoutingTimers = z.infer<typeof RoutingTimers>;

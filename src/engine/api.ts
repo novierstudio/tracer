@@ -12,8 +12,17 @@ import type { PingEvent, PingListener, PingOptions, PingReply, PingSummary } fro
 import type { LearnedRoute, Route } from './l3/routes';
 import type { TraceEvent, TraceListener, TraceOptions, TraceProbe } from './l3/traceroute';
 import type { DeviceUnavailable } from './module';
+import type {
+  OspfDesignated,
+  OspfInterfaceState,
+  OspfInterfaceStatus,
+  OspfNeighborState,
+  OspfNeighborStatus,
+  OspfNetworkType,
+  OspfStatus,
+} from './routing/ospf/status';
 import type { RipStatus } from './routing/rip';
-import type { RipTimers } from './routing/timers';
+import type { OspfTimers, RipTimers } from './routing/timers';
 import type { TopologyPatch } from './patch';
 
 export type {
@@ -28,6 +37,14 @@ export type {
   LinkEnd,
   LinkStatus,
   MacTableEntry,
+  OspfDesignated,
+  OspfInterfaceState,
+  OspfInterfaceStatus,
+  OspfNeighborState,
+  OspfNeighborStatus,
+  OspfNetworkType,
+  OspfStatus,
+  OspfTimers,
   PingEvent,
   PingListener,
   PingOptions,
@@ -75,7 +92,10 @@ export type SimEventBatch = {
 export type CliResult = { kind: 'not-implemented' };
 
 /** A router's routing protocols as they run, each undefined while it is not configured. */
-export type RoutingProtocols = { readonly rip: RipStatus | undefined };
+export type RoutingProtocols = {
+  readonly rip: RipStatus | undefined;
+  readonly ospf: OspfStatus | undefined;
+};
 
 /** The simulation worker's contract with the main thread. */
 export interface SimAPI {

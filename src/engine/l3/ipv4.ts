@@ -48,3 +48,13 @@ export function classfulNetwork(address: Ipv4Address): Ipv4Cidr | undefined {
   const prefixLength = classfulLength(address);
   return prefixLength === undefined ? undefined : networkOf({ address, prefixLength });
 }
+
+/** Whether an address matches `network` under a wildcard mask, whose 1 bits may differ. */
+export function matchesWildcard(
+  address: Ipv4Address,
+  network: Ipv4Address,
+  wildcard: Ipv4Address,
+): boolean {
+  const care = ~ipv4ToUint32(wildcard) >>> 0;
+  return (ipv4ToUint32(address) & care) >>> 0 === (ipv4ToUint32(network) & care) >>> 0;
+}

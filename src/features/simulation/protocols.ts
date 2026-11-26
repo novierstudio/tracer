@@ -11,7 +11,7 @@ import type {
 } from '@/engine/pdu';
 
 /** The protocol a frame shows as: the innermost one the engine models. */
-export type ProtocolId = 'arp' | 'icmp' | 'dhcp' | 'rip' | 'stp' | 'hello';
+export type ProtocolId = 'arp' | 'icmp' | 'dhcp' | 'rip' | 'ospf' | 'stp' | 'hello';
 
 /** Each protocol's short label and colour token. The label means colour is never the only cue. */
 export const PROTOCOLS: Record<ProtocolId, { label: string; token: `--proto-${string}` }> = {
@@ -19,6 +19,7 @@ export const PROTOCOLS: Record<ProtocolId, { label: string; token: `--proto-${st
   icmp: { label: 'ICMP', token: '--proto-icmp' },
   dhcp: { label: 'DHCP', token: '--proto-dhcp' },
   rip: { label: 'RIP', token: '--proto-routing' },
+  ospf: { label: 'OSPF', token: '--proto-routing' },
   stp: { label: 'STP', token: '--proto-stp' },
   hello: { label: 'Hello', token: '--proto-stp' },
 };
@@ -32,6 +33,8 @@ function ipProtocol(packet: Ipv4Packet): ProtocolId {
     case 'udp':
       // Each protocol over UDP is a protocol of its own.
       return packet.payload.payload.kind;
+    case 'ospf':
+      return 'ospf';
   }
 }
 
@@ -128,7 +131,14 @@ function describeUdp(packet: Ipv4Packet, datagram: UdpDatagram): string {
 
 function describePacket(packet: Ipv4Packet): string {
   const { payload } = packet;
-  return payload.kind === 'icmp' ? describeIcmp(packet, payload) : describeUdp(packet, payload);
+  switch (payload.kind) {
+    case 'icmp':
+      return describeIcmp(packet, payload);
+    case 'udp':
+      return describeUdp(packet, payload);
+    case 'ospf':
+      return `OSPF ${payload.type}`;
+  }
 }
 
 /** The Info column: what the frame says, in a line a student can read. */

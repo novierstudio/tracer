@@ -171,9 +171,14 @@ function ipv4Bytes(packet: Ipv4Packet): number[] {
 
 function payloadBytes(packet: Ipv4Packet): number[] {
   const { payload } = packet;
-  return payload.kind === 'icmp'
-    ? icmpBytes(payload)
-    : udpParts(packet, payload).flatMap((part) => part.bytes);
+  switch (payload.kind) {
+    case 'icmp':
+      return icmpBytes(payload);
+    case 'udp':
+      return udpParts(packet, payload).flatMap((part) => part.bytes);
+    case 'ospf':
+      return [];
+  }
 }
 
 function ipv4Header(packet: Ipv4Packet, payloadLength: number): number[] {
@@ -302,6 +307,7 @@ function icmpLayers(wire: Wire, message: IcmpMessage): Layer[] {
 
 function describeIcmpStart(payload: Ipv4Payload) {
   if (payload.kind === 'udp') return `UDP ${payload.srcPort} → ${payload.dstPort}`;
+  if (payload.kind === 'ospf') return 'OSPF';
   return isEcho(payload)
     ? `ICMP ${ICMP_NAMES[payload.type]}, id ${payload.id}, seq ${payload.seq}`
     : `ICMP ${ICMP_NAMES[payload.type]}`;
@@ -834,7 +840,11 @@ function ripLayer(message: RipMessage, fields: readonly Field[]): Layer {
 
 // IPv4
 
-const IP_PROTOCOL_NAMES: Record<Ipv4Payload['kind'], string> = { icmp: 'ICMP', udp: 'UDP' };
+const IP_PROTOCOL_NAMES: Record<Ipv4Payload['kind'], string> = {
+  icmp: 'ICMP',
+  udp: 'UDP',
+  ospf: 'OSPF',
+};
 
 function describeIpAddress(address: Ipv4Address, role: 'src' | 'dst') {
   if (role === 'src') {
@@ -936,10 +946,20 @@ function ipv4Layers(wire: Wire, packet: Ipv4Packet): Layer[] {
       summary: `${packet.src} → ${packet.dst}, TTL ${packet.ttl}`,
       fields,
     },
-    ...(packet.payload.kind === 'icmp'
-      ? icmpLayers(wire, packet.payload)
-      : udpLayers(wire, packet, packet.payload)),
+    ...payloadLayers(wire, packet),
   ];
+}
+
+function payloadLayers(wire: Wire, packet: Ipv4Packet): Layer[] {
+  const { payload } = packet;
+  switch (payload.kind) {
+    case 'icmp':
+      return icmpLayers(wire, payload);
+    case 'udp':
+      return udpLayers(wire, packet, payload);
+    case 'ospf':
+      return [];
+  }
 }
 
 // ARP

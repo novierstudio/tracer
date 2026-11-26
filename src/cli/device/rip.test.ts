@@ -235,7 +235,7 @@ describe('show ip protocols', () => {
   ];
 
   it('describes the RIP process from its config and the simulation', () => {
-    expect(showWith(v2, { rip: STATUS }).live).toEqual([
+    expect(showWith(v2, { rip: STATUS, ospf: undefined }).live).toEqual([
       'Routing Protocol is "rip"',
       '  Outgoing update filter list for all interfaces is not set',
       '  Incoming update filter list for all interfaces is not set',
@@ -263,6 +263,7 @@ describe('show ip protocols', () => {
   it('sends v1 and receives either version when no version is set', () => {
     const live = showWith(['router rip', 'network 10.0.0.0'], {
       rip: { ...STATUS, timers: RIP_TIMERS.fast, nextUpdateMs: 3_000, sources: [] },
+      ospf: undefined,
     }).live;
 
     expect(live.slice(3, 10)).toEqual([
@@ -286,7 +287,7 @@ describe('show ip protocols', () => {
   });
 
   it('pins both directions to version 1', () => {
-    const live = showWith(['router rip', 'version 1'], { rip: STATUS }).live;
+    const live = showWith(['router rip', 'version 1'], { rip: STATUS, ospf: undefined }).live;
 
     expect(live.slice(6, 9)).toEqual([
       '  Default version control: send version 1, receive version 1',
@@ -296,11 +297,11 @@ describe('show ip protocols', () => {
   });
 
   it('prints nothing when no routing protocol is configured', () => {
-    expect(showWith([], { rip: undefined }).live).toEqual([]);
+    expect(showWith([], { rip: undefined, ospf: undefined }).live).toEqual([]);
   });
 
   it('says there is no live state without a simulation', () => {
-    expect(showWith(v2, { rip: STATUS }).output).toEqual(NO_ENGINE);
+    expect(showWith(v2, { rip: STATUS, ospf: undefined }).output).toEqual(NO_ENGINE);
   });
 
   it('is a router command only', () => {

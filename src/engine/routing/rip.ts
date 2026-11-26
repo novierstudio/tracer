@@ -15,7 +15,7 @@ import {
   type RipMessage,
   type RipVersion,
 } from '../pdu';
-import { arrival, sendOn, type Arrival } from './link';
+import { arrival, packetIn, sendOn, type Arrival } from './link';
 import { RIP_TIMERS, type RipTimers } from './timers';
 
 /**
@@ -487,7 +487,8 @@ export const ripModule: SimModule<RipState> = {
   },
   onFrame(ctx, port, frame) {
     const config = ripConfig(ctx.device);
-    if (!config) return;
+    const datagram = packetIn(frame)?.payload;
+    if (!config || datagram?.kind !== 'udp' || datagram.dstPort !== UDP_PORT.rip) return;
     const interfaces = ipInterfaces(ctx.device, (candidate) => ctx.portUp(candidate), undefined);
     // RIPv1 only broadcasts, so a router pinned to it never joins RIPv2's group.
     const groups = config.version === 1 ? [] : [RIP_GROUP];
