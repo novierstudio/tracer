@@ -44,8 +44,14 @@ import type {
   OspfNetworkType,
   OspfStatus,
 } from './routing/ospf/status';
+import type {
+  EigrpNeighborStatus,
+  EigrpPathStatus,
+  EigrpStatus,
+  EigrpTopologyEntry,
+} from './routing/eigrp/status';
 import type { RipStatus } from './routing/rip';
-import type { OspfTimers, RipTimers } from './routing/timers';
+import type { EigrpTimers, OspfTimers, RipTimers } from './routing/timers';
 import type { TopologyPatch } from './patch';
 import type { HttpResponse } from './http';
 
@@ -59,6 +65,11 @@ export type {
   DhcpOutcome,
   DnsListener,
   DnsLookup,
+  EigrpNeighborStatus,
+  EigrpPathStatus,
+  EigrpStatus,
+  EigrpTimers,
+  EigrpTopologyEntry,
   FetchEvent,
   FetchFailure,
   FetchListener,
@@ -143,6 +154,7 @@ export type CliResult = { kind: 'not-implemented' };
 export type RoutingProtocols = {
   readonly rip: RipStatus | undefined;
   readonly ospf: OspfStatus | undefined;
+  readonly eigrp: EigrpStatus | undefined;
 };
 
 /** The simulation worker's contract with the main thread. */

@@ -15,12 +15,22 @@ import { compareAddresses, inPrefix, networkOf } from './ipv4';
  * protocol's module offers it, and the routing table weighs it against every other source.
  */
 export type LearnedRoute = {
-  readonly source: 'rip' | 'ospf';
+  readonly source: 'rip' | 'ospf' | 'eigrp';
   readonly prefix: Ipv4Cidr;
   /** Administrative distance: how far the router trusts the source. Lower wins. */
   readonly distance: number;
-  /** The protocol's own cost: hops for RIP, the sum of interface costs for OSPF. */
+  /**
+   * The protocol's own cost: hops for RIP, the sum of interface costs for OSPF, the composite
+   * metric for EIGRP.
+   */
   readonly metric: number;
+  /**
+   * The metric the table weighs the path by, when it differs from `metric`: EIGRP's `variance`
+   * offers worse paths at the best one's metric, so they share the load with it.
+   */
+  readonly rank?: number;
+  /** A route another protocol brought into this one, as EIGRP's `D EX`. */
+  readonly external?: true;
   /** The neighbour to forward to. */
   readonly via: Ipv4Address;
   readonly interface: InterfaceId;
@@ -45,6 +55,7 @@ export type Route =
 export const ADMINISTRATIVE_DISTANCE = {
   connected: 0,
   static: 1,
+  eigrp: 90,
   ospf: 110,
   rip: 120,
 } as const satisfies Record<Exclude<Route['source'], 'local'>, number>;
@@ -70,8 +81,9 @@ const SOURCE_ORDER: Record<Route['source'], number> = {
   connected: 0,
   local: 1,
   static: 2,
-  ospf: 3,
-  rip: 4,
+  eigrp: 3,
+  ospf: 4,
+  rip: 5,
 };
 
 /**
@@ -108,7 +120,7 @@ function configuredRoutes(
 }
 
 const distanceOf = (route: Route) => ('distance' in route ? route.distance : 0);
-const metricOf = (route: Route) => ('metric' in route ? route.metric : 0);
+const metricOf = (route: Route) => ('metric' in route ? (route.rank ?? route.metric) : 0);
 const prefixKey = ({ prefix }: Route) => `${prefix.address}/${prefix.prefixLength}`;
 
 /** The better of two routes to one network: the lower administrative distance, then metric. */
@@ -161,6 +173,7 @@ function resolve(
       return exit(route.interface, destination);
     case 'rip':
     case 'ospf':
+    case 'eigrp':
       return exit(route.interface, route.via);
     case 'static': {
       const hop = route.nextHop;

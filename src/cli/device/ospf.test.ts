@@ -454,7 +454,7 @@ describe('OSPF show commands', () => {
     return { live: query.render(answer), output };
   }
 
-  const both = { rip: undefined, ospf: STATUS };
+  const both = { eigrp: undefined, rip: undefined, ospf: STATUS };
 
   describe('show ip protocols', () => {
     it('describes the OSPF process from its config and the simulation', () => {
@@ -480,7 +480,11 @@ describe('OSPF show commands', () => {
 
     it('counts the distinct areas of the OSPF interfaces', () => {
       const status = { ...STATUS, interfaces: [LOOPBACK, { ...SERIAL, area: 1 }] };
-      const live = showWith(OSPF_LINES, 'show ip protocols', { rip: undefined, ospf: status }).live;
+      const live = showWith(OSPF_LINES, 'show ip protocols', {
+        eigrp: undefined,
+        rip: undefined,
+        ospf: status,
+      }).live;
 
       expect(live[4]).toBe('  Number of areas in this router is 2. 2 normal 0 stub 0 nssa');
     });
@@ -493,7 +497,11 @@ describe('OSPF show commands', () => {
         sources: [],
       };
       const lines = [...OSPF_LINES, 'router rip', 'network 10.0.0.0'];
-      const live = showWith(lines, 'show ip protocols', { rip, ospf: STATUS }).live;
+      const live = showWith(lines, 'show ip protocols', {
+        rip,
+        ospf: STATUS,
+        eigrp: undefined,
+      }).live;
       const blank = live.indexOf('');
 
       expect(live[0]).toBe('Routing Protocol is "ospf 1"');
@@ -523,7 +531,11 @@ describe('OSPF show commands', () => {
   ])('shows a %s neighbour as %s', (state, role, text) => {
     const neighbor = { ...SERIAL.neighbors[0]!, state, role };
     const status = { ...STATUS, interfaces: [{ ...SERIAL, neighbors: [neighbor] }] };
-    const live = showWith(OSPF_LINES, 'show ip ospf neighbor', { rip: undefined, ospf: status });
+    const live = showWith(OSPF_LINES, 'show ip ospf neighbor', {
+      eigrp: undefined,
+      rip: undefined,
+      ospf: status,
+    });
 
     expect(live.live[2]!.slice(22, 38).trimEnd()).toBe(text);
   });
@@ -546,6 +558,7 @@ describe('OSPF show commands', () => {
     const status = { ...STATUS, interfaces: [{ ...TRANSIT, state }] };
     const live = showWith(OSPF_LINES, 'show ip ospf interface brief', {
       rip: undefined,
+      eigrp: undefined,
       ospf: status,
     }).live;
 
@@ -588,8 +601,11 @@ describe('OSPF show commands', () => {
       const timers = { hello: 3, dead: 12, wait: 12, retransmit: 2, spfDelay: 0 };
       const status = { ...STATUS, timers };
       expect(
-        showWith(OSPF_LINES, 'show ip ospf interface s0/0/0', { rip: undefined, ospf: status })
-          .live,
+        showWith(OSPF_LINES, 'show ip ospf interface s0/0/0', {
+          eigrp: undefined,
+          rip: undefined,
+          ospf: status,
+        }).live,
       ).toEqual([
         'Serial0/0/0 is up, line protocol is up',
         '  Internet Address 10.0.13.1/30, Area 0',
@@ -617,6 +633,7 @@ describe('OSPF show commands', () => {
       const status = { ...STATUS, interfaces: [waiting] };
       const live = showWith(OSPF_LINES, 'show ip ospf interface', {
         rip: undefined,
+        eigrp: undefined,
         ospf: status,
       }).live;
 
@@ -656,9 +673,10 @@ describe('OSPF show commands', () => {
     (command) => {
       const status = { ...STATUS, routerId: undefined, interfaces: [] };
 
-      expect(showWith(['router ospf 9'], command, { rip: undefined, ospf: status }).live).toEqual([
-        '%OSPF: Router process 1 is not running, please configure a router-id',
-      ]);
+      expect(
+        showWith(['router ospf 9'], command, { eigrp: undefined, rip: undefined, ospf: status })
+          .live,
+      ).toEqual(['%OSPF: Router process 1 is not running, please configure a router-id']);
     },
   );
 
@@ -668,7 +686,9 @@ describe('OSPF show commands', () => {
     'show ip ospf interface',
     'show ip ospf interface brief',
   ])('%s prints nothing without OSPF and NO_ENGINE without a simulation', (command) => {
-    expect(showWith([], command, { rip: undefined, ospf: undefined }).live).toEqual([]);
+    expect(
+      showWith([], command, { eigrp: undefined, rip: undefined, ospf: undefined }).live,
+    ).toEqual([]);
     expect(showWith(OSPF_LINES, command, both).output).toEqual(NO_ENGINE);
   });
 

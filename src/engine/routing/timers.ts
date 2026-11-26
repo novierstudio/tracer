@@ -47,3 +47,20 @@ export const OSPF_TIMERS: Record<RoutingTimers, OspfTimers> = {
   ios: { hello: 10, dead: 40, wait: 40, retransmit: 5, spfDelay: 5 },
   fast: { hello: 2, dead: 8, wait: 8, retransmit: 1, spfDelay: 0 },
 };
+
+/** EIGRP's interface timers, in seconds, as `show ip eigrp neighbors` counts the hold time down. */
+export type EigrpTimers = {
+  /** A hello goes out of every EIGRP interface this often. */
+  readonly hello: number;
+  /** What hellos tell neighbours to wait: one not heard from for this long is down. */
+  readonly hold: number;
+};
+
+/**
+ * EIGRP's timers by the lab's routing timer profile. `ios` is IOS's hello 5 and hold 15 on a LAN
+ * or a T1. `fast` keeps the hold at three hellos, as IOS does, with a hello every 2 s.
+ */
+export const EIGRP_TIMERS: Record<RoutingTimers, EigrpTimers> = {
+  ios: { hello: 5, hold: 15 },
+  fast: { hello: 2, hold: 6 },
+};
