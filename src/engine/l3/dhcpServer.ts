@@ -1,12 +1,12 @@
-import {
-  DEFAULT_DHCP_LEASE,
-  type DhcpPool,
-  type DhcpServerConfig,
-  type InterfaceId,
-  type Ipv4Address,
-  type Ipv4Cidr,
-  type MacAddress,
+import type {
+  DhcpPool,
+  DhcpServerConfig,
+  InterfaceId,
+  Ipv4Address,
+  Ipv4Cidr,
+  MacAddress,
 } from '@/model';
+import { DEFAULT_DHCP_LEASE } from '@/model/defaults';
 import { after, ms, type SimTime } from '../core/time';
 import {
   LIMITED_BROADCAST,

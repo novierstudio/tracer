@@ -18,7 +18,8 @@ import {
 } from './commands';
 import { DeviceId, LinkId, createIdSource } from './ids';
 import { buildLab, end, expectOk, port } from './testing';
-import { labSettings, linkAt, type Topology } from './topology';
+import { labSettings } from './defaults';
+import { linkAt, type Topology } from './topology';
 import { Hostname, Ipv4Address, PrefixLength, VlanId } from './values';
 
 const linkIds = createIdSource(99);
