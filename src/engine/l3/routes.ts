@@ -6,6 +6,7 @@ import type {
   PrefixLength,
   StaticRoute,
 } from '@/model';
+import { gatewayOf, type HostAddressing } from './hostAddress';
 import type { IpInterface } from './interfaces';
 import { compareAddresses, inPrefix, networkOf } from './ipv4';
 
@@ -39,18 +40,22 @@ const MAX_RECURSION = 8;
 const SOURCE_ORDER: Record<Route['source'], number> = { connected: 0, local: 1, static: 2 };
 
 /**
- * A host's default gateway is a static default route, as `route print` shows it. So is a switch's
- * `ip default-gateway`, which its management interface uses.
+ * A host's default gateway, from its config or its DHCP lease, is a static default route, as
+ * `route print` shows it. So is a switch's `ip default-gateway`, which its management interface
+ * uses.
  */
-function configuredRoutes(device: Device): readonly StaticRoute[] {
+function configuredRoutes(
+  device: Device,
+  host: HostAddressing | undefined,
+): readonly StaticRoute[] {
   switch (device.kind) {
     case 'router':
       return device.config.staticRoutes;
     case 'pc':
     case 'server': {
-      const { ipv4 } = device.config;
-      return ipv4.mode === 'static' && ipv4.gateway
-        ? [{ prefix: DEFAULT_ROUTE, nextHop: { kind: 'address', address: ipv4.gateway } }]
+      const gateway = host && gatewayOf(host);
+      return gateway
+        ? [{ prefix: DEFAULT_ROUTE, nextHop: { kind: 'address', address: gateway } }]
         : [];
     }
     case 'switch': {
@@ -117,9 +122,13 @@ export function nextHop(
 /**
  * The routes in use: a connected route for each working interface, a local route for each of a
  * router's own addresses, and each static route whose next hop resolves or whose exit interface
- * works. Sorted by network, as `show ip route` lists them.
+ * works. Sorted by network, as `show ip route` lists them. A host's gateway is `host`'s.
  */
-export function routingTable(device: Device, interfaces: readonly IpInterface[]): Route[] {
+export function routingTable(
+  device: Device,
+  interfaces: readonly IpInterface[],
+  host: HostAddressing | undefined,
+): Route[] {
   const candidates: Route[] = [];
   for (const iface of interfaces) {
     candidates.push({ source: 'connected', prefix: networkOf(iface.cidr), interface: iface.name });
@@ -128,7 +137,7 @@ export function routingTable(device: Device, interfaces: readonly IpInterface[])
       candidates.push({ source: 'local', prefix, interface: iface.name });
     }
   }
-  for (const route of configuredRoutes(device)) {
+  for (const route of configuredRoutes(device, host)) {
     const { prefix, nextHop, distance = 1 } = route;
     candidates.push({ source: 'static', prefix: networkOf(prefix), distance, nextHop });
   }

@@ -139,6 +139,31 @@ export function labBuilder(seed = 1) {
     },
     device: (id: DeviceId): Device => topology.devices[id]!,
 
+    /** A host whose config asks for DHCP. */
+    dhcpHost(kind: 'pc' | 'server', name: string): DeviceId {
+      const device = createDevice(
+        {
+          ...base,
+          kind,
+          model: kind,
+          hostname: Hostname.parse(name),
+          ports: ports('fastEthernet', ['FastEthernet0']),
+        },
+        { ids, topology },
+      );
+      if (device.kind !== 'pc' && device.kind !== 'server') throw new Error('not a host');
+      device.config.ipv4 = { mode: 'dhcp' };
+      return add(device);
+    },
+
+    /** Replaces a device with `edit`'s copy of it, as a config edit would. */
+    edit(id: DeviceId, edit: (device: Device) => Device): void {
+      topology = {
+        ...topology,
+        devices: { ...topology.devices, [id]: edit(topology.devices[id]!) },
+      };
+    },
+
     host(kind: 'pc' | 'server', name: string, address?: string, gateway?: string): DeviceId {
       const device = createDevice(
         {

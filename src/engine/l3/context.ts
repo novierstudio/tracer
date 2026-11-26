@@ -2,6 +2,9 @@ import type { InterfaceId, Ipv4Address, MacAddress, PortId } from '@/model';
 import type { SimTime } from '../core/time';
 import type { ModuleContext } from '../module';
 import type { Ipv4Packet } from '../pdu';
+import type { DhcpClient, DhcpListener } from './dhcpClient';
+import type { DhcpBinding } from './dhcpServer';
+import { hostAddressing, isHost, type HostAddressing } from './hostAddress';
 import { ipInterfaces, type IpInterface } from './interfaces';
 import type { PingSession } from './ping';
 import { routingTable, type Route } from './routes';
@@ -33,6 +36,12 @@ export type IpState = {
   readonly loopback: Ipv4Packet[];
   nextPacketId: number;
   nextProbeId: number;
+  /** A host's DHCP client. It stays stopped unless the host's config asks for DHCP. */
+  dhcp: DhcpClient;
+  /** What waits on the client's next lease or failure, as `ipconfig /renew` does. */
+  readonly dhcpWaiters: DhcpListener[];
+  /** A router's DHCP server: the addresses it has offered or leased, by client MAC. */
+  readonly bindings: Map<MacAddress, DhcpBinding>;
 };
 
 /** Something that sends echo requests and waits on their answers. */
@@ -44,7 +53,9 @@ export type IpContext = ModuleContext<IpState>;
 export type IpTimer =
   | { readonly kind: 'arp'; readonly address: Ipv4Address }
   | { readonly kind: 'probe'; readonly id: number }
-  | { readonly kind: 'loopback' };
+  | { readonly kind: 'loopback' }
+  /** The DHCP client's one pending step: a retry, a renewal, or the lease running out. */
+  | { readonly kind: 'dhcp' };
 
 export function timerKey(timer: IpTimer): string {
   switch (timer.kind) {
@@ -53,7 +64,8 @@ export function timerKey(timer: IpTimer): string {
     case 'probe':
       return `probe ${timer.id}`;
     case 'loopback':
-      return 'loopback';
+    case 'dhcp':
+      return timer.kind;
   }
 }
 
@@ -65,16 +77,22 @@ export function parseTimer(key: string): IpTimer | undefined {
     case 'probe':
       return { kind, id: Number(value) };
     case 'loopback':
+    case 'dhcp':
       return { kind };
     default:
       return undefined;
   }
 }
 
+/** A host's live IPv4 settings. Undefined for a router or a switch. */
+export const hostAddressingOf = (ctx: IpContext): HostAddressing | undefined =>
+  isHost(ctx.device) ? hostAddressing(ctx.device, ctx.state.dhcp) : undefined;
+
 export const interfacesOf = (ctx: IpContext): IpInterface[] =>
-  ipInterfaces(ctx.device, (port) => ctx.portUp(port));
+  ipInterfaces(ctx.device, (port) => ctx.portUp(port), hostAddressingOf(ctx));
 
 export function routesOf(ctx: IpContext): { interfaces: IpInterface[]; routes: Route[] } {
-  const interfaces = interfacesOf(ctx);
-  return { interfaces, routes: routingTable(ctx.device, interfaces) };
+  const host = hostAddressingOf(ctx);
+  const interfaces = ipInterfaces(ctx.device, (port) => ctx.portUp(port), host);
+  return { interfaces, routes: routingTable(ctx.device, interfaces, host) };
 }
