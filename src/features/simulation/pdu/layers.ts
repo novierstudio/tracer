@@ -41,6 +41,7 @@ import {
   type RipVersion,
   type UdpDatagram,
   type UdpPayload,
+  type UnreachableCode,
   isMulticast,
   multicastMac,
 } from '@/engine/pdu';
@@ -156,6 +157,19 @@ const ICMP_EXPLAIN: Record<IcmpMessage['type'], string> = {
   'time-exceeded': 'A router dropped a packet whose TTL ran out, and tells its sender.',
 };
 
+const UNREACHABLE_NAME: Record<UnreachableCode, string> = {
+  network: 'network unreachable',
+  host: 'host unreachable',
+  'admin-prohibited': 'administratively prohibited',
+};
+
+const UNREACHABLE_EXPLAIN: Record<UnreachableCode, string> = {
+  network: 'Network unreachable: the router has no route to that network.',
+  host: 'Host unreachable: the network was found, but not the host on it.',
+  'admin-prohibited':
+    'Administratively prohibited: an access list on the router denied the packet.',
+};
+
 /** An ICMP message's bytes, with its checksum filled in. */
 function icmpBytes(message: IcmpMessage): number[] {
   const code = message.type === 'destination-unreachable' ? UNREACHABLE_CODE[message.code] : 0;
@@ -230,12 +244,10 @@ function icmpLayers(wire: Wire, message: IcmpMessage): Layer[] {
       'icmp.code',
       'Code',
       message.type === 'destination-unreachable'
-        ? `${UNREACHABLE_CODE[message.code]} (${message.code} unreachable)`
+        ? `${UNREACHABLE_CODE[message.code]} (${UNREACHABLE_NAME[message.code]})`
         : '0',
       message.type === 'destination-unreachable'
-        ? message.code === 'network'
-          ? 'Network unreachable: the router has no route to that network.'
-          : 'Host unreachable: the network was found, but not the host on it.'
+        ? UNREACHABLE_EXPLAIN[message.code]
         : 'Narrows the type down. This type has only code 0.',
       bytes.slice(1, 2),
     ),

@@ -1,4 +1,4 @@
-import type { InterfaceId, Ipv4Address, MacAddress, PortId } from '@/model';
+import type { AclName, InterfaceId, Ipv4Address, MacAddress, PortId } from '@/model';
 import type { SimTime } from '../core/time';
 import type { ModuleContext } from '../module';
 import type { Ipv4Packet } from '../pdu';
@@ -7,6 +7,7 @@ import type { DhcpBinding } from './dhcpServer';
 import { hostAddressing, isHost, type HostAddressing } from './hostAddress';
 import { ipInterfaces, type IpInterface } from './interfaces';
 import type { PingSession } from './ping';
+import type { NatTable } from './nat';
 import { routingTable, type Route } from './routes';
 import type { TraceSession } from './traceroute';
 import type { Transport } from './transport';
@@ -45,6 +46,10 @@ export type IpState = {
   readonly bindings: Map<MacAddress, DhcpBinding>;
   /** TCP connections, DNS queries and page loads in flight. */
   readonly transport: Transport;
+  /** How many packets each entry of each access list has matched, by list then entry index. */
+  readonly aclHits: Map<AclName, number[]>;
+  /** A router's dynamic NAT translations. */
+  nat: NatTable;
 };
 
 /** Something that sends echo requests and waits on their answers. */
