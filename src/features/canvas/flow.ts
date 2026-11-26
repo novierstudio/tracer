@@ -56,7 +56,21 @@ export const NEW_ANNOTATION_ID = 'annotation-new';
 const INITIAL_HEIGHT: Record<AnnotationKind, number> = { note: 76, text: 32, area: 0, shape: 0 };
 const INITIAL_TEXT_WIDTH = 160;
 
-export type CableEdgeData = { cable: Cable; ports: [a: string, b: string] };
+/** `bundle` names the EtherChannel the link belongs to, such as `Po1`, when it is in one. */
+export type CableEdgeData = { cable: Cable; ports: [a: string, b: string]; bundle?: string };
+
+/** The channel group a switch puts the port in, from either end of the link, as `Po1`. */
+function bundleOf(link: Link, devices: Topology['devices']): string | undefined {
+  for (const end of [link.a, link.b]) {
+    const device = devices[end.device];
+    const group =
+      device?.kind === 'switch'
+        ? device.config.interfaces[end.port]?.channelGroup?.group
+        : undefined;
+    if (group !== undefined) return `Po${group}`;
+  }
+  return undefined;
+}
 export type CableFlowEdge = Edge<CableEdgeData, 'cable'>;
 
 const KIND_ICON: Record<DeviceKind, DeviceIconName> = {
@@ -223,7 +237,8 @@ export function createEdgeMapper() {
       const ends = [link.a, link.b].map(
         (end) => `${devices[end.device]?.config.hostname ?? ''} ${shortPortName(end.port)}`,
       );
-      const label = `${CABLE_LABELS[link.cable]} cable from ${ends[0]} to ${ends[1]}`;
+      const bundle = bundleOf(link, devices);
+      const label = `${CABLE_LABELS[link.cable]} cable from ${ends[0]} to ${ends[1]}${bundle ? `, bundled in ${bundle}` : ''}`;
       const isSelected = selected.has(link.id);
       const hit = cache.get(link.id);
       if (hit && hit.link === link && hit.selected === isSelected && hit.label === label) {
@@ -241,6 +256,7 @@ export function createEdgeMapper() {
         data: {
           cable: link.cable,
           ports: [shortPortName(link.a.port), shortPortName(link.b.port)],
+          ...(bundle && { bundle }),
         },
         ariaLabel: label,
       };

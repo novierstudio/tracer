@@ -51,7 +51,7 @@ function PortLabel({ at, text }: { at: Vec; text: string }) {
 
 export const CableEdge = memo(function CableEdge(props: EdgeProps<CableFlowEdge>) {
   const { id, source, target, sourceX, sourceY, targetX, targetY, interactionWidth } = props;
-  const { cable, ports } = props.data as CableEdgeData;
+  const { cable, ports, bundle } = props.data as CableEdgeData;
   const sourceData = useNodeData(source);
   const targetData = useNodeData(target);
   const lights = useLinkLights(id as LinkId);
@@ -72,7 +72,7 @@ export const CableEdge = memo(function CableEdge(props: EdgeProps<CableFlowEdge>
   );
 
   return (
-    <g className="cable" data-cable={cable}>
+    <g className="cable" data-cable={cable} data-bundle={bundle}>
       <BaseEdge
         id={id}
         path={layout.path}

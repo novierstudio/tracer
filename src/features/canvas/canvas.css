@@ -132,6 +132,11 @@
   transition: stroke 150ms ease-out;
 }
 
+/* An EtherChannel's members draw heavier, so the bundle reads as one link. */
+.tracer-canvas .react-flow__edge .cable[data-bundle] .cable-path {
+  stroke-width: 3.25;
+}
+
 .cable[data-cable='crossover'] .cable-path {
   stroke-dasharray: 7 5;
 }
