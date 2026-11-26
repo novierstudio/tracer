@@ -161,3 +161,100 @@ for (const rate of RATES) {
     });
   }
 }
+
+const IDLE_SETTLE_MS = 2000;
+
+/**
+ * Two idle pages with nothing to draw: Simulation mode paused, and realtime with spanning tree's
+ * hellos hidden, so no frame reaches the overlay. Each run prints the CPU every Chromium process
+ * used over `MEASURE_MS`, from `SystemInfo.getProcessInfo`, in cores; the renderer main thread's
+ * share, from `Performance.getMetrics` TaskDuration; and the animation frames the page asked for.
+ */
+const IDLE_SCENES = {
+  'paused Simulation': async (page: Page) => {
+    await page.getByRole('radio', { name: 'Simulation' }).click();
+    await expect(page.getByRole('toolbar', { name: 'Simulation timeline' })).toBeVisible();
+  },
+  'realtime, no traffic': async (page: Page) => {
+    // The filters list a protocol once a step has shown one: the next hello brings STP.
+    await page.getByRole('radio', { name: 'Simulation' }).click();
+    await page.getByRole('button', { name: 'Step forward' }).click();
+    await page
+      .getByRole('group', { name: 'Protocol filters' })
+      .getByRole('button', { name: /STP/ })
+      .click();
+    await page.getByRole('radio', { name: 'Realtime' }).click();
+    await expect(page.getByRole('toolbar', { name: 'Simulation timeline' })).toBeHidden();
+  },
+};
+
+for (const [scene, enter] of Object.entries(IDLE_SCENES)) {
+  for (let run = 1; run <= RUNS; run++) {
+    test(`idle CPU, ${scene}, run ${run}`, async ({ page, browser }) => {
+      await openRoutedLab(page);
+      await page.keyboard.press('1');
+      await enter(page);
+      await page.mouse.move(0, 0);
+      await page.waitForTimeout(IDLE_SETTLE_MS);
+
+      const browserCdp = await browser.newBrowserCDPSession();
+      const pageCdp = await page.context().newCDPSession(page);
+      await pageCdp.send('Performance.enable');
+      // Seconds of CPU each kind of Chromium process has used: browser, renderer, GPU, utility.
+      const cpuSeconds = async () => {
+        const { processInfo } = await browserCdp.send('SystemInfo.getProcessInfo');
+        const byType: Record<string, number> = {};
+        for (const { type, cpuTime } of processInfo) byType[type] = (byType[type] ?? 0) + cpuTime;
+        return byType;
+      };
+      const cores = (before: Record<string, number>, after: Record<string, number>, s: number) =>
+        Object.fromEntries(
+          Object.keys(after).map((type) => [
+            type,
+            Number((((after[type] ?? 0) - (before[type] ?? 0)) / s).toFixed(3)),
+          ]),
+        );
+      const taskSeconds = async () => {
+        const { metrics } = await pageCdp.send('Performance.getMetrics');
+        return metrics.find(({ name }) => name === 'TaskDuration')!.value;
+      };
+      // Counts the frame callbacks the page runs, whoever asked for them.
+      await page.evaluate(() => {
+        const w = window as unknown as { rafCount: number };
+        w.rafCount = 0;
+        const original = window.requestAnimationFrame.bind(window);
+        window.requestAnimationFrame = (callback) =>
+          original((now) => {
+            w.rafCount += 1;
+            callback(now);
+          });
+      });
+
+      const [cpuBefore, taskBefore] = [await cpuSeconds(), await taskSeconds()];
+      const wallBefore = Date.now();
+      await page.waitForTimeout(MEASURE_MS);
+      const [cpuAfter, taskAfter] = [await cpuSeconds(), await taskSeconds()];
+      const seconds = (Date.now() - wallBefore) / 1000;
+      const { rafCount, chips } = await page.evaluate(() => ({
+        rafCount: (window as unknown as { rafCount: number }).rafCount,
+        chips: (window as unknown as TrafficWindow).tracerTraffic.chips().length,
+      }));
+      const result = {
+        scene,
+        run,
+        cpuCores: Number(
+          Object.values(cores(cpuBefore, cpuAfter, seconds))
+            .reduce((sum, value) => sum + value, 0)
+            .toFixed(3),
+        ),
+        byProcess: cores(cpuBefore, cpuAfter, seconds),
+        mainThread: Number(((taskAfter - taskBefore) / seconds).toFixed(3)),
+        framesPerSecond: Number((rafCount / seconds).toFixed(1)),
+        chips,
+      };
+      console.log(`IDLE ${JSON.stringify(result)}`);
+      // Idle means nothing to draw: no chip was on screen when the window closed.
+      expect(chips).toBe(0);
+    });
+  }
+}
