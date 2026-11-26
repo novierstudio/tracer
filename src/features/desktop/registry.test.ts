@@ -19,6 +19,9 @@ function setup() {
     traceroute: () => new Promise<void>(() => {}),
     arpTable: async () => [],
     clearArp: async () => 0,
+    hostIp: async () => ({ addressing: { kind: 'unassigned' }, now: 0 }),
+    renewDhcp: async () => ({ kind: 'failed' }),
+    releaseDhcp: async () => {},
   };
   return { ...lab, store, aborted, prompts: createHostPromptRegistry(store, backend) };
 }

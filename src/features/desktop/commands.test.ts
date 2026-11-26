@@ -69,11 +69,16 @@ describe('parseCommand', () => {
     expect(parsed('ping -x 10.0.0.2')).toEqual({ error: ['Bad option -x.', ...PING_USAGE] });
   });
 
-  it('reads ipconfig and ipconfig /all', () => {
+  it('reads ipconfig, ipconfig /all, /release and /renew', () => {
     expect(parsed('ipconfig')).toEqual({ kind: 'ipconfig', all: false });
     expect(parsed('ipconfig /all')).toEqual({ kind: 'ipconfig', all: true });
     expect(parsed('IPCONFIG -ALL')).toEqual({ kind: 'ipconfig', all: true });
-    expect(parsed('ipconfig /renew')).toMatchObject({
+    expect(parsed('ipconfig /release')).toEqual({ kind: 'ipconfig-release' });
+    expect(parsed('ipconfig -RENEW')).toEqual({ kind: 'ipconfig-renew' });
+    expect(parsed('ipconfig /renew FastEthernet0')).toMatchObject({
+      error: expect.arrayContaining(['Error: unrecognized or incomplete command line.']),
+    });
+    expect(parsed('ipconfig /flushdns')).toMatchObject({
       error: expect.arrayContaining(['Error: unrecognized or incomplete command line.']),
     });
   });

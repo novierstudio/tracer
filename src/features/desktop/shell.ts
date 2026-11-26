@@ -1,6 +1,9 @@
+import { addressOf } from '@/engine/l3/hostAddress';
 import type { HostBackend, PingReply, TraceProbe } from './backend';
 import { HELP, parseCommand } from './commands';
 import {
+  addressPort,
+  configAddressing,
   formatArp,
   formatIpconfig,
   formatReply,
@@ -9,6 +12,7 @@ import {
   tracertHeader,
   tracertLines,
   type HostDevice,
+  type IpconfigView,
 } from './format';
 
 /** Where a running command writes. `signal` aborts on Ctrl+C. */
@@ -23,7 +27,12 @@ export type ShellIo = {
 /** The host as the prompt sees it when a line runs. Undefined once the device is gone. */
 export type HostView = { device: HostDevice; connected: boolean };
 
-export type ShellContext = { host(): HostView | undefined; backend: HostBackend };
+/** `wallClock` dates a DHCP lease's times for `ipconfig /all`; it is the real clock by default. */
+export type ShellContext = {
+  host(): HostView | undefined;
+  backend: HostBackend;
+  wallClock?: () => number;
+};
 
 /** A command line, run to completion. */
 export type HostShell = (line: string, io: ShellIo) => Promise<void>;
@@ -36,10 +45,22 @@ const TRACERT_PROBES = 3;
 /** Every line ends with a blank one before the next prompt, as in cmd. */
 const block = (lines: readonly string[]) => (lines.at(-1) === '' ? lines : [...lines, '']);
 
+/** Resolves on Ctrl+C, including one pressed before the command got this far. */
 const aborted = (signal: AbortSignal) =>
-  new Promise<void>((resolve) => signal.addEventListener('abort', () => resolve(), { once: true }));
+  signal.aborted
+    ? Promise.resolve()
+    : new Promise<void>((resolve) =>
+        signal.addEventListener('abort', () => resolve(), { once: true }),
+      );
 
-export function hostShell({ host, backend }: ShellContext): HostShell {
+/** What Windows says to `/release` or `/renew` on an adapter that does not use DHCP. */
+const NOT_DHCP = [
+  '',
+  'The operation failed as no adapter is in the state permissible for this operation.',
+  '',
+];
+
+export function hostShell({ host, backend, wallClock = Date.now }: ShellContext): HostShell {
   return async (line, io) => {
     const parsed = parseCommand(line);
     if (!parsed.ok) return io.print(block(parsed.error));
@@ -47,8 +68,32 @@ export function hostShell({ host, backend }: ShellContext): HostShell {
     const view = host();
     if (!view) return;
     const { device, connected } = view;
-    const address = device.config.ipv4.mode === 'static' ? device.config.ipv4.address : undefined;
+    const dhcp = device.config.ipv4.mode === 'dhcp';
+    /** The host's addressing now. A static host's is its config; a DHCP host's, the simulation's. */
+    const live = async (): Promise<IpconfigView> => {
+      if (!dhcp) return { addressing: configAddressing(device), dateOf: (time) => new Date(time) };
+      const { addressing, now } = await backend.hostIp(device.id);
+      const wall = wallClock();
+      return { addressing, dateOf: (time) => new Date(wall - (now - time)) };
+    };
+    const ipconfig = async (all: boolean) =>
+      formatIpconfig(device, connected, all, connected ? await live() : undefined);
+    /** `/release` and `/renew` need a DHCP adapter with its cable in. */
+    const dhcpRefusal = () => {
+      if (!dhcp) return NOT_DHCP;
+      const port = addressPort(device);
+      if (connected || !port) return undefined;
+      return [
+        '',
+        `No operation can be performed on ${port.id} while it has its media disconnected.`,
+        '',
+      ];
+    };
     try {
+      const address =
+        command.kind === 'arp-show' || command.kind === 'ping' || command.kind === 'tracert'
+          ? addressOf((await live()).addressing)
+          : undefined;
       switch (command.kind) {
         case 'empty':
           return;
@@ -57,7 +102,28 @@ export function hostShell({ host, backend }: ShellContext): HostShell {
         case 'cls':
           return io.clear();
         case 'ipconfig':
-          return io.print(formatIpconfig(device, connected, command.all));
+          return io.print(await ipconfig(command.all));
+        case 'ipconfig-release': {
+          const refusal = dhcpRefusal();
+          if (refusal) return io.print(refusal);
+          await backend.releaseDhcp(device.id);
+          return io.print(await ipconfig(false));
+        }
+        case 'ipconfig-renew': {
+          const refusal = dhcpRefusal();
+          if (refusal) return io.print(refusal);
+          // Ctrl+C gives the prompt back; the client carries on asking.
+          const outcome = await Promise.race([backend.renewDhcp(device.id), aborted(io.signal)]);
+          if (!outcome) return io.print(['^C', '']);
+          if (outcome.kind === 'failed') {
+            return io.print([
+              '',
+              `An error occurred while renewing interface ${addressPort(device)?.id} : unable to contact your DHCP server. Request has timed out.`,
+              '',
+            ]);
+          }
+          return io.print(await ipconfig(false));
+        }
         case 'arp-show':
           return io.print(formatArp(address?.address, await backend.arpTable(device.id)));
         case 'arp-clear': {

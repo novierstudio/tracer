@@ -7,6 +7,8 @@ export type HostCommand =
   | { kind: 'ping'; target: Ipv4Address; count: number }
   | { kind: 'tracert'; target: Ipv4Address; maxHops: number; timeoutMs: number }
   | { kind: 'ipconfig'; all: boolean }
+  | { kind: 'ipconfig-release' }
+  | { kind: 'ipconfig-renew' }
   | { kind: 'arp-show' }
   /** Without an address, every entry. */
   | { kind: 'arp-clear'; address?: Ipv4Address }
@@ -49,10 +51,12 @@ export const TRACERT_USAGE = [
 const IPCONFIG_USAGE = [
   '',
   'USAGE:',
-  '    ipconfig [/all]',
+  '    ipconfig [/all | /release | /renew]',
   '',
   'Options:',
-  '    /all     Display full configuration information.',
+  '    /all         Display full configuration information.',
+  '    /release     Release the IPv4 address for the adapter.',
+  '    /renew       Renew the IPv4 address for the adapter.',
   '',
 ];
 
@@ -74,14 +78,16 @@ export const HELP = [
   '',
   'Available commands:',
   '',
-  '  arp -a          Show the ARP cache: IP addresses this host has resolved to MACs.',
-  '  arp -d [ip]     Clear the ARP cache, or one address in it.',
-  '  cls             Clear the screen.',
-  '  help            Show this list.',
-  '  ipconfig        Show the IP address, subnet mask and default gateway.',
-  '  ipconfig /all   Also show the MAC address, DHCP and DNS settings.',
-  '  ping <ip>       Send 4 echo requests. -n <count> sends more or fewer, -t until Ctrl+C.',
-  '  tracert <ip>    List the routers on the way to an address, hop by hop.',
+  '  arp -a              Show the ARP cache: IP addresses this host has resolved to MACs.',
+  '  arp -d [ip]         Clear the ARP cache, or one address in it.',
+  '  cls                 Clear the screen.',
+  '  help                Show this list.',
+  '  ipconfig            Show the IP address, subnet mask and default gateway.',
+  '  ipconfig /all       Also show the MAC address, DHCP lease and DNS settings.',
+  '  ipconfig /renew     Ask the DHCP server for an address, or to extend the lease.',
+  '  ipconfig /release   Give the DHCP lease back.',
+  '  ping <ip>           Send 4 echo requests. -n <count> sends more or fewer, -t until Ctrl+C.',
+  '  tracert <ip>        List the routers on the way to an address, hop by hop.',
   '',
   'Up and Down recall earlier commands. Ctrl+C stops a running command.',
   '',
@@ -164,10 +170,17 @@ function parseTracert(args: readonly string[]): Result<HostCommand, ParseError> 
   return ok({ kind: 'tracert', target: address.data, maxHops, timeoutMs });
 }
 
+const IPCONFIG_OPTIONS: Record<string, HostCommand> = {
+  all: { kind: 'ipconfig', all: true },
+  release: { kind: 'ipconfig-release' },
+  renew: { kind: 'ipconfig-renew' },
+};
+
 function parseIpconfig(args: readonly string[]): Result<HostCommand, ParseError> {
   if (args.length === 0) return ok({ kind: 'ipconfig', all: false });
   const [first, ...rest] = args.map(flag);
-  if (first === 'all' && rest.length === 0) return ok({ kind: 'ipconfig', all: true });
+  const command = first === undefined ? undefined : IPCONFIG_OPTIONS[first];
+  if (command && rest.length === 0) return ok(command);
   if (first === '?') return err(IPCONFIG_USAGE);
   return err(['Error: unrecognized or incomplete command line.', ...IPCONFIG_USAGE]);
 }
