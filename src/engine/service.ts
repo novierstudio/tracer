@@ -20,6 +20,7 @@ import { dhcpBindings } from './l3/dhcpServer';
 import { ipModule, stopProbe } from './l3/ip';
 import { pingSummary, startPing } from './l3/ping';
 import { startTrace } from './l3/traceroute';
+import { ospfModule, ospfStatus } from './routing/ospf/ospf';
 import { ripModule, ripStatus } from './routing/rip';
 
 /** The wall clock and frame timer that drive playback. The worker passes the real ones. */
@@ -313,8 +314,12 @@ export function createSimService({
     },
     arpTable: (device) => engine.withModule(device, ipModule, arpTable),
     routes: (device) => engine.withModule(device, ipModule, (ctx) => routesOf(ctx).routes),
-    routingProtocols: (device) =>
-      engine.withModule(device, ripModule, (ctx) => ({ rip: ripStatus(ctx) })),
+    routingProtocols(device) {
+      const rip = engine.withModule(device, ripModule, ripStatus);
+      const ospf = engine.withModule(device, ospfModule, ospfStatus);
+      if (!rip.ok) return rip;
+      return ospf.ok ? ok({ rip: rip.value, ospf: ospf.value }) : ospf;
+    },
     macTable: (device) =>
       engine.withModule(device, switchingModule, (ctx) => macTable(ctx.state, ctx.now)),
     spanningTree: (device) =>

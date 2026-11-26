@@ -18,6 +18,14 @@ export type Arrival = {
   readonly mac?: MacAddress;
 };
 
+/** The IPv4 packet a frame carries, if any. */
+export const packetIn = (frame: Frame): Ipv4Packet | undefined =>
+  frame.kind === 'hdlc'
+    ? frame.payload
+    : frame.kind === 'ethernet' && frame.payload.kind === 'ipv4'
+      ? frame.payload
+      : undefined;
+
 /**
  * The IPv4 packet in a frame that arrived on `port`, when the frame is for this device: anything
  * on a serial link, and on a LAN a frame to the interface's own MAC, to broadcast, or to the MAC

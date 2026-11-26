@@ -21,3 +21,29 @@ export const RIP_TIMERS: Record<RoutingTimers, RipTimers> = {
   ios: { update: 30, invalid: 180, holddown: 180, flush: 240 },
   fast: { update: 5, invalid: 15, holddown: 15, flush: 20 },
 };
+
+/** OSPF's interface timers, in seconds, as `show ip ospf interface` prints them. */
+export type OspfTimers = {
+  /** A hello goes out of every OSPF interface this often. */
+  readonly hello: number;
+  /** A neighbour not heard from for this long is down. */
+  readonly dead: number;
+  /** How long a new multi-access interface listens before it elects a DR. */
+  readonly wait: number;
+  /** An unacknowledged DBD, request or LSA goes again after this long. */
+  readonly retransmit: number;
+  /** SPF runs this long after the database changes, so a burst of changes costs one run. */
+  readonly spfDelay: number;
+};
+
+/**
+ * OSPF's timers by the lab's routing timer profile. `ios` is IOS's hello 10, dead 40, wait 40,
+ * retransmit 5 and a 5 s SPF delay. `fast` keeps dead and wait at four hellos, as IOS does, with a
+ * hello every 2 s. The wait outlasts fast spanning tree's 4 s, as IOS's 40 s outlasts its 30 s, so
+ * a router behind a switch hears its neighbours before it elects a DR. A point-to-point neighbour
+ * is FULL within a hello, a multi-access one after the 8 s wait, and a silent one dead in 8 s.
+ */
+export const OSPF_TIMERS: Record<RoutingTimers, OspfTimers> = {
+  ios: { hello: 10, dead: 40, wait: 40, retransmit: 5, spfDelay: 5 },
+  fast: { hello: 2, dead: 8, wait: 8, retransmit: 1, spfDelay: 0 },
+};

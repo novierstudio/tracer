@@ -56,9 +56,9 @@ export type Ipv4Packet = {
 };
 
 /** TCP joins this union when it arrives. */
-export type Ipv4Payload = IcmpMessage | UdpDatagram;
+export type Ipv4Payload = IcmpMessage | UdpDatagram | OspfPacket;
 
-export const IP_PROTOCOL = { icmp: 1, udp: 17 } as const satisfies Record<
+export const IP_PROTOCOL = { icmp: 1, udp: 17, ospf: 89 } as const satisfies Record<
   Ipv4Payload['kind'],
   number
 >;
@@ -278,3 +278,150 @@ export type TcnBpdu = { readonly kind: 'bpdu'; readonly type: 'tcn' };
 
 /** A frame on a serial link. Cisco HDLC needs no addresses: the link has one peer. */
 export type HdlcFrame = { readonly kind: 'hdlc'; readonly payload: Ipv4Packet };
+
+/** Every OSPF router on a link listens to this group: hellos go here. */
+export const ALL_SPF_ROUTERS = '224.0.0.5' as Ipv4Address;
+
+/** Only the DR and BDR of a multi-access network listen to this group. */
+export const ALL_D_ROUTERS = '224.0.0.6' as Ipv4Address;
+
+/** OSPF version 2, for IPv4. */
+export const OSPF_VERSION = 2;
+
+/** An LSA older than this, in seconds, is flushed from every database. */
+export const MAX_AGE = 3600;
+
+/** The first sequence number an LSA carries, 0x80000001 as a signed 32-bit number. Higher is newer. */
+export const INITIAL_SEQUENCE = -0x7fffffff;
+
+/** The LSAs a single area needs: each router's own links, and each multi-access network's routers. */
+export type LsaType = 'router' | 'network';
+
+export const LSA_TYPE = { router: 1, network: 2 } as const satisfies Record<LsaType, number>;
+
+/**
+ * Which LSA: its type, its link state ID (the router ID for a router LSA, the DR's interface
+ * address for a network LSA) and the router that originated it.
+ */
+export type LsaKey = {
+  readonly type: LsaType;
+  readonly id: Ipv4Address;
+  readonly advertisingRouter: Ipv4Address;
+};
+
+/** Which instance of an LSA: the newer has the higher sequence number. */
+export type LsaHeader = LsaKey & {
+  /** Seconds since it was originated, up to MAX_AGE. */
+  readonly age: number;
+  readonly sequence: number;
+};
+
+/** One of a router's links, as its router LSA describes it, with what sending over it costs. */
+export type RouterLink =
+  /** To a neighbour across a point-to-point link: its router ID, and this router's address there. */
+  | {
+      readonly type: 'point-to-point';
+      readonly neighbor: Ipv4Address;
+      readonly address: Ipv4Address;
+      readonly metric: number;
+    }
+  /** To a multi-access network with a DR: the DR's address there, and this router's own. */
+  | {
+      readonly type: 'transit';
+      readonly dr: Ipv4Address;
+      readonly address: Ipv4Address;
+      readonly metric: number;
+    }
+  /** To a network no neighbour is on, or a point-to-point link's subnet: its number and mask. */
+  | {
+      readonly type: 'stub';
+      readonly network: Ipv4Address;
+      readonly prefixLength: PrefixLength;
+      readonly metric: number;
+    };
+
+/** A router's links in its area. Every router originates one. */
+export type RouterLsa = LsaHeader & {
+  readonly type: 'router';
+  readonly links: readonly RouterLink[];
+};
+
+/** A multi-access network and the routers on it, originated by its DR. */
+export type NetworkLsa = LsaHeader & {
+  readonly type: 'network';
+  readonly prefixLength: PrefixLength;
+  /** The router IDs of the DR and every router fully adjacent to it. */
+  readonly attached: readonly Ipv4Address[];
+};
+
+export type Lsa = RouterLsa | NetworkLsa;
+
+/** What every OSPF packet's header says: who sent it, and in which area. */
+type OspfHeader = {
+  readonly kind: 'ospf';
+  readonly routerId: Ipv4Address;
+  readonly area: number;
+};
+
+/** Finds neighbours and keeps them: no hello within the dead interval, and the neighbour is down. */
+export type OspfHello = OspfHeader & {
+  readonly type: 'hello';
+  /** The sending interface's mask. Neighbours on a multi-access network must agree on it. */
+  readonly networkMask: PrefixLength;
+  /** Seconds. Neighbours must agree on both intervals. */
+  readonly helloInterval: number;
+  readonly deadInterval: number;
+  readonly priority: number;
+  /** The DR and BDR the sender knows of, by interface address, or 0.0.0.0 for none. */
+  readonly dr: Ipv4Address;
+  readonly bdr: Ipv4Address;
+  /** The router ID of every neighbour the sender heard on this link within the dead interval. */
+  readonly neighbors: readonly Ipv4Address[];
+};
+
+/** Lists the sender's LSAs by header, so the neighbour can ask for the ones it lacks. */
+export type OspfDatabaseDescription = OspfHeader & {
+  readonly type: 'dbd';
+  readonly mtu: number;
+  /** The first DBD of an exchange. */
+  readonly init: boolean;
+  /** More DBDs follow. */
+  readonly more: boolean;
+  /** The sender leads the exchange: the router with the higher router ID does. */
+  readonly master: boolean;
+  readonly sequence: number;
+  readonly headers: readonly LsaHeader[];
+};
+
+/** Asks a neighbour for whole LSAs. */
+export type OspfLinkStateRequest = OspfHeader & {
+  readonly type: 'lsr';
+  readonly requests: readonly LsaKey[];
+};
+
+/** Carries whole LSAs: an answer to a request, or flooding news on. */
+export type OspfLinkStateUpdate = OspfHeader & {
+  readonly type: 'lsu';
+  readonly lsas: readonly Lsa[];
+};
+
+/** Confirms LSAs arrived, so the sender stops retransmitting them. */
+export type OspfLinkStateAck = OspfHeader & {
+  readonly type: 'lsack';
+  readonly headers: readonly LsaHeader[];
+};
+
+export type OspfPacket =
+  | OspfHello
+  | OspfDatabaseDescription
+  | OspfLinkStateRequest
+  | OspfLinkStateUpdate
+  | OspfLinkStateAck;
+
+export const OSPF_PACKET_TYPE = {
+  hello: 1,
+  dbd: 2,
+  lsr: 3,
+  lsu: 4,
+  lsack: 5,
+} as const satisfies Record<OspfPacket['type'], number>;
