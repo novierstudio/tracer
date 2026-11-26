@@ -47,6 +47,7 @@ function linkTo({ sim, onBatch, ping, traceroute }: SimClient): SimLink {
     aclHits: (device) => sim.aclHits(device),
     natTranslations: (device) => sim.natTranslations(device),
     clearNatTranslations: (device) => sim.clearNatTranslations(device),
+    ipv6Status: (device) => sim.ipv6Status(device),
     now: () => now,
     ping,
     traceroute,
