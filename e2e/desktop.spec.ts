@@ -161,9 +161,10 @@ test('sets an address in IP Configuration, then pings from the Command Prompt', 
   await expect.poll(wide.rows).toEqual(['C:\\>']);
   await page.keyboard.type('ping 192.168.1.11');
   await page.keyboard.press('Enter');
-  // Done when the summary is up and the prompt is back.
+  // Done when the summary is up and the prompt is back. Four realtime echoes a second apart take
+  // over 3 s, so allow more than the default 5 s on a loaded machine.
   await expect
-    .poll(async () => (await wide.rows()).slice(-4))
+    .poll(async () => (await wide.rows()).slice(-4), { timeout: 15_000 })
     .toEqual([
       '    Packets: Sent = 4, Received = 4, Lost = 0 (0% loss),',
       'Approximate round trip times in milli-seconds:',
