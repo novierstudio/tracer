@@ -55,8 +55,8 @@ function devicePlace(flowStore: FlowStore, id: DeviceId): DevicePlace | undefine
   };
 }
 
-const reducedMotion = () =>
-  window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+const reducedMotionQuery = () => window.matchMedia?.('(prefers-reduced-motion: reduce)');
+const reducedMotion = () => reducedMotionQuery()?.matches ?? false;
 
 function isTypingTarget(target: EventTarget | null) {
   if (!(target instanceof HTMLElement)) return false;
@@ -174,9 +174,11 @@ function chipAt(drawn: readonly Drawn[], x: number, y: number): Drawn | undefine
 
 /**
  * Packets on the canvas: one 2D canvas over React Flow's edges and nodes, drawn in screen space
- * from the viewport transform every animation frame, so it follows pan and zoom for free.
- * Hovering a drop's cross names the reason, and in Simulation mode clicking a chip selects its
- * event. Mount it inside <ReactFlow>.
+ * from the viewport transform. It draws a frame only when the picture changes: every animation
+ * frame while something moves, and once for a pan, a zoom, a step, a selection, a resize or a
+ * theme change. With nothing moving it asks for no frames at all. Hovering a drop's cross names
+ * the reason, and in Simulation mode clicking a chip selects its event. Mount it inside
+ * <ReactFlow>.
  */
 export function TrafficOverlay() {
   const canvas = useRef<HTMLCanvasElement>(null);
@@ -203,8 +205,17 @@ export function TrafficOverlay() {
     const themed = element.closest<HTMLElement>('.react-flow') ?? element;
     const device = (id: DeviceId) => devicePlace(flowStore, id);
 
+    // The pending animation frame, or 0 when the picture is up to date.
+    let frame = 0;
+    const wake = () => {
+      frame ||= requestAnimationFrame(paint);
+    };
+
     let palette = readPalette(themed);
-    const theme = new MutationObserver(() => (palette = readPalette(themed)));
+    const theme = new MutationObserver(() => {
+      palette = readPalette(themed);
+      wake();
+    });
     theme.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
     theme.observe(themed, { attributes: true, attributeFilter: ['class'] });
 
@@ -214,7 +225,11 @@ export function TrafficOverlay() {
       element.width = Math.round(element.clientWidth * dpr);
       element.height = Math.round(element.clientHeight * dpr);
     };
-    const sizes = new ResizeObserver(resize);
+    // A resize clears the canvas, so it draws again.
+    const sizes = new ResizeObserver(() => {
+      resize();
+      wake();
+    });
     sizes.observe(element);
     resize();
 
@@ -250,8 +265,14 @@ export function TrafficOverlay() {
       const { x, y } = pointAt(event);
       return selectable() ? chipAt(drawnLast, x, y) : undefined;
     };
-    const track = (event: PointerEvent) => (pointer = pointAt(event));
-    const leave = () => (pointer = undefined);
+    const track = (event: PointerEvent) => {
+      pointer = pointAt(event);
+      hover(chipAt(drawnLast, pointer.x, pointer.y));
+    };
+    const leave = () => {
+      pointer = undefined;
+      hover(undefined);
+    };
     // Clicking a chip selects its event, and must not also select, drag or pan what is under it.
     const swallow = (event: MouseEvent) => {
       if (chipUnder(event)) event.stopPropagation();
@@ -287,8 +308,8 @@ export function TrafficOverlay() {
 
     let painted = false;
     let shown = -1;
-    let frame = requestAnimationFrame(function paint() {
-      frame = requestAnimationFrame(paint);
+    const paint = () => {
+      frame = 0;
       const state = simulationStore.getState();
       const wallNow = performance.now();
       const still = reducedMotion();
@@ -302,6 +323,10 @@ export function TrafficOverlay() {
       const focus =
         selected && !state.hidden.includes(protocolOf(selected.frame)) ? selected : undefined;
       const source = state.pdu.step === 'destination' ? device(state.pdu.source) : undefined;
+      // The selected packet's ring breathes for as long as it is selected.
+      const pulsing = focus !== undefined && !still;
+      if (pulsing || (state.showTraffic && traffic.animating(wallNow, { reducedMotion: still })))
+        wake();
       if (places.length === 0 && rings.length === 0 && !focus && !source) {
         if (painted) ctx.clearRect(0, 0, element.width, element.height);
         painted = false;
@@ -352,10 +377,30 @@ export function TrafficOverlay() {
       drawnLast = drawn;
       hover(pointer && chipAt(drawn, pointer.x, pointer.y));
       if (shown !== drawn.length) element.dataset.chips = String((shown = drawn.length));
+    };
+
+    // Anything the picture is drawn from wakes it: new chips, the simulation's state, the
+    // topology, the viewport, and the reduced-motion setting.
+    const stopTraffic = traffic.subscribe(wake);
+    const stopSimulation = simulationStore.subscribe((state, previous) => {
+      const drawnFrom = ['showTraffic', 'mode', 'selected', 'frames', 'hidden', 'pdu'] as const;
+      if (drawnFrom.some((key) => state[key] !== previous[key])) wake();
     });
+    const stopEditor = editorStore.subscribe((state, previous) => {
+      if (state.topology !== previous.topology) wake();
+    });
+    const stopFlow = flowStore.subscribe(wake);
+    const motion = reducedMotionQuery();
+    motion?.addEventListener('change', wake);
+    wake();
 
     return () => {
       cancelAnimationFrame(frame);
+      stopTraffic();
+      stopSimulation();
+      stopEditor();
+      stopFlow();
+      motion?.removeEventListener('change', wake);
       theme.disconnect();
       sizes.disconnect();
       themed.removeEventListener('pointermove', track, true);
