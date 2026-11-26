@@ -67,6 +67,7 @@ import {
 import { aclCommands } from './acl';
 import { execCommands } from './exec';
 import { dhcpCommands } from './dhcp';
+import { ipv6Commands } from './ipv6';
 import { natCommands } from './nat';
 import { ospfCommands } from './ospf';
 import { ripCommands } from './rip';
@@ -812,6 +813,7 @@ export const routerCommands = [
   ...ripCommands,
   ...aclCommands,
   ...natCommands,
+  ...ipv6Commands,
 ];
 
 /** `ip helper-address`: relay the DHCP broadcasts heard on an interface to a server elsewhere. */
