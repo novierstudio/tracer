@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { AnnotationId, DeviceId, LinkId } from './ids';
-import { Hostname, Ipv4Address, Ipv4Cidr, MacAddress, VlanId } from './values';
+import { Hostname, Ipv4Address, Ipv4Cidr, ipv4ToUint32, MacAddress, VlanId } from './values';
 
 export const TOPOLOGY_VERSION = 1;
 
@@ -79,11 +79,15 @@ const interfaceFields = {
   duplex: z.enum(['full', 'half']).optional(),
 };
 
+/** `ip helper-address`: where a router relays the DHCP broadcasts it hears on an interface. */
+const helperAddresses = z.array(Ipv4Address).min(1).optional();
+
 export const RoutedInterface = z.object({
   ...interfaceFields,
   ipv4: Ipv4Cidr.optional(),
   /** Bit/s a serial port clocks when its end of the cable is DCE. */
   clockRate: z.int().positive().optional(),
+  helperAddresses,
 });
 export type RoutedInterface = z.infer<typeof RoutedInterface>;
 
@@ -150,6 +154,7 @@ export const Subinterface = z.object({
   /** IOS refuses an address until the subinterface has an encapsulation. */
   encapsulation: Dot1q.optional(),
   ipv4: Ipv4Cidr.optional(),
+  helperAddresses,
 });
 export type Subinterface = z.infer<typeof Subinterface>;
 
@@ -190,6 +195,56 @@ export const StaticRoute = z.object({
   distance: z.int().min(1).max(255).optional(),
 });
 export type StaticRoute = z.infer<typeof StaticRoute>;
+
+/** `lease days [hours [minutes]]` at its longest: 365 days, 23 hours and 59 minutes. */
+export const MAX_LEASE_MINUTES = 365 * 1440 + 23 * 60 + 59;
+
+/** `lease`: how long a pool lends an address, in whole minutes, or `infinite`. */
+export const DhcpLease = z.union([
+  z.literal('infinite'),
+  z.int().min(1).max(MAX_LEASE_MINUTES).brand<'LeaseMinutes'>(),
+]);
+export type DhcpLease = z.infer<typeof DhcpLease>;
+
+/** The lease IOS gives a pool with no `lease` line: one day. */
+export const DEFAULT_DHCP_LEASE = DhcpLease.parse(1440);
+
+/** IOS takes up to 8 addresses on one `default-router` or `dns-server` line. */
+export const MAX_DHCP_OPTION_ADDRESSES = 8;
+
+const optionAddresses = z.array(Ipv4Address).min(1).max(MAX_DHCP_OPTION_ADDRESSES).optional();
+
+/** `ip dhcp pool NAME`: an address pool and the options its clients get with an address. */
+export const DhcpPool = z.object({
+  /** `network`: the subnet the pool lends from. A pool without one serves nobody. */
+  network: Ipv4Cidr.optional(),
+  /** `default-router`, in order of preference. */
+  defaultRouters: optionAddresses,
+  /** `dns-server`, in order of preference. */
+  dnsServers: optionAddresses,
+  /** Absent means DEFAULT_DHCP_LEASE. */
+  lease: DhcpLease.optional(),
+});
+export type DhcpPool = z.infer<typeof DhcpPool>;
+
+export const DhcpPoolName = z.string().regex(/^\S+$/, 'Invalid pool name');
+
+/** `ip dhcp excluded-address first [last]`: addresses no pool lends, `first` to `last` included. */
+export const DhcpExcludedRange = z
+  .object({ first: Ipv4Address, last: Ipv4Address })
+  .refine(
+    (range) => ipv4ToUint32(range.first) <= ipv4ToUint32(range.last),
+    'An excluded range must not run backwards',
+  );
+export type DhcpExcludedRange = z.infer<typeof DhcpExcludedRange>;
+
+/** A router's DHCP server: its pools by name, and the ranges excluded from every pool. */
+export const DhcpServerConfig = z.object({
+  pools: z.record(DhcpPoolName, DhcpPool),
+  /** In the order they were entered, as IOS lists them. */
+  excluded: z.array(DhcpExcludedRange),
+});
+export type DhcpServerConfig = z.infer<typeof DhcpServerConfig>;
 
 export const DEFAULT_ROUTER_HOSTNAME = Hostname.parse('Router');
 export const DEFAULT_SWITCH_HOSTNAME = Hostname.parse('Switch');
@@ -236,6 +291,8 @@ export const RouterConfig = z.object({
   subinterfaces: z.record(SubinterfaceId, Subinterface).default(() => ({})),
   lines: RouterLines.default(factoryRouterLines),
   staticRoutes: z.array(StaticRoute).default(() => []),
+  /** Absent until the first `ip dhcp` command, and again once the last pool and range go. */
+  dhcp: DhcpServerConfig.optional(),
 });
 export type RouterConfig = z.infer<typeof RouterConfig>;
 
