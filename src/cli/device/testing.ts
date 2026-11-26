@@ -62,6 +62,11 @@ export function switchDevice(
   return make('switch', hostname, names) as SwitchDevice;
 }
 
+/** A switch of the catalog's multilayer model, which takes `ip routing` and routed ports. */
+export function multilayerSwitch(hostname = 'Switch'): SwitchDevice {
+  return { ...switchDevice(SWITCH_PORTS, hostname), model: 'switch-l3-24' };
+}
+
 /**
  * A console on a device in an editor store, wired the way the terminal binds: each line reads the
  * device from the store and commits the session's update with `updateConfig`.

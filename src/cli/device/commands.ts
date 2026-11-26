@@ -195,6 +195,9 @@ function addressProblem(
       ...Object.entries(device.config.interfaces),
       ...Object.entries(device.config.subinterfaces),
     );
+  } else {
+    // A multilayer switch's routed ports. A switchport has no address.
+    others.push(...Object.entries(device.config.interfaces));
   }
   for (const [id, other] of others) {
     if (id === self || !other.ipv4) continue;
@@ -230,7 +233,7 @@ function setPassword(
 }
 
 function setRoute(
-  ctx: RouterContext,
+  ctx: DeviceContext,
   address: Ipv4Address,
   prefix: PrefixLength,
   nextHop: StaticRoute['nextHop'],
@@ -247,7 +250,7 @@ function setRoute(
     nextHop,
     ...(distance === undefined || distance === 1 ? {} : { distance }),
   };
-  const routes = ctx.device.config.staticRoutes;
+  const routes = (ctx.device.config.staticRoutes ??= []);
   const same = routes.findIndex(
     (r) =>
       r.prefix.address === address &&
@@ -260,12 +263,12 @@ function setRoute(
 }
 
 function removeRoutes(
-  ctx: RouterContext,
+  ctx: DeviceContext,
   args: { network?: Ipv4Address; mask?: PrefixLength; nextHop?: Ipv4Address; exit?: InterfaceId },
 ) {
   const { network, mask: prefix, nextHop, exit } = args;
   if (network === undefined || prefix === undefined) return ctx.reject('% Incomplete command.');
-  const routes = ctx.device.config.staticRoutes;
+  const routes = ctx.device.config.staticRoutes ?? [];
   const keep = routes.filter(
     (r) =>
       r.prefix.address !== network ||
@@ -806,12 +809,12 @@ export const routerCommands = [
 ];
 
 /** `ip helper-address`: relay the DHCP broadcasts heard on an interface to a server elsewhere. */
-function helperAddressCommands() {
+export function helperAddressCommands() {
   const helper = keyword('helper-address', 'Specify a destination address for UDP broadcasts');
   const address = ipv4('address', 'IP destination address');
   const edit =
     (change: (current: readonly Ipv4Address[], address?: Ipv4Address) => readonly Ipv4Address[]) =>
-    (args: { address?: Ipv4Address }, ctx: RouterContext, mode: InterfaceMode) =>
+    (args: { address?: Ipv4Address }, ctx: DeviceContext, mode: InterfaceMode) =>
       eachInterface(ctx, mode, (target) => {
         if (target.kind === 'switched') return INVALID_INPUT;
         const next = change(target.config.helperAddresses ?? [], args.address);
@@ -820,7 +823,7 @@ function helperAddressCommands() {
         return undefined;
       });
   return [
-    routerCommand({
+    command({
       modes: ANY_IF,
       path: [interfaceIp, helper, address],
       run: edit((current, added) =>
@@ -893,37 +896,38 @@ function encapsulationCommands() {
   ];
 }
 
-function routeCommands() {
+/** `ip route` in each of its forms, and `no ip route`. */
+export function routeCommands() {
   const network = ipv4('network', 'Destination prefix');
   const prefix = mask('mask', 'Destination prefix mask');
   const nextHop = ipv4('nextHop', "Forwarding router's address");
   const exit = iface('exit', 'Exit interface');
   const distance = num('distance', 1, 255, 'Distance metric for this route');
-  const no = (args: Parameters<typeof removeRoutes>[1], ctx: RouterContext) =>
+  const no = (args: Parameters<typeof removeRoutes>[1], ctx: DeviceContext) =>
     removeRoutes(ctx, args);
   return [
-    routerCommand({
+    command({
       modes: GLOBAL,
       path: [globalIp, routeKw, network, prefix, nextHop],
       run: (a, ctx) =>
         setRoute(ctx, a.network, a.mask, { kind: 'address', address: a.nextHop }, undefined),
       no,
     }),
-    routerCommand({
+    command({
       modes: GLOBAL,
       path: [globalIp, routeKw, network, prefix, nextHop, distance],
       run: (a, ctx) =>
         setRoute(ctx, a.network, a.mask, { kind: 'address', address: a.nextHop }, a.distance),
       no,
     }),
-    routerCommand({
+    command({
       modes: GLOBAL,
       path: [globalIp, routeKw, network, prefix, exit],
       run: (a, ctx) =>
         setRoute(ctx, a.network, a.mask, { kind: 'interface', interface: a.exit }, undefined),
       no,
     }),
-    routerCommand({
+    command({
       modes: GLOBAL,
       path: [globalIp, routeKw, network, prefix, exit, distance],
       run: (a, ctx) =>
@@ -1065,7 +1069,10 @@ const switchShowCommands = [
   switchCommand({
     modes: EXEC,
     path: [show, showIp, routeKeyword],
-    run: (_a, ctx) => showSwitchIpRoute(ctx.device),
+    run: (_a, ctx) =>
+      ctx.device.config.ipRouting
+        ? ctx.query('routes', showIpRoute)
+        : showSwitchIpRoute(ctx.device),
   }),
   ...[
     [keyword('mac', 'MAC configuration'), keyword('address-table', 'MAC forwarding table')],

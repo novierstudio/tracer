@@ -14,6 +14,7 @@ import { complete, help, parse, type CliError, type CompleteResult } from '../pa
 import { verifySecret } from '../passwords';
 import { buildTree, type CommandTree } from '../tree';
 import { routerCommands, switchCommands } from './commands';
+import { multilayerCommands } from './layer3';
 import type {
   DeviceContext,
   IosDevice,
@@ -28,7 +29,7 @@ import { bindQuery, mapQuery, type EngineQuery, type EngineStream } from './quer
 import { blankLine } from './show';
 
 const ROUTER_TREE = buildTree<RouterContext>(routerCommands);
-const SWITCH_TREE = buildTree<SwitchContext>(switchCommands);
+const SWITCH_TREE = buildTree<SwitchContext>([...switchCommands, ...multilayerCommands]);
 
 type ContextFor<D extends IosDevice> = D extends RouterDevice ? RouterContext : SwitchContext;
 
