@@ -6,14 +6,18 @@ import {
   ALL_SPF_ROUTERS,
   BROADCAST_MAC,
   EIGRP_GROUP,
+  CDP_MAC,
   LIMITED_BROADCAST,
+  LLDP_MAC,
   multicastMac,
   PVST_MAC,
   RIP_GROUP,
+  SLOW_PROTOCOLS_MAC,
   UNKNOWN_MAC,
   UNSPECIFIED_ADDRESS,
   type DhcpMessage,
   type EigrpPacket,
+  type EthernetPayload,
   type Ipv4Packet,
   type OspfPacket,
 } from '@/engine/pdu';
@@ -21,6 +25,7 @@ import type { Ipv6Packet } from '@/engine/pdu6';
 import type { Ipv4Address, MacAddress, PrefixLength, VlanId } from '@/model';
 import { ipv6MulticastMac, UNSPECIFIED_IPV6 } from '@/model/ipv6';
 import {
+  cdpAdvertisement,
   dnsAnswer,
   dnsNoSuchName,
   dnsQuery,
@@ -31,6 +36,8 @@ import {
   eigrpQuery,
   eigrpUpdate,
   httpOk,
+  lacpPdu,
+  lldpAdvertisement,
   neighborAdvertisement,
   neighborSolicitation,
   ospfAck,
@@ -39,6 +46,7 @@ import {
   ospfLsr,
   ospfLsu,
   ospfPacket,
+  pagpPdu,
   PC1_MAC,
   R1_IPV6,
   R1_MAC,
@@ -227,6 +235,18 @@ const hopLimitExceeded: Ipv6Packet = {
   payload: { kind: 'icmpv6', type: 'time-exceeded', original: { ...echoRequest6, hopLimit: 1 } },
 };
 
+const control = (dst: MacAddress, payload: EthernetPayload): Frame => ({
+  kind: 'ethernet',
+  dst,
+  src: mac(4),
+  payload,
+});
+
+const cdp = control(CDP_MAC, cdpAdvertisement);
+const lldp = control(LLDP_MAC, lldpAdvertisement);
+const lacp = control(SLOW_PROTOCOLS_MAC, lacpPdu);
+const pagp = control(CDP_MAC, pagpPdu);
+
 /** Every PDU kind the engine sends, by name. */
 const FRAMES: Record<string, Frame> = {
   'ARP request': arpRequest,
@@ -242,6 +262,21 @@ const FRAMES: Record<string, Frame> = {
   'HDLC echo': { kind: 'hdlc', payload: echo },
   'STP BPDU': bpdu,
   'STP topology change': { ...bpdu, payload: { kind: 'bpdu', type: 'tcn' } },
+  CDP: cdp,
+  'CDP without native VLAN': control(CDP_MAC, {
+    ...cdpAdvertisement,
+    nativeVlan: undefined,
+    addresses: [],
+  }),
+  LLDP: lldp,
+  'LLDP without management address': control(LLDP_MAC, {
+    ...lldpAdvertisement,
+    managementAddress: undefined,
+  }),
+  LACP: lacp,
+  'LACP without partner': control(SLOW_PROTOCOLS_MAC, { ...lacpPdu, partner: undefined }),
+  PAgP: pagp,
+  'PAgP with partner': control(CDP_MAC, { ...pagpPdu, partner: { device: mac(5), port: 7 } }),
   'RIPv2 response': ripV2,
   'RIPv1 response': ripV1,
   'RIPv2 request': ripV2Request,
@@ -489,6 +524,77 @@ describe('dissect', () => {
     expect(field(dissection, 'bpdu.root')!.value).toBe(`32769 ${mac(3)}`);
     expect(bytesOf(dissection, 'bpdu.port')).toEqual([0x80, 0x01]);
     expect(bytesOf(dissection, 'bpdu.hello')).toEqual([2, 0]);
+  });
+});
+
+describe('dissect discovery and EtherChannel', () => {
+  const names = (dissection: Dissection) => dissection.layers.map((layer) => layer.name);
+  /** The 802.3 length field counts every byte after it up to the padding and frame check. */
+  const lengthOf = (dissection: Dissection) =>
+    Number.parseInt(field(dissection, 'ethernet.type')!.value);
+
+  it('reads CDP as an 802.3 frame whose SNAP header names CDP', () => {
+    const dissection = dissect(cdp);
+    expect(names(dissection)).toEqual(['Ethernet 802.3', 'LLC and SNAP', 'CDP']);
+    expect(bytesOf(dissection, 'llc.snap')).toEqual([0x00, 0x00, 0x0c, 0x20, 0x00]);
+    expect(field(dissection, 'llc.snap')!.value).toBe('Cisco, CDP');
+    const [start] = field(dissection, 'llc.header')!.bytes!;
+    const [, end] = field(dissection, 'cdp.duplex')!.bytes!;
+    expect(lengthOf(dissection)).toBe(end - start);
+    expect(internetChecksum([...dissection.bytes.slice(start + 8, end)])).toBe(0);
+    expect(field(dissection, 'cdp.holdtime')!.value).toBe('180 s');
+    expect(field(dissection, 'cdp.deviceId')!.value).toBe('SW1');
+    expect(field(dissection, 'cdp.addresses')!.value).toBe('192.168.1.2');
+    expect(field(dissection, 'cdp.portId')!.value).toBe('FastEthernet0/1');
+    expect(field(dissection, 'cdp.capabilities')!.value).toBe('switch, IGMP');
+    expect(bytesOf(dissection, 'cdp.capabilities')).toEqual([0, 4, 0, 8, 0, 0, 0, 0x28]);
+    expect(field(dissection, 'cdp.platform')!.value).toBe('cisco WS-C2960-24TT-L');
+    expect(field(dissection, 'cdp.nativeVlan')!.value).toBe('1');
+    expect(bytesOf(dissection, 'cdp.duplex')).toEqual([0, 0x0b, 0, 5, 1]);
+    expect(field(dissection, 'ethernet.dst')!.explain).toMatch(/CDP and PAgP/);
+  });
+
+  it('reads PAgP as an 802.3 frame whose SNAP header names PAgP', () => {
+    const dissection = dissect(pagp);
+    expect(names(dissection)).toEqual(['Ethernet 802.3', 'LLC and SNAP', 'PAgP']);
+    expect(bytesOf(dissection, 'llc.snap')).toEqual([0x00, 0x00, 0x0c, 0x01, 0x04]);
+    expect(field(dissection, 'pagp.flags')!.value).toBe('desirable');
+    expect(field(dissection, 'pagp.device')!.value).toBe(pagpPdu.device);
+    expect(field(dissection, 'pagp.group')!.value).toBe('1');
+    expect(field(dissection, 'pagp.partnerDevice')!.value).toBe('none yet');
+    const heard = dissect(FRAMES['PAgP with partner']!);
+    expect(field(heard, 'pagp.flags')!.value).toBe('desirable, consistent');
+    expect(field(heard, 'pagp.partnerPort')!.value).toBe('7');
+  });
+
+  it('reads LLDP as Ethernet II with EtherType 0x88CC', () => {
+    const dissection = dissect(lldp);
+    expect(names(dissection)).toEqual(['Ethernet II', 'LLDP']);
+    expect(field(dissection, 'ethernet.type')!.value).toBe('0x88CC (LLDP)');
+    expect(field(dissection, 'lldp.chassisId')!.value).toBe(lldpAdvertisement.chassisId);
+    expect(bytesOf(dissection, 'lldp.ttl')).toEqual([0x06, 0x02, 0, 120]);
+    expect(field(dissection, 'lldp.systemName')!.value).toBe('R1');
+    expect(field(dissection, 'lldp.capabilities')!.value).toBe('router');
+    expect(bytesOf(dissection, 'lldp.capabilities')).toEqual([0x0e, 0x04, 0, 0x10, 0, 0x10]);
+    expect(field(dissection, 'lldp.managementAddress')!.value).toBe('192.168.1.1');
+    expect(bytesOf(dissection, 'lldp.end')).toEqual([0, 0]);
+  });
+
+  it('reads LACP as a 110-byte Slow Protocols PDU with its actor and partner', () => {
+    const dissection = dissect(lacp);
+    expect(names(dissection)).toEqual(['Ethernet II', 'LACP']);
+    expect(field(dissection, 'ethernet.type')!.value).toBe('0x8809 (Slow Protocols)');
+    const lacpLayer = dissection.layers.find((layer) => layer.id === 'lacp')!;
+    const size = lacpLayer.fields.reduce((sum, f) => sum + f.bytes![1] - f.bytes![0], 0);
+    expect(size).toBe(110);
+    expect(field(dissection, 'lacp.actor.key')!.value).toBe('1');
+    expect(field(dissection, 'lacp.actor.state')!.value).toBe(
+      'active, aggregatable, in sync, collecting, distributing',
+    );
+    expect(field(dissection, 'lacp.partner.port')!.value).toBe('32768.3');
+    const alone = dissect(FRAMES['LACP without partner']!);
+    expect(field(alone, 'lacp.partner.system')!.value).toBe('none yet');
+    expect(field(alone, 'lacp.actor.state')!.value).toBe('active, aggregatable, defaulted');
   });
 });
 

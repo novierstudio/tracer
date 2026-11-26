@@ -18,8 +18,12 @@ import {
   type EigrpMetric,
   type EigrpPacket,
   type EigrpRouting,
+  type CdpPacket,
   type EthernetFrame,
+  type EthernetPayload,
   type Ipv4Packet,
+  type LacpPdu,
+  type LldpPacket,
   type Lsa,
   type LsaHeader,
   type NetworkLsa,
@@ -29,6 +33,7 @@ import {
   type OspfLinkStateRequest,
   type OspfLinkStateUpdate,
   type OspfPacket,
+  type PagpPdu,
   type RipMessage,
   type RouterLsa,
 } from '@/engine/pdu';
@@ -45,6 +50,7 @@ import type {
   PortId,
   PrefixLength,
   Topology,
+  VlanId,
 } from '@/model';
 import { ALL_NODES, ALL_ROUTERS, linkLocalOf, solicitedNode, type Ipv6Address } from '@/model/ipv6';
 
@@ -455,13 +461,52 @@ export const eigrpQuery: EigrpRouting = {
   ],
 };
 
+export const cdpAdvertisement: CdpPacket = {
+  kind: 'cdp',
+  version: 2,
+  holdtime: 180,
+  deviceId: 'SW1',
+  addresses: [ip('192.168.1.2')],
+  portId: 'FastEthernet0/1',
+  capabilities: ['switch', 'igmp'],
+  platform: 'cisco WS-C2960-24TT-L',
+  software: 'Cisco IOS Software, C2960 Software (C2960-LANBASEK9-M), Version 15.0(2)SE4',
+  nativeVlan: 1 as VlanId,
+  duplex: 'full',
+};
+
+export const lldpAdvertisement: LldpPacket = {
+  kind: 'lldp',
+  chassisId: mac(0x31),
+  portId: 'GigabitEthernet0/0',
+  ttl: 120,
+  systemName: 'R1',
+  systemDescription: 'Cisco IOS Software, C2900 Software (C2900-UNIVERSALK9-M), Version 15.1(4)M4',
+  capabilities: ['router'],
+  managementAddress: ip('192.168.1.1'),
+};
+
+export const lacpPdu: LacpPdu = {
+  kind: 'lacp',
+  actor: { system: mac(0x21), key: 1, port: 2, active: true },
+  partner: { system: mac(0x22), key: 1, port: 3 },
+};
+
+export const pagpPdu: PagpPdu = {
+  kind: 'pagp',
+  device: mac(0x21),
+  port: 2,
+  group: 1,
+  desirable: true,
+};
+
 type Hop = {
   id: number;
   from: string;
   to: string;
   sentAt: number;
   time?: number;
-  payload?: ArpPacket | Ipv4Packet | Ipv6Packet;
+  payload?: EthernetPayload;
 };
 
 /** A delivered Ethernet frame on the link between two devices, named by their ids. */

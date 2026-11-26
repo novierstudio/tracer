@@ -3,6 +3,7 @@ import {
   ALL_D_ROUTERS,
   ALL_SPF_ROUTERS,
   BROADCAST_MAC,
+  CDP_MAC,
   DHCP_MESSAGE_TYPE,
   DOT1Q_TPID,
   EIGRP_GROUP,
@@ -13,6 +14,7 @@ import {
   ICMP_TYPE,
   IP_PROTOCOL,
   LIMITED_BROADCAST,
+  LLDP_MAC,
   LSA_TYPE,
   MAX_AGE,
   OSPF_PACKET_TYPE,
@@ -20,6 +22,7 @@ import {
   PVST_MAC,
   RIP_GROUP,
   RIP_INFINITY,
+  SLOW_PROTOCOLS_MAC,
   UNKNOWN_MAC,
   UNREACHABLE_CODE,
   UNSPECIFIED_ADDRESS,
@@ -46,6 +49,7 @@ import {
   type RipEntry,
   type RipMessage,
   type RipVersion,
+  type SnapPayload,
   type UdpDatagram,
   type UdpPayload,
   type UnreachableCode,
@@ -73,6 +77,7 @@ import {
   u32,
   type Part,
 } from './encode';
+import { controlSection, type ControlSection } from './control';
 import { describeIpv6GroupMac, ipv6Sections } from './ipv6';
 import {
   describeDns,
@@ -114,6 +119,10 @@ export type LayerId =
   | 'ospf'
   | 'eigrp'
   | 'bpdu'
+  | 'cdp'
+  | 'lldp'
+  | 'lacp'
+  | 'pagp'
   | 'hello';
 
 export type OsiLayer = 1 | 2 | 3 | 4 | 7;
@@ -2159,6 +2168,15 @@ function describeMac(mac: MacAddress, role: 'dst' | 'src') {
   }
   if (mac === BROADCAST_MAC) return 'All ones: a broadcast, which every device on the LAN takes.';
   if (mac === PVST_MAC) return 'Cisco’s spanning tree address: only switches listen for it.';
+  if (mac === CDP_MAC) {
+    return 'Cisco’s address for CDP and PAgP: the next device takes it for itself and never forwards it.';
+  }
+  if (mac === LLDP_MAC) {
+    return 'LLDP’s nearest-bridge address: the next device takes it for itself and never forwards it.';
+  }
+  if (mac === SLOW_PROTOCOLS_MAC) {
+    return 'The Slow Protocols address LACP goes to: the next switch takes it for itself and never forwards it.';
+  }
   if (mac === multicastMac(RIP_GROUP)) {
     return 'The MAC of the IPv4 group 224.0.0.9: only routers running RIPv2 take it.';
   }
@@ -2185,7 +2203,111 @@ const ETHER_TYPE_NAMES: Record<keyof typeof ETHER_TYPE, string> = {
   arp: 'ARP',
   ipv4: 'IPv4',
   ipv6: 'IPv6',
+  lldp: 'LLDP',
+  lacp: 'Slow Protocols',
 };
+
+/** The SNAP header of each payload an 802.3 frame carries: Cisco's OUI, then the protocol. */
+const SNAP: Record<SnapPayload['kind'], { name: string; pid: number; explain: string }> = {
+  bpdu: {
+    name: 'PVST+',
+    pid: 0x010b,
+    explain: 'Names Cisco’s per-VLAN spanning tree as the protocol inside.',
+  },
+  cdp: {
+    name: 'CDP',
+    pid: 0x2000,
+    explain: 'Names Cisco Discovery Protocol as the protocol inside.',
+  },
+  pagp: {
+    name: 'PAgP',
+    pid: 0x0104,
+    explain: 'Names Cisco’s Port Aggregation Protocol as the protocol inside.',
+  },
+};
+
+const placeSection = (wire: Wire, { parts, ...section }: ControlSection): Layer => ({
+  ...section,
+  osi: 2,
+  fields: parts.map(({ id, label, value, explain, bytes }) =>
+    wire.field(id, label, value, explain, bytes),
+  ),
+});
+
+const sectionPdu = (wire: Wire, section: ControlSection) => ({
+  length: section.parts.reduce((sum, part) => sum + part.bytes.length, 0),
+  layers: () => [placeSection(wire, section)],
+});
+
+/** 802.3 and its LLC and SNAP headers, as Cisco's own protocols use, or else Ethernet II. */
+function ethernetPayloadLayers(
+  wire: Wire,
+  payload: EthernetFrame['payload'],
+): { typeField: Field; inner: Layer[] } {
+  switch (payload.kind) {
+    case 'bpdu':
+    case 'cdp':
+    case 'pagp': {
+      // A configuration BPDU is 35 bytes and a notification 4.
+      const pdu =
+        payload.kind === 'bpdu'
+          ? { length: payload.type === 'tcn' ? 4 : 35, layers: () => bpduLayers(wire, payload) }
+          : sectionPdu(wire, controlSection(payload));
+      // LLC and SNAP take 8 bytes before the PDU.
+      const length = 8 + pdu.length;
+      const snap = SNAP[payload.kind];
+      const typeField = wire.field(
+        'ethernet.type',
+        'Length',
+        `${length} bytes`,
+        'A number of 1500 or less is a length, not a type: this is an 802.3 frame, and LLC and SNAP name what it carries.',
+        u16(length),
+      );
+      const llc: Layer = {
+        id: 'llc',
+        osi: 2,
+        name: 'LLC and SNAP',
+        summary: `Cisco ${snap.name}`,
+        fields: [
+          wire.field(
+            'llc.header',
+            'LLC',
+            'AA AA 03',
+            'Says a SNAP header follows, since an 802.3 frame has no EtherType.',
+            [0xaa, 0xaa, 0x03],
+          ),
+          wire.field('llc.snap', 'SNAP', `Cisco, ${snap.name}`, snap.explain, [
+            0x00,
+            0x00,
+            0x0c,
+            ...u16(snap.pid),
+          ]),
+        ],
+      };
+      return { typeField, inner: [llc, ...pdu.layers()] };
+    }
+    case 'arp':
+    case 'ipv4':
+    case 'ipv6':
+    case 'lldp':
+    case 'lacp': {
+      const typeField = wire.field(
+        'ethernet.type',
+        'EtherType',
+        `${hex(ETHER_TYPE[payload.kind], 4)} (${ETHER_TYPE_NAMES[payload.kind]})`,
+        'Names what the frame carries, so the receiver hands it to the right protocol.',
+        u16(ETHER_TYPE[payload.kind]),
+      );
+      const inner =
+        payload.kind === 'arp'
+          ? arpLayers(wire, payload)
+          : payload.kind === 'ipv4' || payload.kind === 'ipv6'
+            ? ipLayers(wire, payload)
+            : [placeSection(wire, controlSection(payload))];
+      return { typeField, inner };
+    }
+  }
+}
 
 function ethernetLayers(wire: Wire, frame: EthernetFrame): Layer[] {
   const { payload, tag } = frame;
@@ -2226,52 +2348,8 @@ function ethernetLayers(wire: Wire, frame: EthernetFrame): Layer[] {
     ],
   };
 
-  const inner: Layer[] = [];
   const bodyStart = wire.data.length + 2;
-  let typeField: Field;
-  if (payload.kind === 'bpdu') {
-    // LLC and SNAP, then a configuration BPDU's 35 bytes or a notification's 4.
-    const bpduLength = 8 + (payload.type === 'tcn' ? 4 : 35);
-    typeField = wire.field(
-      'ethernet.type',
-      'Length',
-      `${bpduLength} bytes`,
-      'A number of 1500 or less is a length, not a type: this is an 802.3 frame, as BPDUs use.',
-      u16(bpduLength),
-    );
-    inner.push({
-      id: 'llc',
-      osi: 2,
-      name: 'LLC and SNAP',
-      summary: 'Cisco PVST+',
-      fields: [
-        wire.field(
-          'llc.header',
-          'LLC',
-          'AA AA 03',
-          'Says a SNAP header follows, since an 802.3 frame has no EtherType.',
-          [0xaa, 0xaa, 0x03],
-        ),
-        wire.field(
-          'llc.snap',
-          'SNAP',
-          'Cisco, PVST+',
-          'Names Cisco’s per-VLAN spanning tree as the protocol inside.',
-          [0x00, 0x00, 0x0c, 0x01, 0x0b],
-        ),
-      ],
-    });
-    inner.push(...bpduLayers(wire, payload));
-  } else {
-    typeField = wire.field(
-      'ethernet.type',
-      'EtherType',
-      `${hex(ETHER_TYPE[payload.kind], 4)} (${ETHER_TYPE_NAMES[payload.kind]})`,
-      'Names what the frame carries, so the receiver hands it to the right protocol.',
-      u16(ETHER_TYPE[payload.kind]),
-    );
-    inner.push(...(payload.kind === 'arp' ? arpLayers(wire, payload) : ipLayers(wire, payload)));
-  }
+  const { typeField, inner } = ethernetPayloadLayers(wire, payload);
 
   const trailer: Field[] = [];
   const short = MIN_PAYLOAD - (tag ? 4 : 0) - (wire.data.length - bodyStart);
@@ -2300,7 +2378,7 @@ function ethernetLayers(wire: Wire, frame: EthernetFrame): Layer[] {
   const ethernet: Layer = {
     id: 'ethernet',
     osi: 2,
-    name: payload.kind === 'bpdu' ? 'Ethernet 802.3' : 'Ethernet II',
+    name: payload.kind in SNAP ? 'Ethernet 802.3' : 'Ethernet II',
     summary: `${frame.src} → ${frame.dst === BROADCAST_MAC ? 'broadcast' : frame.dst}`,
     fields: [dst, src, typeField, ...trailer],
   };
