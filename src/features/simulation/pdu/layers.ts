@@ -5,6 +5,10 @@ import {
   BROADCAST_MAC,
   DHCP_MESSAGE_TYPE,
   DOT1Q_TPID,
+  EIGRP_GROUP,
+  EIGRP_OPCODE,
+  EIGRP_UNREACHABLE,
+  EIGRP_VERSION,
   ETHER_TYPE,
   ICMP_TYPE,
   IP_PROTOCOL,
@@ -24,6 +28,9 @@ import {
   type BridgeId,
   type DhcpMessage,
   type DhcpMessageType,
+  type EigrpExternal,
+  type EigrpPacket,
+  type EigrpRoute,
   type EthernetFrame,
   type IcmpEcho,
   type IcmpMessage,
@@ -105,6 +112,7 @@ export type LayerId =
   | 'ssh'
   | 'rip'
   | 'ospf'
+  | 'eigrp'
   | 'bpdu'
   | 'hello';
 
@@ -224,6 +232,8 @@ function payloadBytes(packet: Ipv4Packet): number[] {
       return udpParts(packet, payload).flatMap((part) => part.bytes);
     case 'ospf':
       return ospfBytes(payload);
+    case 'eigrp':
+      return eigrpBytes(payload);
     case 'tcp': {
       const { header, data } = tcpParts(packet, payload);
       return [...header, ...data].flatMap((part) => part.bytes);
@@ -356,6 +366,9 @@ function icmpLayers(wire: Wire, message: IcmpMessage): Layer[] {
 function describeIcmpStart(payload: Ipv4Payload) {
   if (payload.kind === 'udp') return `UDP ${payload.srcPort} → ${payload.dstPort}`;
   if (payload.kind === 'ospf') return `OSPFv2 ${OSPF_NAMES[payload.type]} from ${payload.routerId}`;
+  if (payload.kind === 'eigrp') {
+    return `EIGRP ${EIGRP_NAMES[eigrpType(payload)].toLowerCase()}, AS ${payload.asn}`;
+  }
   if (payload.kind === 'tcp')
     return `TCP ${payload.srcPort} → ${payload.dstPort}, seq ${payload.seq}`;
   return isEcho(payload)
@@ -893,6 +906,7 @@ const IP_PROTOCOL_NAMES: Record<Ipv4Payload['kind'], string> = {
   icmp: 'ICMP',
   tcp: 'TCP',
   udp: 'UDP',
+  eigrp: 'EIGRP',
   ospf: 'OSPF',
 };
 
@@ -910,6 +924,9 @@ function describeIpAddress(address: Ipv4Address, role: 'src' | 'dst') {
   }
   if (address === ALL_SPF_ROUTERS) {
     return 'AllSPFRouters, the group every OSPF router listens on. Hellos go here, and routers keep it on this network.';
+  }
+  if (address === EIGRP_GROUP) {
+    return 'The group every EIGRP router listens on. Hellos and most updates go here, and routers keep it on this link.';
   }
   if (address === ALL_D_ROUTERS) {
     return 'AllDRouters, the group only the DR and BDR listen on. A router that is neither sends its updates and acks here, so the two routers that keep the network in sync hear them and the others are not disturbed.';
@@ -1029,6 +1046,8 @@ function payloadLayers(wire: Wire, packet: Ipv4Packet): Layer[] {
       return udpLayers(wire, packet, payload);
     case 'ospf':
       return ospfLayers(wire, payload);
+    case 'eigrp':
+      return eigrpLayers(wire, payload);
     case 'tcp':
       return tcpLayers(wire, packet, payload);
   }
@@ -1517,6 +1536,424 @@ function ospfSummary(packet: OspfPacket): string {
   }
 }
 
+// EIGRP
+
+/** What an EIGRP packet is for. An ack is a hello with no parameters, so it gets a name of its own. */
+export type EigrpType = 'ack' | EigrpPacket['opcode'];
+
+export const eigrpType = (packet: EigrpPacket): EigrpType =>
+  packet.opcode === 'hello' && !packet.parameters ? 'ack' : packet.opcode;
+
+const EIGRP_NAMES: Record<EigrpType, string> = {
+  hello: 'Hello',
+  ack: 'Ack',
+  update: 'Update',
+  query: 'Query',
+  reply: 'Reply',
+};
+
+const EIGRP_TYPE_EXPLAIN: Record<EigrpType, string> = {
+  hello:
+    'A hello finds neighbours and keeps them. Routers in the same AS, with the same K-values, that hear each other’s hellos become neighbours.',
+  ack: 'An ack is a hello with no TLVs. It carries only the sequence number it acknowledges, unicast to the neighbour that sent the reliable packet.',
+  update:
+    'An update carries routes: the whole table to a new neighbour, then only what changed. The receiver acks it.',
+  query:
+    'A query asks every neighbour for a way to a network the sender lost and has no feasible successor for. The receiver acks it and answers with a reply.',
+  reply:
+    'A reply answers a query with the sender’s own route to the network, or says it has none. The receiver acks it.',
+};
+
+const EIGRP_INIT = 0x1;
+
+const EIGRP_TLV = { parameters: 0x0001, software: 0x0004, internal: 0x0102, external: 0x0103 };
+
+/** The releases a router of IOS 15.1 puts in its Software Version TLV. */
+const IOS_RELEASE = [15, 1];
+const EIGRP_RELEASE = [2, 0];
+
+const EXTERNAL_PROTOCOL = { static: 3 } as const satisfies Record<
+  EigrpExternal['protocol'],
+  number
+>;
+
+/** EIGRP's wide fields hold at most all ones. */
+const saturate = (value: number) => Math.min(value, 0xffffffff);
+
+/** Delay on the wire: tens of microseconds times 256, or all ones for a route that is gone. */
+const wireDelay = (delay: number) =>
+  delay === EIGRP_UNREACHABLE ? EIGRP_UNREACHABLE : saturate(delay * 256);
+
+/** Bandwidth on the wire as IOS writes it: 10^7 over the kbit/s, rounded down, times 256. */
+const wireBandwidth = (kbit: number) => saturate(Math.floor(10_000_000 / kbit) * 256);
+
+/** How many bytes of the destination go on the wire. A default route still sends one. */
+const significantBytes = (prefixLength: number) => Math.max(1, Math.ceil(prefixLength / 8));
+
+function routeBytes({ prefix, metric, external }: EigrpRoute): number[] {
+  const origin = external
+    ? [
+        ...ipBytes(external.originRouter),
+        ...u32(external.originAs),
+        ...u32(0),
+        ...u32(external.externalMetric),
+        0,
+        0,
+        EXTERNAL_PROTOCOL[external.protocol],
+        0,
+      ]
+    : [];
+  const body = [
+    ...ipBytes(UNSPECIFIED_ADDRESS),
+    ...origin,
+    ...u32(wireDelay(metric.delay)),
+    ...u32(wireBandwidth(metric.bandwidth)),
+    ...u32(metric.mtu).slice(1),
+    metric.hops,
+    metric.reliability,
+    metric.load,
+    0,
+    0,
+    prefix.prefixLength,
+    ...ipBytes(prefix.address).slice(0, significantBytes(prefix.prefixLength)),
+  ];
+  const type = external ? EIGRP_TLV.external : EIGRP_TLV.internal;
+  return [...u16(type), ...u16(4 + body.length), ...body];
+}
+
+function eigrpTlvBytes(packet: EigrpPacket): number[] {
+  if (packet.opcode !== 'hello') return packet.routes.flatMap(routeBytes);
+  if (!packet.parameters) return [];
+  const { kValues, holdTime } = packet.parameters;
+  return [
+    ...u16(EIGRP_TLV.parameters),
+    ...u16(12),
+    ...kValues,
+    0,
+    ...u16(holdTime),
+    ...u16(EIGRP_TLV.software),
+    ...u16(8),
+    ...IOS_RELEASE,
+    ...EIGRP_RELEASE,
+  ];
+}
+
+const eigrpFlags = (packet: EigrpPacket) =>
+  packet.opcode !== 'hello' && packet.init ? EIGRP_INIT : 0;
+
+/** An EIGRP packet's bytes, with its checksum over the whole packet filled in. */
+function eigrpBytes(packet: EigrpPacket): number[] {
+  const bytes = [
+    EIGRP_VERSION,
+    EIGRP_OPCODE[packet.opcode],
+    0,
+    0,
+    ...u32(eigrpFlags(packet)),
+    ...u32(packet.sequence),
+    ...u32(packet.ack),
+    ...u16(0),
+    ...u16(packet.asn),
+    ...eigrpTlvBytes(packet),
+  ];
+  const checksum = internetChecksum(bytes);
+  bytes[2] = checksum >> 8;
+  bytes[3] = checksum & 0xff;
+  return bytes;
+}
+
+function delayText(delay: number) {
+  if (delay === EIGRP_UNREACHABLE) return `${hex(EIGRP_UNREACHABLE, 8)} (unreachable)`;
+  return `${wireDelay(delay)} (${delay} ${delay === 1 ? 'ten' : 'tens'} of µs = ${delay * 10} µs)`;
+}
+
+function eigrpLayers(wire: Wire, packet: EigrpPacket): Layer[] {
+  const bytes = eigrpBytes(packet);
+  const type = eigrpType(packet);
+  let at = 0;
+  const field = (id: string, label: string, value: string, explain: string, length: number) =>
+    wire.field(id, label, value, explain, bytes.slice(at, (at += length)));
+  const flags = eigrpFlags(packet);
+
+  const fields: Field[] = [
+    field(
+      'eigrp.version',
+      'Version',
+      String(EIGRP_VERSION),
+      'The version of EIGRP’s header: 2, the one every router uses.',
+      1,
+    ),
+    field(
+      'eigrp.opcode',
+      'Opcode',
+      `${EIGRP_OPCODE[packet.opcode]} (${type === 'ack' ? 'Hello, used as an ack' : EIGRP_NAMES[type]})`,
+      EIGRP_TYPE_EXPLAIN[type],
+      1,
+    ),
+    field(
+      'eigrp.checksum',
+      'Checksum',
+      hex((bytes[2]! << 8) | bytes[3]!, 4),
+      'Covers the whole EIGRP packet, so the receiver can spot one damaged on the way.',
+      2,
+    ),
+    field(
+      'eigrp.flags',
+      'Flags',
+      `${hex(flags, 8)} (${flags & EIGRP_INIT ? 'INIT' : 'none'})`,
+      'INIT marks the first update to a new neighbour, which asks it for its whole table. CR, conditional receive, paces multicast to slow neighbours, and Tracer never sets it.',
+      4,
+    ),
+    field(
+      'eigrp.sequence',
+      'Sequence',
+      String(packet.sequence),
+      packet.sequence > 0
+        ? 'Numbers each reliable packet. The receiver acks this number, and the sender sends the packet again until it does.'
+        : 'Hellos and acks are not reliable, so they carry sequence 0 and nobody acks them.',
+      4,
+    ),
+    field(
+      'eigrp.ack',
+      'Acknowledgment',
+      String(packet.ack),
+      packet.ack === 0
+        ? 'Acknowledges nothing.'
+        : type === 'ack'
+          ? 'The sequence number of the receiver’s reliable packet that this ack confirms arrived.'
+          : 'Confirms the receiver’s reliable packet with this sequence number arrived, carried on this packet so no separate ack is needed.',
+      4,
+    ),
+    field(
+      'eigrp.virtualRouter',
+      'Virtual router ID',
+      '0 (unicast)',
+      'Which routing table the packet is for: 0 is the ordinary unicast one. Tracer runs no other.',
+      2,
+    ),
+    field(
+      'eigrp.asn',
+      'Autonomous system',
+      `AS ${packet.asn}`,
+      'The AS number from router eigrp. Routers only become neighbours, and only take routes, within the same AS.',
+      2,
+    ),
+  ];
+
+  if (packet.opcode === 'hello' && packet.parameters) {
+    const { kValues, holdTime } = packet.parameters;
+    fields.push(
+      field(
+        'eigrp.parameters',
+        'Parameters TLV',
+        `Type ${hex(EIGRP_TLV.parameters, 4)}, 12 bytes`,
+        'A TLV is a type, a length that counts the whole TLV, and a value. This one carries the K-values and hold time.',
+        4,
+      ),
+      field(
+        'eigrp.kValues',
+        'K-values',
+        kValues.map((k, index) => `K${index + 1} ${k}`).join(', '),
+        'K1 to K5 weigh bandwidth, load, delay and reliability in the metric. IOS uses 1 0 1 0 0: bandwidth plus delay. Routers whose K-values differ never become neighbours.',
+        5,
+      ),
+      field('eigrp.reserved', 'Reserved', '0', 'One byte kept for future use, always 0.', 1),
+      field(
+        'eigrp.holdTime',
+        'Hold time',
+        `${holdTime} s`,
+        'How long the receiver keeps the sender as a neighbour without another hello: three hellos by default.',
+        2,
+      ),
+      field(
+        'eigrp.software',
+        'Software Version TLV',
+        `Type ${hex(EIGRP_TLV.software, 4)}, 8 bytes`,
+        'Every hello with parameters also says which software sent it.',
+        4,
+      ),
+      field(
+        'eigrp.release',
+        'Releases',
+        `IOS ${IOS_RELEASE.join('.')}, EIGRP ${EIGRP_RELEASE.join('.')}`,
+        'The sender’s IOS release and EIGRP release. Tracer says IOS 15.1 and EIGRP 2.0, as a router of that age does. Neighbours need not match.',
+        4,
+      ),
+    );
+  }
+
+  if (packet.opcode !== 'hello') {
+    packet.routes.forEach((route, index) => fields.push(...routeFields(route, index + 1)));
+  }
+
+  function routeFields({ prefix, metric, external }: EigrpRoute, n: number): Field[] {
+    const routeField = (
+      name: string,
+      label: string,
+      value: string,
+      explain: string,
+      length: number,
+    ) => field(`eigrp.route.${n}.${name}`, `Route ${n} ${label}`, value, explain, length);
+    const tlv = external ? EIGRP_TLV.external : EIGRP_TLV.internal;
+    const length = (bytes[at + 2]! << 8) | bytes[at + 3]!;
+    const significant = significantBytes(prefix.prefixLength);
+    return [
+      routeField(
+        'tlv',
+        'type, length',
+        `${hex(tlv, 4)} (IPv4 ${external ? 'external' : 'internal'}), ${length} bytes`,
+        external
+          ? 'An external route: one redistributed into EIGRP from outside, here a static route. EIGRP trusts it less, administrative distance 170 against 90 for an internal route.'
+          : 'An internal route: a network inside this EIGRP AS.',
+        4,
+      ),
+      routeField(
+        'nextHop',
+        'next hop',
+        '0.0.0.0 (the sender)',
+        'Where to send traffic for the network. 0.0.0.0 means the router that sent this packet.',
+        4,
+      ),
+      ...(external
+        ? [
+            routeField(
+              'originRouter',
+              'originating router',
+              external.originRouter,
+              'The router ID of the router that redistributed the route into EIGRP.',
+              4,
+            ),
+            routeField(
+              'originAs',
+              'originating AS',
+              `AS ${external.originAs}`,
+              'The AS of the router that redistributed the route.',
+              4,
+            ),
+            routeField(
+              'tag',
+              'tag',
+              '0',
+              'A tag a route map could set and match on. Tracer leaves it at 0.',
+              4,
+            ),
+            routeField(
+              'externalMetric',
+              'external metric',
+              String(external.externalMetric),
+              'The route’s metric in the protocol it came from, kept for reference. EIGRP does not use it.',
+              4,
+            ),
+            routeField(
+              'externalReserved',
+              'reserved',
+              '0',
+              'Two bytes kept for future use, always 0.',
+              2,
+            ),
+            routeField(
+              'protocol',
+              'external protocol',
+              `${EXTERNAL_PROTOCOL[external.protocol]} (${external.protocol})`,
+              'The protocol the route came from: 3 is a static route.',
+              1,
+            ),
+            routeField(
+              'externalFlags',
+              'external flags',
+              '0x00',
+              'Flag bits, such as one for a candidate default route. None are set.',
+              1,
+            ),
+          ]
+        : []),
+      routeField(
+        'delay',
+        'delay',
+        delayText(metric.delay),
+        'The path’s total delay in tens of microseconds, times 256 on the wire. Each router adds the delay of the interface it heard the route on. All ones means the network is unreachable: the route is withdrawn.',
+        4,
+      ),
+      routeField(
+        'bandwidth',
+        'bandwidth',
+        `${wireBandwidth(metric.bandwidth)} (${metric.bandwidth} kbit/s)`,
+        'The slowest link on the path: 10⁷ divided by its bandwidth in kbit/s, rounded down, times 256, so a faster path has a lower number. A GigabitEthernet link gives 2560 and a T1 serial link 1657856.',
+        4,
+      ),
+      routeField(
+        'mtu',
+        'MTU',
+        `${metric.mtu} bytes`,
+        'The smallest MTU on the path. It travels with the route but takes no part in the metric.',
+        3,
+      ),
+      routeField(
+        'hops',
+        'hop count',
+        String(metric.hops),
+        'How many routers away the network is. EIGRP drops a route 100 hops away.',
+        1,
+      ),
+      routeField(
+        'reliability',
+        'reliability',
+        `${metric.reliability}/255`,
+        'How reliable the path’s worst link is: 255 is perfect. It counts only when K5 is set, which IOS leaves at 0.',
+        1,
+      ),
+      routeField(
+        'load',
+        'load',
+        `${metric.load}/255`,
+        'How busy the path’s busiest link is: 1 is idle and 255 full. It counts only when K2 is set, which IOS leaves at 0.',
+        1,
+      ),
+      routeField(
+        'internalTag',
+        'internal tag',
+        '0',
+        'A tag a route map could set inside the AS. Tracer leaves it at 0.',
+        1,
+      ),
+      routeField(
+        'flags',
+        'flags',
+        '0x00',
+        'Flag bits, such as source withdraw and candidate default. None are set.',
+        1,
+      ),
+      routeField(
+        'prefixLength',
+        'prefix length',
+        maskText(prefix.prefixLength),
+        'How many bits of the destination name the network.',
+        1,
+      ),
+      routeField(
+        'destination',
+        'destination',
+        `${prefix.address}/${prefix.prefixLength}`,
+        prefix.prefixLength === 0
+          ? 'A default route has no significant bytes, but still sends one zero byte.'
+          : `Only the bytes the prefix length covers: ${plural(significant, 'byte')} for a /${prefix.prefixLength}. The receiver fills the rest with zeros.`,
+        significant,
+      ),
+    ];
+  }
+
+  return [{ id: 'eigrp', osi: 3, name: 'EIGRP', summary: eigrpSummary(packet), fields }];
+}
+
+function eigrpSummary(packet: EigrpPacket): string {
+  if (packet.opcode === 'hello') {
+    return packet.parameters
+      ? `Hello, AS ${packet.asn}, hold ${packet.parameters.holdTime} s`
+      : `Ack ${packet.ack}`;
+  }
+  const routes = `${EIGRP_NAMES[packet.opcode]}, ${plural(packet.routes.length, 'route')}`;
+  return packet.init ? `${routes} (init)` : routes;
+}
+
 // ARP
 
 function arpLayers(wire: Wire, arp: ArpPacket): Layer[] {
@@ -1730,6 +2167,9 @@ function describeMac(mac: MacAddress, role: 'dst' | 'src') {
   }
   if (mac === multicastMac(ALL_D_ROUTERS)) {
     return 'The multicast MAC of 224.0.0.6, the DR and BDR only: the designated routers of an OSPF network take it.';
+  }
+  if (mac === multicastMac(EIGRP_GROUP)) {
+    return 'The multicast MAC of 224.0.0.10, all EIGRP routers: every router running EIGRP takes it, and other devices ignore it.';
   }
 
   if (mac.startsWith('01:00:5e')) {

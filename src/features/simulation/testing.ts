@@ -6,12 +6,18 @@ import type { EventId, FrameEvent } from '@/engine/events';
 import { byteLength, httpText, type HttpRequest, type HttpResponse } from '@/engine/http';
 import {
   ALL_SPF_ROUTERS,
+  EIGRP_GROUP,
+  EIGRP_UNREACHABLE,
   INITIAL_SEQUENCE,
   LIMITED_BROADCAST,
   MAX_AGE,
   RIP_GROUP,
   UDP_PORT,
   type ArpPacket,
+  type EigrpHello,
+  type EigrpMetric,
+  type EigrpPacket,
+  type EigrpRouting,
   type EthernetFrame,
   type Ipv4Packet,
   type Lsa,
@@ -384,6 +390,69 @@ export const ospfAck: OspfLinkStateAck = {
   routerId: R2,
   area: 0,
   headers: [headerOf(routerLsa)],
+};
+
+/** An EIGRP packet from 10.0.12.1, to its group unless `dst` says otherwise. TTL 2, as EIGRP sends. */
+export function eigrpPacket(payload: EigrpPacket, dst: Ipv4Address = EIGRP_GROUP): Ipv4Packet {
+  return { kind: 'ipv4', src: ip('10.0.12.1'), dst, ttl: 2, id: 5, payload };
+}
+
+export const eigrpHello: EigrpHello = {
+  kind: 'eigrp',
+  opcode: 'hello',
+  asn: 1,
+  sequence: 0,
+  ack: 0,
+  parameters: { kValues: [1, 0, 1, 0, 0], holdTime: 15 },
+};
+
+/** Confirms the neighbour's packet 5. */
+export const eigrpAck: EigrpHello = { kind: 'eigrp', opcode: 'hello', asn: 1, sequence: 0, ack: 5 };
+
+const metric = (bandwidth: number, delay: number, hops: number): EigrpMetric => ({
+  bandwidth,
+  delay,
+  hops,
+  reliability: 255,
+  load: 1,
+  mtu: 1500,
+});
+
+/** A LAN behind a GigabitEthernet port, and a static route redistributed across a T1 serial link. */
+export const eigrpUpdate: EigrpRouting = {
+  kind: 'eigrp',
+  opcode: 'update',
+  asn: 1,
+  sequence: 6,
+  ack: 0,
+  init: false,
+  routes: [
+    {
+      prefix: { address: ip('192.168.1.0'), prefixLength: prefix(24) },
+      metric: metric(1000000, 1, 0),
+    },
+    {
+      prefix: { address: ip('172.16.0.0'), prefixLength: prefix(16) },
+      metric: metric(1544, 2001, 1),
+      external: { originRouter: R1, originAs: 1, protocol: 'static', externalMetric: 0 },
+    },
+  ],
+};
+
+/** Asks for a way back to a LAN the sender lost: its delay is all ones. */
+export const eigrpQuery: EigrpRouting = {
+  kind: 'eigrp',
+  opcode: 'query',
+  asn: 1,
+  sequence: 7,
+  ack: 0,
+  init: false,
+  routes: [
+    {
+      prefix: { address: ip('192.168.1.0'), prefixLength: prefix(24) },
+      metric: metric(1000000, EIGRP_UNREACHABLE, 0),
+    },
+  ],
 };
 
 type Hop = {

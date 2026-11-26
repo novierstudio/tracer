@@ -12,6 +12,11 @@ import {
   dnsQuery,
   echoRequest,
   echoRequest6,
+  eigrpAck,
+  eigrpHello,
+  eigrpPacket,
+  eigrpQuery,
+  eigrpUpdate,
   hop,
   neighborAdvertisement,
   neighborSolicitation,
@@ -119,6 +124,21 @@ describe('protocol filters', () => {
     expect(describeFrame(ospf(ospfLsr))).toBe('OSPF LS request, 2 LSAs');
     expect(describeFrame(ospf(ospfLsu))).toBe('OSPF LS update from 1.1.1.1, 2 LSAs');
     expect(describeFrame(ospf(ospfAck))).toBe('OSPF LS ack, 1 LSA');
+  });
+
+  it('classifies EIGRP and says what each EIGRP packet carries', () => {
+    const eigrp = (payload: Parameters<typeof eigrpPacket>[0]) =>
+      hop({ id: 1, from: 'R1', to: 'R2', sentAt: 1, payload: eigrpPacket(payload) });
+    expect(protocolOf(eigrp(eigrpHello).frame)).toBe('eigrp');
+    expect(PROTOCOLS.eigrp).toEqual({ label: 'EIGRP', token: '--proto-routing' });
+    expect(describeFrame(eigrp(eigrpHello))).toBe('EIGRP hello, AS 1');
+    expect(describeFrame(eigrp(eigrpAck))).toBe('EIGRP ack 5');
+    expect(describeFrame(eigrp(eigrpUpdate))).toBe('EIGRP update, 2 routes');
+    expect(describeFrame(eigrp({ ...eigrpUpdate, init: true, routes: [] }))).toBe(
+      'EIGRP update, 0 routes (init)',
+    );
+    expect(describeFrame(eigrp(eigrpQuery))).toBe('EIGRP query, 1 route');
+    expect(describeFrame(eigrp({ ...eigrpQuery, opcode: 'reply' }))).toBe('EIGRP reply, 1 route');
   });
 
   it('classifies Neighbor Discovery as NDP and other ICMPv6 as ICMPv6, and says what each does', () => {
