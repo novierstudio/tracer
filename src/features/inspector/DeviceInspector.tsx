@@ -16,6 +16,7 @@ import { IosConfigTab } from './config/ConfigTab';
 import { HostAddressForm } from './HostAddressForm';
 import { HostnameField } from './HostnameField';
 import { InterfacesTab } from './InterfacesTab';
+import { ServicesTab } from './ServicesTab';
 import { formatCidr } from './ipv4';
 import { DeviceTile, Facts, Mono, PeerButton, STATE_LABELS, Section, StateDot } from './parts';
 import {
@@ -27,7 +28,7 @@ import {
   type PortRow,
 } from './view';
 
-export const DEVICE_TABS = ['overview', 'interfaces', 'config', 'console'] as const;
+export const DEVICE_TABS = ['overview', 'interfaces', 'config', 'services', 'console'] as const;
 export type DeviceTab = (typeof DEVICE_TABS)[number];
 
 type Props = {
@@ -45,9 +46,11 @@ const isHost = (device: Device) => device.kind === 'pc' || device.kind === 'serv
 export function DeviceInspector({ device, topology, tab, onTabChange, focusConsole }: Props) {
   const rows = portRows(topology, device);
   const host = isHost(device);
+  // Only a server has services; the tab kept from one falls back to Config on other devices.
+  const shown = tab === 'services' && device.kind !== 'server' ? 'config' : tab;
   return (
     <Tabs
-      value={tab}
+      value={shown}
       onValueChange={(value) => onTabChange(value as DeviceTab)}
       className="flex min-h-0 flex-1 flex-col"
     >
@@ -56,6 +59,7 @@ export function DeviceInspector({ device, topology, tab, onTabChange, focusConso
         <TabsTrigger value="overview">Overview</TabsTrigger>
         <TabsTrigger value="interfaces">Interfaces</TabsTrigger>
         <TabsTrigger value="config">Config</TabsTrigger>
+        {device.kind === 'server' && <TabsTrigger value="services">Services</TabsTrigger>}
         <TabsTrigger value="console">{host ? 'Desktop' : 'CLI'}</TabsTrigger>
       </TabsList>
       <div className="min-h-0 flex-1 overflow-y-auto">
@@ -68,6 +72,11 @@ export function DeviceInspector({ device, topology, tab, onTabChange, focusConso
         <TabsContent value="config">
           <ConfigTab device={device} rows={rows} />
         </TabsContent>
+        {device.kind === 'server' && (
+          <TabsContent value="services">
+            <ServicesTab key={device.id} device={device} />
+          </TabsContent>
+        )}
         {host ? (
           <TabsContent value="console" className="h-full">
             <HostDesktop device={device} focusPrompt={focusConsole} />
