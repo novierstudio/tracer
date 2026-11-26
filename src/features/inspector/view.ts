@@ -146,7 +146,10 @@ export function portRows(topology: Topology, device: Device): PortRow[] {
       case 'router':
         return { ...base, layer: 'routed', ipv4: device.config.interfaces[port.id]?.ipv4 };
       case 'switch': {
-        const switchport = device.config.interfaces[port.id]?.switchport;
+        const config = device.config.interfaces[port.id];
+        const switchport = config?.switchport;
+        // A multilayer switch's routed port, which `no switchport` took out of switching.
+        if (config && !switchport) return { ...base, layer: 'routed', ipv4: config.ipv4 };
         const vlan = switchport?.mode === 'trunk' ? 'Trunk' : `VLAN ${switchport?.vlan ?? 1}`;
         return { ...base, layer: 'switched', vlan };
       }
