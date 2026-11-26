@@ -1,5 +1,5 @@
-import type { RipStatus, RoutingProtocols } from '../../engine/api';
-import type { RipConfig } from '../../model';
+import type { OspfStatus, RipStatus, RoutingProtocols } from '../../engine/api';
+import type { OspfConfig, RipConfig } from '../../model';
 import type { IosDevice } from './context';
 import { NO_ENGINE, routeAge } from './showRouting';
 
@@ -13,6 +13,32 @@ function versionControl(rip: RipConfig) {
     case 2:
       return { summary: 'send version 2, receive version 2', send: '2', receive: '2' };
   }
+}
+
+function ospfSection(ospf: OspfConfig, status: OspfStatus): string[] {
+  const areas = new Set(status.interfaces.map((entry) => entry.area)).size;
+  return [
+    `Routing Protocol is "ospf ${ospf.processId}"`,
+    '  Outgoing update filter list for all interfaces is not set',
+    '  Incoming update filter list for all interfaces is not set',
+    `  Router ID ${status.routerId ?? '0.0.0.0'}`,
+    `  Number of areas in this router is ${areas}. ${areas} normal 0 stub 0 nssa`,
+    '  Maximum path: 4',
+    '  Routing for Networks:',
+    ...ospf.networks.map(
+      ({ address, wildcard, area }) => `    ${address} ${wildcard} area ${area}`,
+    ),
+    ...(ospf.passiveInterfaces.length > 0
+      ? ['  Passive Interface(s):', ...ospf.passiveInterfaces.map((id) => `    ${id}`)]
+      : []),
+    '  Routing Information Sources:',
+    '    Gateway         Distance      Last Update',
+    ...status.sources.map(
+      ({ routerId, lastUpdateMs }) =>
+        `    ${routerId.padEnd(16)}${'110'.padStart(8)}      ${routeAge(lastUpdateMs)}`,
+    ),
+    '  Distance: (default is 110)',
+  ];
 }
 
 function ripSection(rip: RipConfig, status: RipStatus): string[] {
@@ -57,6 +83,11 @@ export function showIpProtocols(
   device: IosDevice,
 ): readonly string[] {
   if (!protocols) return NO_ENGINE;
-  const rip = device.kind === 'router' ? device.config.rip : undefined;
-  return rip && protocols.rip ? ripSection(rip, protocols.rip) : [];
+  if (device.kind !== 'router') return [];
+  const { ospf, rip } = device.config;
+  const sections = [
+    ospf && protocols.ospf ? ospfSection(ospf, protocols.ospf) : undefined,
+    rip && protocols.rip ? ripSection(rip, protocols.rip) : undefined,
+  ].filter((section) => section !== undefined);
+  return sections.flatMap((section, i) => (i === 0 ? section : ['', ...section]));
 }
