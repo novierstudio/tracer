@@ -3,13 +3,16 @@ import type { Frame } from '@/engine/frame';
 import {
   BROADCAST_MAC,
   LIMITED_BROADCAST,
+  multicastMac,
   PVST_MAC,
+  RIP_GROUP,
   UNKNOWN_MAC,
   UNSPECIFIED_ADDRESS,
   type DhcpMessage,
   type Ipv4Packet,
 } from '@/engine/pdu';
 import type { Ipv4Address, MacAddress, PrefixLength, VlanId } from '@/model';
+import { ripPacket, ripRequest, ripV1Response, ripV2Response } from '../testing';
 import { crc32, dissect, formatLeaseTime, internetChecksum, type Dissection } from './layers';
 
 const mac = (n: number) => `02:00:00:00:00:0${n}` as MacAddress;
@@ -119,6 +122,27 @@ const offer = dhcpFrame(
   false,
 );
 
+const RIP_MAC = multicastMac(RIP_GROUP);
+
+const ripV2: Frame = {
+  kind: 'ethernet',
+  dst: RIP_MAC,
+  src: mac(1),
+  payload: ripPacket(ripV2Response),
+};
+const ripV1: Frame = {
+  kind: 'ethernet',
+  dst: BROADCAST_MAC,
+  src: mac(1),
+  payload: ripPacket(ripV1Response),
+};
+const ripV2Request: Frame = {
+  kind: 'ethernet',
+  dst: RIP_MAC,
+  src: mac(1),
+  payload: ripPacket(ripRequest(2)),
+};
+
 /** Every PDU kind the engine sends, by name. */
 const FRAMES: Record<string, Frame> = {
   'ARP request': arpRequest,
@@ -134,6 +158,10 @@ const FRAMES: Record<string, Frame> = {
   'HDLC echo': { kind: 'hdlc', payload: echo },
   'STP BPDU': bpdu,
   'STP topology change': { ...bpdu, payload: { kind: 'bpdu', type: 'tcn' } },
+  'RIPv2 response': ripV2,
+  'RIPv1 response': ripV1,
+  'RIPv2 request': ripV2Request,
+  'HDLC RIPv1 request': { kind: 'hdlc', payload: ripPacket(ripRequest(1)) },
   'DHCP Discover': dhcpFrame({ ...dhcpHeader, type: 'discover' }, true),
   'DHCP Offer': offer,
   'DHCP Request': dhcpFrame(
@@ -339,5 +367,117 @@ describe('dissect', () => {
     expect(field(dissection, 'bpdu.root')!.value).toBe(`32769 ${mac(3)}`);
     expect(bytesOf(dissection, 'bpdu.port')).toEqual([0x80, 0x01]);
     expect(bytesOf(dissection, 'bpdu.hello')).toEqual([2, 0]);
+  });
+});
+
+/** Where UDP starts in an untagged Ethernet frame: after 14 bytes of Ethernet and 20 of IPv4. */
+const UDP_START = 34;
+const RIP_START = UDP_START + 8;
+const ENTRY = 20;
+
+/** The UDP segment with the pseudo-header the checksum covers: addresses, protocol, length. */
+function pseudoAndUdp(bytes: Uint8Array) {
+  const udpLength = (bytes[UDP_START + 4]! << 8) | bytes[UDP_START + 5]!;
+  return [
+    ...bytes.slice(26, 34),
+    0,
+    17,
+    udpLength >> 8,
+    udpLength & 0xff,
+    ...bytes.slice(UDP_START, UDP_START + udpLength),
+  ];
+}
+
+describe('dissect a RIP message', () => {
+  it('stacks UDP at layer 4 and RIP at layer 7 over IPv4', () => {
+    const dissection = dissect(ripV2);
+    expect(dissection.layers.map((layer) => [layer.name, layer.osi])).toEqual([
+      ['Ethernet II', 2],
+      ['IPv4', 3],
+      ['UDP', 4],
+      ['RIPv2', 7],
+    ]);
+    expect(dissection.layers.at(-1)!.summary).toBe('Response, 3 routes');
+    expect(field(dissection, 'ipv4.protocol')!.value).toBe('17 (UDP)');
+    expect(bytesOf(dissection, 'ipv4.protocol')).toEqual([17]);
+  });
+
+  it('lays out a RIPv2 response: ports 520, a 72-byte datagram, and 20 bytes a route', () => {
+    const { bytes } = dissect(ripV2);
+    expect([...bytes.slice(UDP_START, UDP_START + 6)]).toEqual([0x02, 0x08, 0x02, 0x08, 0, 72]);
+    expect([...bytes.slice(16, 18)]).toEqual([0, 20 + 72]);
+    expect([...bytes.slice(RIP_START, RIP_START + 4)]).toEqual([2, 2, 0, 0]);
+    const route = (n: number) => [
+      ...bytes.slice(RIP_START + 4 + n * ENTRY, RIP_START + 4 + (n + 1) * ENTRY),
+    ];
+    expect(route(0)).toEqual([
+      ...[0, 2, 0, 0],
+      ...[192, 168, 1, 0],
+      ...[255, 255, 255, 0],
+      ...[0, 0, 0, 0],
+      ...[0, 0, 0, 1],
+    ]);
+    expect(route(1).slice(8, 12)).toEqual([255, 255, 255, 252]);
+    expect(route(2).slice(16)).toEqual([0, 0, 0, 16]);
+    expect(bytes.length).toBe(14 + 20 + 72 + 4);
+  });
+
+  it('writes a UDP checksum over the IPv4 pseudo-header', () => {
+    for (const frame of [ripV2, ripV1, ripV2Request]) {
+      const { bytes } = dissect(frame);
+      expect(internetChecksum(pseudoAndUdp(bytes))).toBe(0);
+    }
+    // Worked by hand for the request from 10.0.12.1 to 224.0.0.9.
+    const request = dissect(ripV2Request);
+    expect(bytesOf(request, 'udp.checksum')).toEqual([0x04, 0x82]);
+    expect(field(request, 'udp.checksum')!.value).toBe('0x0482');
+  });
+
+  it('names the ports and explains the fields of each route', () => {
+    const dissection = dissect(ripV2);
+    expect(field(dissection, 'udp.srcPort')!.value).toBe('520 (RIP)');
+    expect(field(dissection, 'udp.dstPort')!.explain).toMatch(/RIP on 520/);
+    expect(field(dissection, 'udp.length')!.value).toBe('72 bytes');
+    expect(field(dissection, 'rip.command')!.value).toBe('2 (response)');
+    expect(field(dissection, 'rip.1.address')!.label).toBe('Route 1 network');
+    expect(field(dissection, 'rip.1.mask')!.value).toBe('255.255.255.0 (/24)');
+    expect(field(dissection, 'rip.2.metric')!.value).toBe('2 hops');
+    expect(field(dissection, 'rip.3.metric')!.value).toBe('16 (unreachable)');
+    expect(field(dissection, 'rip.3.metric')!.explain).toMatch(/unreachable/);
+    expect(field(dissection, 'ipv4.dst')!.explain).toMatch(/RIPv2/);
+  });
+
+  it('explains the multicast MAC of RIPv2’s group', () => {
+    const explain = field(dissect(ripV2), 'ethernet.dst')!.explain;
+    expect(explain).toMatch(/224\.0\.0\.9/);
+    const other = { ...ripV2, dst: multicastMac('224.0.0.5' as Ipv4Address) };
+    expect(field(dissect(other), 'ethernet.dst')!.explain).toMatch(/multicast/);
+    expect(field(dissect(other), 'ethernet.dst')!.explain).not.toMatch(/RIP/);
+  });
+
+  it('leaves the mask and next hop of a RIPv1 route empty', () => {
+    const dissection = dissect(ripV1);
+    expect(dissection.layers.at(-1)!.name).toBe('RIPv1');
+    expect(bytesOf(dissection, 'rip.version')).toEqual([1]);
+    expect(bytesOf(dissection, 'rip.1.family')).toEqual([0, 2]);
+    expect(bytesOf(dissection, 'rip.1.mask')).toEqual([0, 0, 0, 0]);
+    expect(bytesOf(dissection, 'rip.1.nextHop')).toEqual([0, 0, 0, 0]);
+    expect(field(dissection, 'rip.1.mask')!.value).toBe('0.0.0.0 (none)');
+    expect(field(dissection, 'rip.1.mask')!.explain).toMatch(/no room for a mask/);
+    expect(field(dissection, 'ipv4.dst')!.value).toBe('255.255.255.255');
+  });
+
+  it('reads a request as one entry of family 0 and metric 16', () => {
+    const dissection = dissect(ripV2Request);
+    const { bytes } = dissection;
+    expect(dissection.layers.at(-1)!.summary).toBe('Request for the whole table');
+    expect([...bytes.slice(UDP_START + 4, UDP_START + 6)]).toEqual([0, 8 + 4 + ENTRY]);
+    expect([...bytes.slice(RIP_START, RIP_START + 4 + ENTRY)]).toEqual([
+      ...[1, 2, 0, 0],
+      ...new Array<number>(16).fill(0),
+      ...[0, 0, 0, 16],
+    ]);
+    expect(field(dissection, 'rip.command')!.value).toBe('1 (request)');
+    expect(field(dissection, 'rip.1.family')!.value).toBe('0 (whole table)');
   });
 });

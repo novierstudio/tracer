@@ -8,6 +8,8 @@ import {
   IP_PROTOCOL,
   LIMITED_BROADCAST,
   PVST_MAC,
+  RIP_GROUP,
+  RIP_INFINITY,
   UDP_PORT,
   UNKNOWN_MAC,
   UNREACHABLE_CODE,
@@ -23,7 +25,13 @@ import {
   type Ipv4Packet,
   type Ipv4Payload,
   type LeaseTime,
+  type RipEntry,
+  type RipMessage,
+  type RipVersion,
   type UdpDatagram,
+  type UdpPayload,
+  isMulticast,
+  multicastMac,
 } from '@/engine/pdu';
 import { formatSubnetMask, prefixMask, type Ipv4Address, type MacAddress } from '@/model';
 
@@ -46,6 +54,7 @@ export type LayerId =
   | 'quoted'
   | 'udp'
   | 'dhcp'
+  | 'rip'
   | 'bpdu'
   | 'hello';
 
@@ -306,6 +315,7 @@ type Part = Omit<Field, 'bytes'> & { readonly bytes: readonly number[] };
 const PORT_NAMES: Record<number, string> = {
   [UDP_PORT.dhcpServer]: 'DHCP server',
   [UDP_PORT.dhcpClient]: 'DHCP client',
+  [UDP_PORT.rip]: 'RIP',
 };
 
 const portName = (port: number) => {
@@ -315,7 +325,7 @@ const portName = (port: number) => {
 
 /** The UDP header's fields and then its payload's, with the checksum over the IPv4 pseudo-header. */
 function udpParts(packet: Ipv4Packet, datagram: UdpDatagram): Part[] {
-  const data = datagram.payload.kind === 'dhcp' ? dhcpParts(datagram.payload) : [];
+  const data = applicationParts(datagram.payload);
   const dataBytes = data.flatMap((part) => part.bytes);
   const length = 8 + dataBytes.length;
   const header = [...u16(datagram.srcPort), ...u16(datagram.dstPort), ...u16(length)];
@@ -341,7 +351,7 @@ function udpParts(packet: Ipv4Packet, datagram: UdpDatagram): Part[] {
       label: 'Destination port',
       value: portName(datagram.dstPort),
       explain:
-        'Names the program the datagram is for. DHCP servers listen on 67 and clients on 68.',
+        'Names the program the datagram is for. DHCP servers listen on 67, clients on 68, and RIP on 520.',
       bytes: u16(datagram.dstPort),
     },
     {
@@ -375,8 +385,26 @@ function udpLayers(wire: Wire, packet: Ipv4Packet, datagram: UdpDatagram): Layer
     summary: `${portName(datagram.srcPort)} → ${portName(datagram.dstPort)}`,
     fields: fields.slice(0, 4),
   };
-  const { payload } = datagram;
-  return payload.kind === 'dhcp' ? [udp, dhcpLayer(payload, fields.slice(4))] : [udp];
+  return [udp, applicationLayer(datagram.payload, fields.slice(4))];
+}
+
+/** The fields of what UDP carries, by its kind. */
+function applicationParts(payload: UdpPayload): Part[] {
+  switch (payload.kind) {
+    case 'dhcp':
+      return dhcpParts(payload);
+    case 'rip':
+      return ripParts(payload);
+  }
+}
+
+function applicationLayer(payload: UdpPayload, fields: readonly Field[]): Layer {
+  switch (payload.kind) {
+    case 'dhcp':
+      return dhcpLayer(payload, fields);
+    case 'rip':
+      return ripLayer(payload, fields);
+  }
 }
 
 // DHCP
@@ -651,6 +679,159 @@ function dhcpLayer(message: DhcpMessage, fields: readonly Field[]): Layer {
   return { id: 'dhcp', osi: 7, name: 'DHCP', summary: dhcpSummary(message), fields };
 }
 
+// RIP
+
+const RIP_COMMAND = { request: 1, response: 2 } as const;
+
+/** RIP's address family for IPv4 routes. A request for the whole table uses 0. */
+const AF_INET = 2;
+
+const ZEROS = [0, 0, 0, 0];
+
+const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? '' : 's'}`;
+
+/** An entry's six fields, in wire order: its value, explanation and bytes. */
+type EntryText = Record<
+  'family' | 'tag' | 'address' | 'mask' | 'nextHop' | 'metric',
+  readonly [value: string, explain: string, bytes: readonly number[]]
+>;
+
+const ENTRY_LABELS: Record<keyof EntryText, string> = {
+  family: 'family',
+  tag: 'tag',
+  address: 'network',
+  mask: 'mask',
+  nextHop: 'next hop',
+  metric: 'metric',
+};
+
+function entryParts(label: string, index: number, text: EntryText): Part[] {
+  return (Object.keys(ENTRY_LABELS) as (keyof EntryText)[]).map((key) => {
+    const [value, explain, bytes] = text[key];
+    return {
+      id: `rip.${index + 1}.${key}`,
+      label: `${label} ${ENTRY_LABELS[key]}`,
+      value,
+      explain,
+      bytes,
+    };
+  });
+}
+
+const EMPTY = 'Empty: a request for the whole table names no route.';
+
+/** A request's one entry, family 0 and metric 16, which asks for everything. */
+function requestParts(): Part[] {
+  return entryParts('Entry', 0, {
+    family: [
+      '0 (whole table)',
+      'Family 0 with metric 16, in a request’s only entry, asks for every route the neighbour has.',
+      u16(0),
+    ],
+    tag: ['0', EMPTY, u16(0)],
+    address: ['0.0.0.0', EMPTY, ZEROS],
+    mask: ['0.0.0.0', EMPTY, ZEROS],
+    nextHop: ['0.0.0.0', EMPTY, ZEROS],
+    metric: [
+      String(RIP_INFINITY),
+      'Metric 16 completes the “send me everything” pattern.',
+      u32(RIP_INFINITY),
+    ],
+  });
+}
+
+function routeParts(version: RipVersion, entry: RipEntry, index: number): Part[] {
+  const { network, metric, prefixLength } = entry;
+  const v2 = version === 2;
+  const mask = v2 ? prefixLength : undefined;
+  return entryParts(`Route ${index + 1}`, index, {
+    family: [`${AF_INET} (IPv4)`, 'Says the entry is an IPv4 route.', u16(AF_INET)],
+    tag: [
+      '0',
+      v2
+        ? 'Marks a route that came from another routing protocol. 0: RIP learned it itself.'
+        : 'RIPv1 has no route tags: these bytes must be zero.',
+      u16(0),
+    ],
+    address: [
+      network,
+      network === '0.0.0.0'
+        ? 'The default route: the way to every network the receiver has no better route for.'
+        : 'The network this route leads to.',
+      ipBytes(network),
+    ],
+    mask: [
+      mask === undefined ? '0.0.0.0 (none)' : `${formatSubnetMask(mask)} (/${mask})`,
+      v2
+        ? 'The network’s mask. RIPv2 sends it, so subnets of one classful network can each have a route.'
+        : 'RIPv1 has no room for a mask, so the receiver assumes one: its own interface’s mask inside that classful network, else the class A, B or C mask.',
+      mask === undefined ? ZEROS : ipBytes(formatSubnetMask(mask) as Ipv4Address),
+    ],
+    nextHop: [
+      '0.0.0.0',
+      v2
+        ? 'Next hop 0.0.0.0 means: send traffic for this network to me, the router that sent this update.'
+        : 'RIPv1 has no next hop field: these bytes must be zero.',
+      ZEROS,
+    ],
+    metric:
+      metric >= RIP_INFINITY
+        ? [
+            `${metric} (unreachable)`,
+            '16 means unreachable: RIP counts no further. A router poisons a route it lost this way, so its neighbours drop it at once instead of waiting for it to time out.',
+            u32(metric),
+          ]
+        : [
+            plural(metric, 'hop'),
+            'Hops from the sender to the network, counting the sender. The receiver passes it on one higher, and 15 is as far as RIP counts.',
+            u32(metric),
+          ],
+  });
+}
+
+function ripParts(message: RipMessage): Part[] {
+  const request = message.command === 'request';
+  return [
+    {
+      id: 'rip.command',
+      label: 'Command',
+      value: `${RIP_COMMAND[message.command]} (${message.command})`,
+      explain: request
+        ? 'A request asks the neighbours to send their whole routing table now. A router sends one when RIP starts on an interface.'
+        : 'A response carries routes: a regular update, a triggered update after a change, or the answer to a request.',
+      bytes: [RIP_COMMAND[message.command]],
+    },
+    {
+      id: 'rip.version',
+      label: 'Version',
+      value: String(message.version),
+      explain:
+        message.version === 2
+          ? 'RIPv2 sends each route’s subnet mask, and sends to the multicast group 224.0.0.9 so only RIP routers take it.'
+          : 'RIPv1 sends no masks, and broadcasts to every host on the network.',
+      bytes: [message.version],
+    },
+    {
+      id: 'rip.unused',
+      label: 'Unused',
+      value: '0',
+      explain: 'Two bytes RIP leaves empty.',
+      bytes: [0, 0],
+    },
+    ...(message.command === 'request'
+      ? requestParts()
+      : message.entries.flatMap((entry, index) => routeParts(message.version, entry, index))),
+  ];
+}
+
+function ripLayer(message: RipMessage, fields: readonly Field[]): Layer {
+  const summary =
+    message.command === 'request'
+      ? 'Request for the whole table'
+      : `Response, ${plural(message.entries.length, 'route')}`;
+  return { id: 'rip', osi: 7, name: `RIPv${message.version}`, summary, fields };
+}
+
 // IPv4
 
 const IP_PROTOCOL_NAMES: Record<Ipv4Payload['kind'], string> = { icmp: 'ICMP', udp: 'UDP' };
@@ -661,9 +842,15 @@ function describeIpAddress(address: Ipv4Address, role: 'src' | 'dst') {
       ? 'All zeros: the sender has no address yet, as a DHCP client asking for one.'
       : 'The device that created the packet. It stays the same all the way.';
   }
-  return address === LIMITED_BROADCAST
-    ? 'All ones: every host on this network. Routers never pass it on to another network.'
-    : 'Where the packet is going. Every router looks it up in its routing table.';
+  if (address === LIMITED_BROADCAST) {
+    return 'All ones: every host on this network. Routers never pass it on to another network.';
+  }
+  if (address === RIP_GROUP)
+    return 'The group every RIPv2 router listens to. It never leaves the link.';
+  if (isMulticast(address)) {
+    return 'A multicast group: only the devices that joined it take the packet, and routers keep it on its link.';
+  }
+  return 'Where the packet is going. Every router looks it up in its routing table.';
 }
 
 function ipv4Layers(wire: Wire, packet: Ipv4Packet): Layer[] {
@@ -960,6 +1147,12 @@ function describeMac(mac: MacAddress, role: 'dst' | 'src') {
   }
   if (mac === BROADCAST_MAC) return 'All ones: a broadcast, which every device on the LAN takes.';
   if (mac === PVST_MAC) return 'Cisco’s spanning tree address: only switches listen for it.';
+  if (mac === multicastMac(RIP_GROUP)) {
+    return 'The MAC of the IPv4 group 224.0.0.9: only routers running RIPv2 take it.';
+  }
+  if (mac.startsWith('01:00:5e')) {
+    return 'An IPv4 multicast MAC: 01:00:5e and the group’s last 23 bits. Only devices in the group take it.';
+  }
   return 'The next device on this LAN that should take the frame. A router rewrites it at every hop.';
 }
 

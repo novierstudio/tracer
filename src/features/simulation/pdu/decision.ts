@@ -4,9 +4,13 @@ import { ingressVlan } from '@/engine/l2/switching';
 import {
   BROADCAST_MAC,
   LIMITED_BROADCAST,
+  multicastMac,
+  RIP_GROUP,
   type ArpPacket,
   type DhcpMessage,
   type Ipv4Packet,
+  type RipMessage,
+  type RipVersion,
 } from '@/engine/pdu';
 import { shortPortName } from '@/features/canvas/cables';
 import type { Device, Ipv4Address, MacAddress, PortId, VlanId } from '@/model';
@@ -27,6 +31,8 @@ export type Decision =
   | { kind: 'learned'; ip: Ipv4Address; mac: MacAddress; released: readonly PortId[] }
   | { kind: 'received'; message: 'echo-reply' | 'time-exceeded' | 'unreachable'; from: Ipv4Address }
   | { kind: 'dhcp'; step: DhcpStep }
+  /** A router running RIP read a RIP message. `out` are the ports it sent RIP routes out of. */
+  | { kind: 'rip'; command: RipMessage['command']; version: RipVersion; out: readonly PortId[] }
   | { kind: 'dropped'; reason: DropReason; notified?: PortId }
   | { kind: 'ignored'; reason: IgnoreReason }
   | { kind: 'silent' };
@@ -63,7 +69,9 @@ export type IgnoreReason =
   | { kind: 'bpdu' }
   | { kind: 'own-mac' }
   | { kind: 'dhcp-for-other'; client: MacAddress }
-  | { kind: 'dhcp-not-server'; message: DhcpMessage['type'] };
+  | { kind: 'dhcp-not-server'; message: DhcpMessage['type'] }
+  | { kind: 'no-rip' }
+  | { kind: 'rip-version'; version: RipVersion; accepts: RipVersion };
 
 const ipv4Of = (frame: Frame): Ipv4Packet | undefined =>
   frame.kind === 'hdlc'
@@ -79,6 +87,45 @@ const dhcpOf = (frame: Frame): DhcpMessage | undefined => {
 
 const arpOf = (frame: Frame): ArpPacket | undefined =>
   frame.kind === 'ethernet' && frame.payload.kind === 'arp' ? frame.payload : undefined;
+
+/**
+ * The RIP message in a frame, when it is for this device: sent to RIPv2's group, broadcast, or
+ * to one of its addresses.
+ */
+function ripFor(device: Device, frame: Frame): RipMessage | undefined {
+  const packet = ipv4Of(frame);
+  if (packet?.payload.kind !== 'udp' || packet.payload.payload.kind !== 'rip') return undefined;
+  const local =
+    packet.dst === RIP_GROUP ||
+    packet.dst === LIMITED_BROADCAST ||
+    ownAddresses(device).includes(packet.dst);
+  return local ? packet.payload.payload : undefined;
+}
+
+const RIP_MAC = multicastMac(RIP_GROUP);
+
+const sendsRip = (frame: Frame) => {
+  const payload = ipv4Of(frame)?.payload;
+  return payload?.kind === 'udp' && payload.payload.kind === 'rip';
+};
+
+/** A router without `version` reads either version; with one, only that version. */
+function decideRip(device: Device, message: RipMessage, sent: readonly SentFrame[]): Decision {
+  const rip = device.kind === 'router' ? device.config.rip : undefined;
+  if (!rip) return { kind: 'ignored', reason: { kind: 'no-rip' } };
+  if (rip.version !== undefined && rip.version !== message.version) {
+    return {
+      kind: 'ignored',
+      reason: { kind: 'rip-version', version: message.version, accepts: rip.version },
+    };
+  }
+  return {
+    kind: 'rip',
+    command: message.command,
+    version: message.version,
+    out: sent.filter((s) => sendsRip(s.frame)).map((s) => s.port),
+  };
+}
 
 const isGroup = (mac: MacAddress) => (parseInt(mac.slice(0, 2), 16) & 1) === 1;
 
@@ -314,9 +361,14 @@ export function decide(event: FrameEvent, device: Device | undefined): Decision 
   if (frame.kind === 'ethernet' && frame.payload.kind === 'bpdu') {
     return { kind: 'ignored', reason: { kind: 'bpdu' } };
   }
-  if (frame.kind === 'ethernet' && frame.dst !== BROADCAST_MAC && !ownMac(device, frame.dst)) {
+  const rip = ripFor(device, frame);
+  const local =
+    frame.kind !== 'ethernet' || frame.dst === BROADCAST_MAC || ownMac(device, frame.dst);
+  // Every device sees the RIPv2 group's frames, so it can say whether it runs RIP.
+  if (!local && !(rip && frame.dst === RIP_MAC)) {
     return { kind: 'ignored', reason: { kind: 'other-mac', dst: frame.dst } };
   }
+  if (rip) return decideRip(device, rip, sent);
   const arp = arpOf(frame);
   if (arp) return decideArp(device, arp, sent);
   const packet = ipv4Of(frame);
@@ -446,7 +498,23 @@ function describeIgnore(name: string, reason: IgnoreReason) {
       return `${name} ignored it: it is for DHCP client ${reason.client}, not ${name}.`;
     case 'dhcp-not-server':
       return `${name} ignored it: only a DHCP server answers ${DHCP_NAMES[reason.message]}.`;
+    case 'no-rip':
+      return `${name} ignored it: it is a RIP message, and ${name} does not run RIP.`;
+    case 'rip-version':
+      return `${name} ignored it: it is RIPv${reason.version}, and ${name} is set to RIP version ${reason.accepts} only.`;
   }
+}
+
+function describeRip(name: string, { command, version, out }: Extract<Decision, { kind: 'rip' }>) {
+  const ports = list(out);
+  if (command === 'request') {
+    return out.length > 0
+      ? `${name} read the RIPv${version} request and answered with its table out ${ports}.`
+      : `${name} read the RIPv${version} request for its whole table.`;
+  }
+  return out.length > 0
+    ? `${name} read the RIPv${version} update and sent a triggered update out ${ports}.`
+    : `${name} read the RIPv${version} update.`;
 }
 
 /** The decision as one sentence a student can read, with `name` the device's hostname. */
@@ -487,6 +555,8 @@ export function describeDecision(decision: Decision, name: string): string {
       return describeReceived(name, decision);
     case 'dhcp':
       return describeDhcp(name, decision.step);
+    case 'rip':
+      return describeRip(name, decision);
     case 'dropped':
       return describeDrop(name, decision);
     case 'ignored':

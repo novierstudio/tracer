@@ -10,6 +10,7 @@ import {
   MinusIcon,
   NetworkIcon,
   ReplyIcon,
+  RouteIcon,
   SearchIcon,
   Share2Icon,
   XIcon,
@@ -46,11 +47,12 @@ const DECISION_LOOK: Record<Decision['kind'], { icon: LucideIcon; tone: Tone; la
     learned: { icon: BookmarkCheckIcon, tone: 'accent', layer: ['arp'] },
     received: { icon: CircleCheckIcon, tone: 'ok', layer: ['icmp'] },
     dhcp: { icon: ReplyIcon, tone: 'accent', layer: ['dhcp'] },
+    rip: { icon: RouteIcon, tone: 'accent', layer: ['rip'] },
     dropped: { icon: CircleXIcon, tone: 'err', layer: ['dhcp', 'ipv4', 'dot1q', 'ethernet'] },
     ignored: {
       icon: EyeOffIcon,
       tone: 'muted',
-      layer: ['arp', 'dhcp', 'ipv4', 'bpdu', 'ethernet'],
+      layer: ['arp', 'dhcp', 'rip', 'ipv4', 'bpdu', 'ethernet'],
     },
     silent: { icon: MinusIcon, tone: 'muted', layer: [] },
   };

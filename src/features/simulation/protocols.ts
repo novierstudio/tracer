@@ -1,6 +1,14 @@
 import type { FrameEvent } from '@/engine/events';
 import type { Frame } from '@/engine/frame';
-import type { ArpPacket, Bpdu, DhcpMessage, IcmpMessage, Ipv4Packet } from '@/engine/pdu';
+import type {
+  ArpPacket,
+  Bpdu,
+  DhcpMessage,
+  IcmpMessage,
+  Ipv4Packet,
+  RipMessage,
+  UdpDatagram,
+} from '@/engine/pdu';
 
 /** The protocol a frame shows as: the innermost one the engine models. */
 export type ProtocolId = 'arp' | 'icmp' | 'dhcp' | 'rip' | 'stp' | 'hello';
@@ -103,10 +111,24 @@ function describeDhcp(message: DhcpMessage): string {
   }
 }
 
+function describeRip(packet: Ipv4Packet, message: RipMessage): string {
+  if (message.command === 'request') return `RIPv${message.version} request for the whole table`;
+  const routes = message.entries.length;
+  return `RIPv${message.version} response, ${routes} route${routes === 1 ? '' : 's'} ${packet.src} → ${packet.dst}`;
+}
+
+function describeUdp(packet: Ipv4Packet, datagram: UdpDatagram): string {
+  switch (datagram.payload.kind) {
+    case 'dhcp':
+      return describeDhcp(datagram.payload);
+    case 'rip':
+      return describeRip(packet, datagram.payload);
+  }
+}
+
 function describePacket(packet: Ipv4Packet): string {
   const { payload } = packet;
-  if (payload.kind === 'icmp') return describeIcmp(packet, payload);
-  return payload.payload.kind === 'dhcp' ? describeDhcp(payload.payload) : 'RIP';
+  return payload.kind === 'icmp' ? describeIcmp(packet, payload) : describeUdp(packet, payload);
 }
 
 /** The Info column: what the frame says, in a line a student can read. */
