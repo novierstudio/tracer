@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { PingEvent } from '@/engine/api';
+import type { FetchEvent, PingEvent } from '@/engine/api';
 import { ms, simTime } from '@/engine/core/time';
 import { createEngine } from '@/engine/engine';
 import { createSimService } from '@/engine/service';
@@ -18,6 +18,7 @@ const HEADLINE_PING: Record<string, string> = {
   'stp-triangle': '192.168.1.11',
   'dhcp-router': '192.168.1.1',
   'ospf-three-routers': '192.168.3.10',
+  'dns-web-server': '192.168.1.20',
 };
 
 async function load(id: string): Promise<Topology> {
@@ -94,5 +95,23 @@ describe.each(SAMPLE_LABS)('$title', (sample) => {
   it(`answers PC1's ping to ${HEADLINE_PING[sample.id]}`, async () => {
     const summary = ping(await load(sample.id), HEADLINE_PING[sample.id]!);
     expect(summary).toMatchObject({ kind: 'summary', sent: 4, received: 4 });
+  });
+});
+
+it('DNS and a web server: PC1 browses to www.lab.local by name and gets Server1’s page', async () => {
+  const topology = await load('dns-web-server');
+  const engine = createEngine({ seed: 1, stacks: STACKS, linkDelay: ms(1) });
+  const sim = createSimService({ engine, frames: { now: () => 0, request: () => {} } });
+  sim.load(topology);
+  engine.runUntil(SETTLED);
+  const pc1 = Object.values(topology.devices).find((d) => d.config.hostname === 'PC1')!;
+  const events: FetchEvent[] = [];
+  sim.browse(pc1.id, { host: 'www.lab.local', port: 80, path: '/' }, (e) => events.push(e));
+  while (!events.some((e) => e.kind === 'response' || e.kind === 'failed')) engine.step();
+
+  expect(events.map((e) => e.kind)).toEqual(['resolving', 'connecting', 'response']);
+  expect(events.at(-1)).toMatchObject({
+    kind: 'response',
+    response: { status: 200, body: expect.stringContaining('Welcome to www.lab.local') },
   });
 });

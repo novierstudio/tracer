@@ -14,6 +14,7 @@ import {
   DeviceId,
   emptyTopology,
   Hostname,
+  DnsRecord,
   Ipv4Address,
   Ipv4Cidr,
   LinkId,
@@ -22,6 +23,7 @@ import {
   updateConfig,
   type Device,
   type Link,
+  type ServerServices,
   type Topology,
 } from '@/model';
 import { SAMPLE_LABS } from './catalog';
@@ -81,14 +83,24 @@ function labBuilder(id: string) {
       topology = unwrap(updateConfig(topology, toConfigUpdate({ ...device, config } as IosDevice)));
     },
 
-    pc(name: string, x: number, y: number, address: string, gateway?: string) {
+    pc(name: string, x: number, y: number, address: string, gateway?: string, dns?: string) {
       add(name, 'pc', x, y, (device) => {
         if (device.kind !== 'pc') throw new Error(`${name} is not a PC`);
         device.config.ipv4 = {
           mode: 'static',
           address: cidr(address),
           gateway: gateway === undefined ? undefined : Ipv4Address.parse(gateway),
+          ...(dns !== undefined && { dns: Ipv4Address.parse(dns) }),
         };
+      });
+    },
+
+    /** A server with a static address and the services its Services tab would set. */
+    server(name: string, x: number, y: number, address: string, services: ServerServices) {
+      add(name, 'server', x, y, (device) => {
+        if (device.kind !== 'server') throw new Error(`${name} is not a server`);
+        device.config.ipv4 = { mode: 'static', address: cidr(address) };
+        device.config.services = services;
       });
     },
 
@@ -452,6 +464,50 @@ function ospfThreeRouters() {
   return lab.topology;
 }
 
+const LAB_PAGE = `<!doctype html>
+<html>
+  <head>
+    <title>Lab Web</title>
+    <style>
+      body { font-family: system-ui, sans-serif; margin: 2rem; line-height: 1.5; }
+      h1 { color: #2563eb; }
+    </style>
+  </head>
+  <body>
+    <h1>Welcome to www.lab.local</h1>
+    <p>Server1 sent this page over HTTP. Before it could ask, PC1 looked up the name with DNS.</p>
+  </body>
+</html>
+`;
+
+function dnsWebServer() {
+  const lab = labBuilder('dns-web-server');
+  lab.ios('SW1', 'switch-24', 232, 40, []);
+  lab.pc('PC1', 40, 232, '192.168.1.10/24', undefined, '192.168.1.20');
+  lab.server('Server1', 424, 232, '192.168.1.20/24', {
+    dns: {
+      enabled: true,
+      records: [DnsRecord.parse({ name: 'www.lab.local', address: '192.168.1.20' })],
+    },
+    http: { enabled: true, indexHtml: LAB_PAGE },
+  });
+  lab.cable(['PC1', 'FastEthernet0'], ['SW1', 'FastEthernet0/1']);
+  lab.cable(['Server1', 'GigabitEthernet0'], ['SW1', 'GigabitEthernet0/1']);
+  lab.note(
+    'dns',
+    544,
+    -16,
+    'Server1 runs DNS, with one A record: www.lab.local is 192.168.1.20. PC1 uses it as its DNS server.',
+  );
+  lab.note(
+    'http',
+    544,
+    120,
+    'Server1 also runs HTTP. Browsing to http://www.lab.local is a DNS lookup, then a TCP handshake, then an HTTP GET.',
+  );
+  return lab.topology;
+}
+
 export const BUILDERS: Record<string, () => Topology> = {
   'two-pcs-switch': twoPcsSwitch,
   'two-lans-router': twoLansRouter,
@@ -461,4 +517,5 @@ export const BUILDERS: Record<string, () => Topology> = {
   'stp-triangle': stpTriangle,
   'dhcp-router': dhcpRouter,
   'ospf-three-routers': ospfThreeRouters,
+  'dns-web-server': dnsWebServer,
 };

@@ -140,6 +140,21 @@ export const SAMPLE_LABS: readonly SampleLab[] = [
     ],
     load: () => import('./ospf-three-routers.tracer.json?raw').then(text),
   },
+  {
+    id: 'dns-web-server',
+    title: 'DNS and a web server',
+    description:
+      'Server1 runs DNS and HTTP. PC1 browses to www.lab.local by name: it asks DNS for the address, opens a TCP connection, and fetches the page over HTTP.',
+    difficulty: 'beginner',
+    devices: { switch: 1, pc: 1, server: 1 },
+    tryThis: [
+      'Open PC1’s Web Browser on its Desktop and go to `http://www.lab.local`',
+      'Run `nslookup www.lab.local` in PC1’s Command Prompt',
+      'Switch to Simulation mode, load the page again, and step through DNS, then TCP, then HTTP',
+      'Edit index.html in Server1’s Services tab, then reload the page on PC1',
+    ],
+    load: () => import('./dns-web-server.tracer.json?raw').then(text),
+  },
 ];
 
 export const DIFFICULTY_LABELS: Record<Difficulty, string> = {
