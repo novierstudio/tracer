@@ -115,9 +115,10 @@ test('sets an address in IP Configuration, then pings from the Command Prompt', 
   await inspector.getByRole('tab', { name: 'Desktop' }).click();
 
   await inspector.getByRole('button', { name: /IP Configuration/ }).click();
-  await inspector.getByRole('textbox', { name: 'IP address' }).fill('192.168.1.10');
-  await inspector.getByRole('textbox', { name: 'Subnet mask' }).fill('255.255.255.0');
-  await inspector.getByRole('button', { name: 'Apply' }).click();
+  const ipv4 = inspector.getByRole('form', { name: 'IP configuration', exact: true });
+  await ipv4.getByRole('textbox', { name: 'IP address' }).fill('192.168.1.10');
+  await ipv4.getByRole('textbox', { name: 'Subnet mask' }).fill('255.255.255.0');
+  await ipv4.getByRole('button', { name: 'Apply' }).click();
   await expect
     .poll(() =>
       page.evaluate(
@@ -147,7 +148,7 @@ test('sets an address in IP Configuration, then pings from the Command Prompt', 
     .poll(wide.rows)
     .toEqual(
       expect.arrayContaining([
-        'C:\\>ipconfig',
+        '   IPv6 Address. . . . . . . . . . . : ::',
         '   IPv4 Address. . . . . . . . . . . : 192.168.1.10',
         '   Subnet Mask . . . . . . . . . . . : 255.255.255.0',
       ]),
