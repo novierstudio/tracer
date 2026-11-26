@@ -66,6 +66,9 @@ function lab() {
     ping: async (...args) => sim.ping(...args),
     traceroute: async (...args) => sim.traceroute(...args),
     cancel: async (handle) => sim.cancel(handle),
+    openTerminal: async (...args) => sim.openTerminal(...args),
+    terminalSend: async (handle, text) => sim.terminalSend(handle, text),
+    terminalClose: async (handle, server) => sim.terminalClose(handle, server),
   };
   const consoles = createConsoleRegistry(store, async () => queries);
   /** Runs until spanning tree forwards: a port a config change moved into a VLAN starts over. */

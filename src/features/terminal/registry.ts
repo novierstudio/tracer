@@ -2,7 +2,8 @@ import { openConsole } from '@/cli';
 import type { DeviceId } from '@/model';
 import { editorStore, type EditorStore } from '@/model/store';
 import type { SimClient } from '@/engine/client';
-import { deviceTerminal, type EngineLink, type SimLink } from './session';
+import { createVtyRegistry, deviceStack, type VtyRegistry } from './remote';
+import type { EngineLink, SimLink } from './session';
 import { createTty, type Tty } from './tty';
 
 /** One console per router or switch, kept while the device exists. */
@@ -11,8 +12,15 @@ export interface ConsoleRegistry {
   get(device: DeviceId): Tty | undefined;
 }
 
-/** `engine` reaches the simulation for show commands that read live state. */
-export function createConsoleRegistry(store: EditorStore, engine?: EngineLink): ConsoleRegistry {
+/**
+ * `engine` reaches the simulation for show commands that read live state, and for Telnet and SSH.
+ * `vty` holds the remote sessions open on each device, shared with every other terminal.
+ */
+export function createConsoleRegistry(
+  store: EditorStore,
+  engine?: EngineLink,
+  vty: VtyRegistry = createVtyRegistry(),
+): ConsoleRegistry {
   const ttys = new Map<DeviceId, Tty>();
   store.subscribe(({ topology }) => {
     for (const id of ttys.keys()) if (!(id in topology.devices)) ttys.delete(id);
@@ -24,7 +32,8 @@ export function createConsoleRegistry(store: EditorStore, engine?: EngineLink): 
       const device = store.getState().topology.devices[id];
       if (device?.kind !== 'router' && device?.kind !== 'switch') return undefined;
       const { session, greeting } = openConsole(device);
-      const tty = createTty(deviceTerminal(store, id, session, engine), greeting);
+      const stack = deviceStack({ store, engine, vty }, { id, session });
+      const tty = createTty(stack.session, greeting);
       ttys.set(id, tty);
       return tty;
     },
@@ -32,7 +41,7 @@ export function createConsoleRegistry(store: EditorStore, engine?: EngineLink): 
 }
 
 /** The client's calls a console makes, and the simulated clock as its batches report it. */
-function linkTo({ sim, onBatch, ping, traceroute }: SimClient): SimLink {
+function linkTo({ sim, onBatch, ping, traceroute, openTerminal }: SimClient): SimLink {
   let now = 0;
   // A playing simulation sends a batch every frame, and a paused one's clock stands still.
   onBatch((batch) => void (now = batch.now));
@@ -52,6 +61,9 @@ function linkTo({ sim, onBatch, ping, traceroute }: SimClient): SimLink {
     ping,
     traceroute,
     cancel: (handle) => sim.cancel(handle),
+    openTerminal,
+    terminalSend: (handle, text) => sim.terminalSend(handle, text),
+    terminalClose: (handle, server) => sim.terminalClose(handle, server),
   };
 }
 
@@ -61,9 +73,12 @@ let appLink: Promise<SimLink> | undefined;
  * The app's simulation. startEngine returns the client the app already started, so this connects
  * to the running worker rather than starting another.
  */
-const appEngine: EngineLink = () =>
+export const appEngine: EngineLink = () =>
   (appLink ??= import('@/engine/client')
     .then(({ startEngine }) => startEngine(editorStore))
     .then(linkTo));
 
-export const consoles = createConsoleRegistry(editorStore, appEngine);
+/** The Telnet and SSH sessions open on the app's devices, whichever terminal opened them. */
+export const vtySessions = createVtyRegistry();
+
+export const consoles = createConsoleRegistry(editorStore, appEngine, vtySessions);

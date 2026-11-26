@@ -1,8 +1,16 @@
-export type { IosDevice, Pending, RouterDevice, SwitchDevice } from './device/context';
+export type {
+  IosDevice,
+  Pending,
+  RemoteRequest,
+  RouterDevice,
+  SessionLine,
+  SwitchDevice,
+} from './device/context';
 export {
   applyLines,
   createDeviceSession,
   openConsole,
+  openVty,
   toConfigUpdate,
   withBlankConfig,
   type ApplyResult,
@@ -11,6 +19,7 @@ export {
   type LineError,
   type SessionResult,
   type SessionState,
+  type VtyOpening,
 } from './device/session';
 export { CLOCK_RATES } from './device/commands';
 export {
@@ -24,6 +33,7 @@ export {
   type OutputStream,
   type PortStates,
   type StreamSource,
+  type VtySession,
 } from './device/query';
 export { runningConfig, UNSUPPORTED_MARKER } from './device/show';
 export { formatError, formatHelp } from './format';
