@@ -1,5 +1,6 @@
 import type { Ipv4Address, MacAddress, PrefixLength, VlanId } from '@/model';
 import type { DnsMessage } from './dns';
+import type { Ipv6Packet } from './pdu6';
 import type { TcpSegment } from './tcp';
 
 /**
@@ -28,12 +29,13 @@ export type EthernetFrame = {
   readonly payload: EthernetPayload;
 };
 
-export type EthernetPayload = ArpPacket | Ipv4Packet | Bpdu;
+export type EthernetPayload = ArpPacket | Ipv4Packet | Ipv6Packet | Bpdu;
 
 /** A BPDU has no EtherType: it rides in an 802.3 frame with an LLC and SNAP header instead. */
 export const ETHER_TYPE = {
   arp: 0x0806,
   ipv4: 0x0800,
+  ipv6: 0x86dd,
 } as const satisfies Record<Exclude<EthernetPayload['kind'], 'bpdu'>, number>;
 
 export const DOT1Q_TPID = 0x8100;
@@ -282,7 +284,7 @@ export type ConfigBpdu = {
 export type TcnBpdu = { readonly kind: 'bpdu'; readonly type: 'tcn' };
 
 /** A frame on a serial link. Cisco HDLC needs no addresses: the link has one peer. */
-export type HdlcFrame = { readonly kind: 'hdlc'; readonly payload: Ipv4Packet };
+export type HdlcFrame = { readonly kind: 'hdlc'; readonly payload: Ipv4Packet | Ipv6Packet };
 
 /** Every OSPF router on a link listens to this group: hellos go here. */
 export const ALL_SPF_ROUTERS = '224.0.0.5' as Ipv4Address;

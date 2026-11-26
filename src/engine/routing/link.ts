@@ -20,11 +20,9 @@ export type Arrival = {
 
 /** The IPv4 packet a frame carries, if any. */
 export const packetIn = (frame: Frame): Ipv4Packet | undefined =>
-  frame.kind === 'hdlc'
+  (frame.kind === 'hdlc' || frame.kind === 'ethernet') && frame.payload.kind === 'ipv4'
     ? frame.payload
-    : frame.kind === 'ethernet' && frame.payload.kind === 'ipv4'
-      ? frame.payload
-      : undefined;
+    : undefined;
 
 /**
  * The IPv4 packet in a frame that arrived on `port`, when the frame is for this device: anything
@@ -40,7 +38,7 @@ export function arrival(
 ): Arrival | undefined {
   if (frame.kind === 'hdlc') {
     const iface = serialOn(interfaces, port);
-    return iface && { iface, packet: frame.payload };
+    return iface && frame.payload.kind === 'ipv4' ? { iface, packet: frame.payload } : undefined;
   }
   if (frame.kind !== 'ethernet' || frame.payload.kind !== 'ipv4') return undefined;
   const iface = lanInterfaceFor(ctx, interfaces, port, frame);

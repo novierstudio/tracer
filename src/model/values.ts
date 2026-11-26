@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { IPV6_BITS, readIpv6, type Ipv6Address as Ipv6AddressBrand } from './ipv6';
 
 export const Ipv4Address = z.ipv4('Invalid IPv4 address').brand<'Ipv4Address'>();
 export type Ipv4Address = z.infer<typeof Ipv4Address>;
@@ -12,6 +13,25 @@ export type PrefixLength = z.infer<typeof PrefixLength>;
 
 export const Ipv4Cidr = z.object({ address: Ipv4Address, prefixLength: PrefixLength });
 export type Ipv4Cidr = z.infer<typeof Ipv4Cidr>;
+
+/** An IPv6 address in any valid text form, kept in its canonical compressed lower-case form. */
+export const Ipv6Address = z.string().transform((text, ctx): Ipv6AddressBrand => {
+  const address = readIpv6(text);
+  if (address) return address;
+  ctx.addIssue({ code: 'custom', message: 'Invalid IPv6 address' });
+  return z.NEVER;
+});
+export type Ipv6Address = Ipv6AddressBrand;
+
+/** An IPv6 address and prefix length. Helpers that work on it live in `./ipv6`. */
+export const Ipv6Cidr = z.object({
+  address: Ipv6Address,
+  prefixLength: z
+    .int('Prefix length must be a whole number')
+    .min(0, 'Prefix length must be between 0 and 128')
+    .max(IPV6_BITS, 'Prefix length must be between 0 and 128'),
+});
+export type Ipv6Cidr = z.infer<typeof Ipv6Cidr>;
 
 /** `10.0.0.1` as the 32-bit number 167772161. */
 export function ipv4ToUint32(address: string): number {

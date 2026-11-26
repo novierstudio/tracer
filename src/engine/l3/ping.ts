@@ -1,4 +1,5 @@
 import type { Ipv4Address } from '@/model';
+import type { IpAddress } from '@/model/ipv6';
 import { ms } from '../core/time';
 import type { UnreachableCode } from '../pdu';
 import { timerKey, type IpContext } from './context';
@@ -18,7 +19,7 @@ export type PingReply =
   | {
       readonly kind: 'reply';
       readonly seq: number;
-      readonly from: Ipv4Address;
+      readonly from: IpAddress;
       readonly bytes: number;
       readonly timeMs: number;
       readonly ttl: number;
@@ -28,14 +29,14 @@ export type PingReply =
   | {
       readonly kind: 'unreachable';
       readonly seq: number;
-      readonly from: Ipv4Address;
+      readonly from: IpAddress;
       readonly code: UnreachableCode;
     }
-  | { readonly kind: 'ttl-expired'; readonly seq: number; readonly from: Ipv4Address };
+  | { readonly kind: 'ttl-expired'; readonly seq: number; readonly from: IpAddress };
 
 export type PingSummary = {
   readonly kind: 'summary';
-  readonly target: Ipv4Address;
+  readonly target: IpAddress;
   readonly sent: number;
   /** Echo replies only. Windows also counts unreachable messages as received; this does not. */
   readonly received: number;
@@ -58,7 +59,7 @@ export type PingSession = EchoProbe & {
 
 /** The summary of `sent` requests whose replies took `times`. */
 export function pingSummary(
-  target: Ipv4Address,
+  target: IpAddress,
   sent: number,
   times: readonly number[],
 ): PingSummary {

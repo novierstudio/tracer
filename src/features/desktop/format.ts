@@ -7,6 +7,7 @@ import {
   type MacAddress,
   type Port,
 } from '@/model';
+import type { IpAddress } from '@/model/ipv6';
 import type { ArpTableEntry, DnsLookup, HostAddressing, PingReply, TraceProbe } from './backend';
 
 export type HostDevice = Extract<Device, { kind: 'pc' | 'server' }>;
@@ -219,7 +220,7 @@ export const tracertHeader = (target: Ipv4Address, maxHops: number) => [
  */
 export function tracertLines(probesPerHop: number) {
   let open = false;
-  let from: Ipv4Address | undefined;
+  let from: IpAddress | undefined;
   return {
     /** The text for one probe. A line ends with `\n`. */
     next(probe: TraceProbe): string {

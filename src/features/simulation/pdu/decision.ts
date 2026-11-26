@@ -105,11 +105,9 @@ export type IgnoreReason =
   | { kind: 'rip-version'; version: RipVersion; accepts: RipVersion };
 
 const ipv4Of = (frame: Frame): Ipv4Packet | undefined =>
-  frame.kind === 'hdlc'
+  (frame.kind === 'hdlc' || frame.kind === 'ethernet') && frame.payload.kind === 'ipv4'
     ? frame.payload
-    : frame.kind === 'ethernet' && frame.payload.kind === 'ipv4'
-      ? frame.payload
-      : undefined;
+    : undefined;
 
 const dhcpOf = (frame: Frame): DhcpMessage | undefined => {
   const payload = ipv4Of(frame)?.payload;

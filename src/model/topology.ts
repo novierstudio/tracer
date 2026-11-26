@@ -5,6 +5,8 @@ import {
   Ipv4Address,
   Ipv4Cidr,
   ipv4ToUint32,
+  Ipv6Address,
+  Ipv6Cidr,
   MacAddress,
   PrefixLength,
   VlanId,
@@ -125,8 +127,32 @@ const filterInterfaceFields = {
   nat: z.enum(['inside', 'outside']).optional(),
 };
 
+/** One `ipv6 address` line: `X/len`, or `X/64 eui-64`, whose host bits come from the MAC. */
+export const Ipv6InterfaceAddress = z.object({ cidr: Ipv6Cidr, eui64: z.boolean() });
+export type Ipv6InterfaceAddress = z.infer<typeof Ipv6InterfaceAddress>;
+
+/**
+ * An interface's IPv6 settings. IPv6 runs on it, with a link-local address, once any of them is
+ * set: an address, `ipv6 enable` or `ipv6 address autoconfig`.
+ */
+export const Ipv6InterfaceConfig = z.object({
+  /** `ipv6 enable`: a link-local address with no global one. */
+  enabled: z.literal(true).optional(),
+  /** `ipv6 address X link-local`, in place of the one EUI-64 derives from the MAC. */
+  linkLocal: Ipv6Address.optional(),
+  /** `ipv6 address X/len [eui-64]`, in the order they were entered. */
+  addresses: z.array(Ipv6InterfaceAddress).default(() => []),
+  /** `ipv6 address autoconfig`: SLAAC, from the prefixes a router advertises on the link. */
+  autoconfig: z.literal(true).optional(),
+});
+export type Ipv6InterfaceConfig = z.infer<typeof Ipv6InterfaceConfig>;
+
+/** Interface settings for IPv6. Absent means IPv6 is off on the interface. */
+const ipv6InterfaceFields = { ipv6: Ipv6InterfaceConfig.optional() };
+
 export const RoutedInterface = z.object({
   ...interfaceFields,
+  ...ipv6InterfaceFields,
   ...ospfInterfaceFields,
   ...filterInterfaceFields,
   ipv4: Ipv4Cidr.optional(),
@@ -208,6 +234,7 @@ export type Dot1q = z.infer<typeof Dot1q>;
 /** A router subinterface. It has no speed, duplex or clock of its own: those belong to its port. */
 export const Subinterface = z.object({
   ...ospfInterfaceFields,
+  ...ipv6InterfaceFields,
   ...filterInterfaceFields,
   shutdown: z.boolean(),
   description: z.string().optional(),
@@ -255,6 +282,25 @@ export const StaticRoute = z.object({
   distance: z.int().min(1).max(255).optional(),
 });
 export type StaticRoute = z.infer<typeof StaticRoute>;
+
+/**
+ * `ipv6 route prefix/len next-hop|interface [next-hop] [distance]`. A link-local next hop needs
+ * the interface it is on.
+ */
+export const Ipv6StaticRoute = z.object({
+  prefix: Ipv6Cidr,
+  nextHop: z.discriminatedUnion('kind', [
+    z.object({
+      kind: z.literal('address'),
+      address: Ipv6Address,
+      interface: InterfaceId.optional(),
+    }),
+    z.object({ kind: z.literal('interface'), interface: InterfaceId }),
+  ]),
+  /** Administrative distance. Absent means 1. */
+  distance: z.int().min(1).max(254).optional(),
+});
+export type Ipv6StaticRoute = z.infer<typeof Ipv6StaticRoute>;
 
 /** `lease days [hours [minutes]]` at its longest: 365 days, 23 hours and 59 minutes. */
 export const MAX_LEASE_MINUTES = 365 * 1440 + 23 * 60 + 59;
@@ -501,6 +547,10 @@ export const RouterConfig = z.object({
   ospf: OspfConfig.optional(),
   /** Absent until the first `ip nat` global command, and again once the last one goes. */
   nat: NatConfig.optional(),
+  /** `ipv6 unicast-routing`: the router forwards IPv6 and sends router advertisements. */
+  ipv6UnicastRouting: z.literal(true).optional(),
+  /** `ipv6 route`, in the order entered. Absent means none. */
+  ipv6StaticRoutes: z.array(Ipv6StaticRoute).optional(),
 });
 export type RouterConfig = z.infer<typeof RouterConfig>;
 
@@ -533,7 +583,26 @@ export const HostIpv4 = z.discriminatedUnion('mode', [
 ]);
 export type HostIpv4 = z.infer<typeof HostIpv4>;
 
-export const HostConfig = z.object({ hostname: Hostname, ipv4: HostIpv4 });
+/**
+ * A host's IPv6 settings, as its IP Configuration sets them. Every host has a link-local address
+ * from its MAC. `auto` takes a global address and gateway from router advertisements (SLAAC).
+ */
+export const HostIpv6 = z.discriminatedUnion('mode', [
+  z.object({ mode: z.literal('auto') }),
+  z.object({
+    mode: z.literal('static'),
+    address: Ipv6Cidr.optional(),
+    gateway: Ipv6Address.optional(),
+  }),
+]);
+export type HostIpv6 = z.infer<typeof HostIpv6>;
+
+/** Absent `ipv6` means static with no address: the host has its link-local address only. */
+export const HostConfig = z.object({
+  hostname: Hostname,
+  ipv4: HostIpv4,
+  ipv6: HostIpv6.optional(),
+});
 export type HostConfig = z.infer<typeof HostConfig>;
 
 /** A DNS name: dot-separated labels of letters, digits and hyphens. Kept in lower case. */
