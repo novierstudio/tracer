@@ -1,12 +1,14 @@
 import { DomainName, err, Ipv4Address, ok, type Result } from '@/model';
+import { readIpv6, type IpAddress } from '@/model/ipv6';
 
 /** A Command Prompt line, parsed. */
 export type HostCommand =
   | { kind: 'empty' }
   /** `count` is Infinity for `ping -t`, which runs until Ctrl+C. */
-  | { kind: 'ping'; target: Ipv4Address; count: number }
-  | { kind: 'tracert'; target: Ipv4Address; maxHops: number; timeoutMs: number }
+  | { kind: 'ping'; target: IpAddress; count: number }
+  | { kind: 'tracert'; target: IpAddress; maxHops: number; timeoutMs: number }
   | { kind: 'ipconfig'; all: boolean }
+  | { kind: 'ipv6config'; all: boolean }
   | { kind: 'ipconfig-release' }
   | { kind: 'ipconfig-renew' }
   | { kind: 'arp-show' }
@@ -62,6 +64,16 @@ const IPCONFIG_USAGE = [
   '',
 ];
 
+const IPV6CONFIG_USAGE = [
+  '',
+  'USAGE:',
+  '    ipv6config [/all]',
+  '',
+  'Options:',
+  '    /all         Display full configuration information.',
+  '',
+];
+
 const ARP_USAGE = [
   '',
   'Displays and modifies the IP-to-Physical address translation tables used by',
@@ -97,6 +109,8 @@ export const HELP = [
   '  ipconfig /all       Also show the MAC address, DHCP lease and DNS settings.',
   '  ipconfig /renew     Ask the DHCP server for an address, or to extend the lease.',
   '  ipconfig /release   Give the DHCP lease back.',
+  '  ipv6config          Show the IPv6 link-local and global addresses and the gateway.',
+  '  ipv6config /all     Also show the MAC address and DNS servers.',
   "  nslookup <name>     Ask the DNS server for a name's address. Add an IP to ask that server.",
   '  ping <ip>           Send 4 echo requests. -n <count> sends more or fewer, -t until Ctrl+C.',
   '  tracert <ip>        List the routers on the way to an address, hop by hop.',
@@ -104,6 +118,12 @@ export const HELP = [
   'Up and Down recall earlier commands. Ctrl+C stops a running command.',
   '',
 ];
+
+/** A ping or tracert target: an IPv4 address, or an IPv6 address in any valid form. */
+function readTarget(text: string): IpAddress | undefined {
+  const ipv4 = Ipv4Address.safeParse(text);
+  return ipv4.success ? ipv4.data : readIpv6(text);
+}
 
 /** Windows accepts `-n` and `/n` alike, in any case. */
 const flag = (word: string) => (/^[-/]/.test(word) ? word.slice(1).toLowerCase() : undefined);
@@ -131,13 +151,13 @@ function parsePing(args: readonly string[]): Result<HostCommand, ParseError> {
     }
   }
   if (target === undefined) return err(PING_USAGE);
-  const address = Ipv4Address.safeParse(target);
-  if (!address.success) {
+  const address = readTarget(target);
+  if (!address) {
     return err([
       `Ping request could not find host ${target}. Please check the name and try again.`,
     ]);
   }
-  return ok({ kind: 'ping', target: address.data, count });
+  return ok({ kind: 'ping', target: address, count });
 }
 
 /** Reads the value after option `word` at `args[at]` as a whole number in [1, max]. */
@@ -177,9 +197,9 @@ function parseTracert(args: readonly string[]): Result<HostCommand, ParseError> 
     }
   }
   if (target === undefined) return err(TRACERT_USAGE);
-  const address = Ipv4Address.safeParse(target);
-  if (!address.success) return err([`Unable to resolve target system name ${target}.`]);
-  return ok({ kind: 'tracert', target: address.data, maxHops, timeoutMs });
+  const address = readTarget(target);
+  if (!address) return err([`Unable to resolve target system name ${target}.`]);
+  return ok({ kind: 'tracert', target: address, maxHops, timeoutMs });
 }
 
 const IPCONFIG_OPTIONS: Record<string, HostCommand> = {
@@ -195,6 +215,14 @@ function parseIpconfig(args: readonly string[]): Result<HostCommand, ParseError>
   if (command && rest.length === 0) return ok(command);
   if (first === '?') return err(IPCONFIG_USAGE);
   return err(['Error: unrecognized or incomplete command line.', ...IPCONFIG_USAGE]);
+}
+
+function parseIpv6config(args: readonly string[]): Result<HostCommand, ParseError> {
+  const options = args.map(flag);
+  if (options.length === 0) return ok({ kind: 'ipv6config', all: false });
+  if (options.length === 1 && options[0] === 'all') return ok({ kind: 'ipv6config', all: true });
+  if (options[0] === '?') return err(IPV6CONFIG_USAGE);
+  return err(['Error: unrecognized or incomplete command line.', ...IPV6CONFIG_USAGE]);
 }
 
 function parseArp(args: readonly string[]): Result<HostCommand, ParseError> {
@@ -231,6 +259,8 @@ export function parseCommand(line: string): Result<HostCommand, ParseError> {
       return parseTracert(args);
     case 'ipconfig':
       return parseIpconfig(args);
+    case 'ipv6config':
+      return parseIpv6config(args);
     case 'arp':
       return parseArp(args);
     case 'nslookup':

@@ -98,6 +98,11 @@ export function engineBackend(source: TopologySource): HostBackend {
       if (!addressing.ok) throw new Error(`IPCONFIG: ${UNAVAILABLE[addressing.error]}`);
       return { addressing: addressing.value, now };
     },
+    async ipv6Status(device) {
+      const status = await (await engine()).sim.ipv6Status(device);
+      if (!status.ok) throw new Error(`IPV6CONFIG: ${UNAVAILABLE[status.error]}`);
+      return status.value;
+    },
     async renewDhcp(device) {
       const client = await engine();
       let settle!: (outcome: DhcpOutcome) => void;

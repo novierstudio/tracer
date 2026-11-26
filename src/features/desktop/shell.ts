@@ -1,18 +1,23 @@
 import { addressOf } from '@/engine/l3/hostAddress';
+import { isIpv6 } from '@/model/ipv6';
 import type { HostBackend, PingReply, TraceProbe } from './backend';
 import { HELP, parseCommand } from './commands';
 import {
   addressPort,
   configAddressing,
+  configIpv6,
   formatArp,
   formatIpconfig,
+  formatIpv6config,
   formatNslookup,
   formatReply,
+  liveIpv6,
   pingHeader,
   pingSummary,
   tracertHeader,
   tracertLines,
   type HostDevice,
+  type HostIpv6View,
   type IpconfigView,
 } from './format';
 
@@ -77,8 +82,24 @@ export function hostShell({ host, backend, wallClock = Date.now }: ShellContext)
       const wall = wallClock();
       return { addressing, dateOf: (time) => new Date(wall - (now - time)) };
     };
-    const ipconfig = async (all: boolean) =>
-      formatIpconfig(device, connected, all, connected ? await live() : undefined);
+    /**
+     * The host's IPv6 now. A static host's is its config; a SLAAC host's, the simulation's, or
+     * its link-local address alone when the simulation cannot say.
+     */
+    const ipv6 = async (): Promise<HostIpv6View | undefined> => {
+      const port = addressPort(device);
+      if (!port) return undefined;
+      if (device.config.ipv6?.mode !== 'auto') return configIpv6(device, port);
+      return backend.ipv6Status(device.id).then(
+        (status) => liveIpv6(status, port),
+        () => configIpv6(device, port),
+      );
+    };
+    const ipconfig = async (all: boolean) => {
+      if (!connected) return formatIpconfig(device, connected, all);
+      const [view, v6] = await Promise.all([live(), ipv6()]);
+      return formatIpconfig(device, connected, all, { ...view, ...(v6 && { ipv6: v6 }) });
+    };
     /** `/release` and `/renew` need a DHCP adapter with its cable in. */
     const dhcpRefusal = () => {
       if (!dhcp) return NOT_DHCP;
@@ -91,10 +112,12 @@ export function hostShell({ host, backend, wallClock = Date.now }: ShellContext)
       ];
     };
     try {
-      const address =
-        command.kind === 'arp-show' || command.kind === 'ping' || command.kind === 'tracert'
-          ? addressOf((await live()).addressing)
-          : undefined;
+      // An IPv6 ping or trace needs no IPv4 address: the host always has its link-local one.
+      const needsIpv4 =
+        command.kind === 'arp-show' ||
+        ((command.kind === 'ping' || command.kind === 'tracert') && !isIpv6(command.target));
+      const address = needsIpv4 ? addressOf((await live()).addressing) : undefined;
+      const ready = !needsIpv4 || address !== undefined;
       switch (command.kind) {
         case 'empty':
           return;
@@ -104,6 +127,10 @@ export function hostShell({ host, backend, wallClock = Date.now }: ShellContext)
           return io.clear();
         case 'ipconfig':
           return io.print(await ipconfig(command.all));
+        case 'ipv6config':
+          return io.print(
+            formatIpv6config(device, connected, command.all, connected ? await ipv6() : undefined),
+          );
         case 'ipconfig-release': {
           const refusal = dhcpRefusal();
           if (refusal) return io.print(refusal);
@@ -143,7 +170,7 @@ export function hostShell({ host, backend, wallClock = Date.now }: ShellContext)
           return io.print(lookup ? formatNslookup(lookup) : ['^C', '']);
         }
         case 'ping': {
-          if (!address) return io.print(['PING: transmit failed. General failure.', '']);
+          if (!ready) return io.print(['PING: transmit failed. General failure.', '']);
           io.print(pingHeader(command.target));
           const replies: PingReply[] = [];
           const onReply = (reply: PingReply) => {
@@ -161,7 +188,7 @@ export function hostShell({ host, backend, wallClock = Date.now }: ShellContext)
           return io.print(io.signal.aborted ? ['Control-C', '^C', ''] : ['']);
         }
         case 'tracert': {
-          if (!address) return io.print(['Unable to contact IP driver. General failure.', '']);
+          if (!ready) return io.print(['Unable to contact IP driver. General failure.', '']);
           const { target, maxHops, timeoutMs } = command;
           io.print(tracertHeader(target, maxHops));
           const lines = tracertLines(TRACERT_PROBES);

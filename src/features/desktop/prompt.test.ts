@@ -4,12 +4,19 @@ import { describe, expect, it, vi } from 'vitest';
 import { buildOffice } from '@/features/inspector/testing';
 import type { Lease } from '@/engine/api';
 import type { SimTime } from '@/engine/core/time';
-import { Ipv4Address, type DeviceId, type MacAddress, type PrefixLength } from '@/model';
+import {
+  Ipv4Address,
+  Ipv6Address,
+  type DeviceId,
+  type MacAddress,
+  type PrefixLength,
+} from '@/model';
 import type {
   DhcpOutcome,
   DnsLookup,
   HostAddressing,
   HostBackend,
+  Ipv6Status,
   PingReply,
   TraceProbe,
 } from './backend';
@@ -20,6 +27,16 @@ import { createHostTty, PROMPT } from './tty';
 const SIZE = { cols: 80, rows: 24 };
 const UP = '\x1b[A';
 const ip = (text: string) => Ipv4Address.parse(text);
+const ip6 = (text: string) => Ipv6Address.parse(text);
+
+/** What the simulation says about a host it knows no IPv6 for. */
+const NO_IPV6: Ipv6Status = {
+  routing: false,
+  interfaces: [],
+  routes: [],
+  neighbors: [],
+  ports: {},
+};
 
 const reply = (timeMs: number): PingReply => ({
   kind: 'reply',
@@ -77,6 +94,7 @@ function scripted(
       return address ? Math.min(learned, 1) : learned;
     },
     hostIp: async () => ({ addressing: { kind: 'unassigned' }, now: 0 }),
+    ipv6Status: async () => NO_IPV6,
     renewDhcp: async () => ({ kind: 'failed' }),
     releaseDhcp: async () => {},
     nslookup: async () => ({ kind: 'no-server' }),
@@ -343,6 +361,7 @@ describe('the Command Prompt', () => {
       arpTable: () => Promise.reject(new Error('ARP: no engine')),
       clearArp: async () => 0,
       hostIp: () => Promise.reject(new Error('IPCONFIG: no engine')),
+      ipv6Status: () => Promise.reject(new Error('IPV6CONFIG: no engine')),
       renewDhcp: () => Promise.reject(new Error('IPCONFIG: no engine')),
       releaseDhcp: () => Promise.reject(new Error('IPCONFIG: no engine')),
       nslookup: () => Promise.reject(new Error("*** Can't look up www.lab.local: no engine")),
@@ -411,18 +430,22 @@ describe('DHCP in the Command Prompt', () => {
       'Ethernet adapter FastEthernet0:',
       '',
       '   Connection-specific DNS Suffix  . :',
+      `   Link-local IPv6 Address . . . . . : ${PC1_LINK_LOCAL}`,
+      '   IPv6 Address. . . . . . . . . . . : ::',
       '   IPv4 Address. . . . . . . . . . . : 192.168.1.11',
       '   Subnet Mask . . . . . . . . . . . : 255.255.255.0',
-      '   Default Gateway . . . . . . . . . : 192.168.1.1',
+      '   Default Gateway . . . . . . . . . : ::',
+      '                                       192.168.1.1',
       '',
     ]);
     const all = await run('ipconfig /all');
     expect(all).toContain('   DHCP Enabled. . . . . . . . . . . : Yes');
-    expect(all.slice(-8)).toEqual([
+    expect(all.slice(-9)).toEqual([
       '   Subnet Mask . . . . . . . . . . . : 255.255.255.0',
       '   Lease Obtained. . . . . . . . . . : Thursday, November 26, 2026 9:41:07 AM',
       '   Lease Expires . . . . . . . . . . : Friday, November 27, 2026 9:41:07 AM',
-      '   Default Gateway . . . . . . . . . : 192.168.1.1',
+      '   Default Gateway . . . . . . . . . : ::',
+      '                                       192.168.1.1',
       '   DHCP Server . . . . . . . . . . . : 192.168.1.1',
       '   DNS Servers . . . . . . . . . . . : 8.8.8.8',
       '                                       8.8.4.4',
@@ -441,9 +464,12 @@ describe('DHCP in the Command Prompt', () => {
       'Ethernet adapter FastEthernet0:',
       '',
       '   Connection-specific DNS Suffix  . :',
+      `   Link-local IPv6 Address . . . . . : ${PC1_LINK_LOCAL}`,
+      '   IPv6 Address. . . . . . . . . . . : ::',
       '   Autoconfiguration IPv4 Address. . : 169.254.12.34',
       '   Subnet Mask . . . . . . . . . . . : 255.255.0.0',
-      '   Default Gateway . . . . . . . . . :',
+      '   Default Gateway . . . . . . . . . : ::',
+      '                                       0.0.0.0',
       '',
     ]);
   });
@@ -496,6 +522,127 @@ describe('DHCP in the Command Prompt', () => {
     const { run } = await prompt({ ...backend, ping: pinged.backend.ping }, { edit: asDhcp });
     const lines = await run('ping -n 1 192.168.1.1');
     expect(lines).toContain('Reply from 192.168.1.1: bytes=32 time=1ms TTL=255');
+  });
+});
+
+/** PC1's link-local address, from its MAC fe:a8:41:78:49:8f by EUI-64. */
+const PC1_LINK_LOCAL = 'FE80::FCA8:41FF:FE78:498F';
+
+describe('IPv6 in the Command Prompt', () => {
+  const withIpv6 =
+    (ipv6: HostDevice['config']['ipv6'], ipv4: HostDevice['config']['ipv4'] = { mode: 'static' }) =>
+    (device: HostDevice): HostDevice => ({ ...device, config: { ...device.config, ipv4, ipv6 } });
+  const SLAAC: Ipv6Status = {
+    ...NO_IPV6,
+    interfaces: [
+      {
+        name: 'FastEthernet0' as Ipv6Status['interfaces'][number]['name'],
+        up: true,
+        linkLocal: ip6('fe80::fca8:41ff:fe78:498f'),
+        addresses: [
+          {
+            address: ip6('2001:db8:1:0:fca8:41ff:fe78:498f'),
+            prefixLength: 64,
+            origin: 'autoconfig',
+          },
+        ],
+        groups: [],
+      },
+    ],
+    gateway: ip6('fe80::1'),
+  };
+
+  it('pings an IPv6 address from a host with no IPv4 address', async () => {
+    const answer: PingReply = {
+      kind: 'reply',
+      seq: 1,
+      from: ip6('2001:db8:1::1'),
+      bytes: 32,
+      timeMs: 0,
+      ttl: 255,
+    };
+    const { backend, calls } = scripted([answer]);
+    const { run } = await prompt(backend, { edit: withIpv6(undefined) });
+    expect(await run('ping -n 1 2001:DB8:1::1')).toEqual([
+      '',
+      'Pinging 2001:db8:1::1 with 32 bytes of data:',
+      '',
+      'Reply from 2001:DB8:1::1: bytes=32 time<1ms TTL=255',
+      '',
+      'Ping statistics for 2001:DB8:1::1:',
+      '    Packets: Sent = 1, Received = 1, Lost = 0 (0% loss),',
+      'Approximate round trip times in milli-seconds:',
+      '    Minimum = 0ms, Maximum = 0ms, Average = 0ms',
+      '',
+    ]);
+    expect(calls).toEqual([{ device: 'dev_PC1', target: '2001:db8:1::1', count: 1 }]);
+    expect(await run('ping 192.168.1.1')).toEqual(['PING: transmit failed. General failure.', '']);
+  });
+
+  it('traces to an IPv6 address from a host with no IPv4 address', async () => {
+    const trace: TraceProbe[] = [1, 2, 3].map((probe) => ({
+      kind: 'reply',
+      hop: 1,
+      probe,
+      from: ip6('2001:db8:1::1'),
+      timeMs: 0,
+      ttl: 255,
+    }));
+    const { run } = await prompt(scripted([], { trace }).backend, { edit: withIpv6(undefined) });
+    expect((await run('tracert 2001:db8:1::1')).slice(1, 4)).toEqual([
+      'Tracing route to 2001:db8:1::1 over a maximum of 30 hops',
+      '',
+      '  1    <1 ms    <1 ms    <1 ms  2001:DB8:1::1',
+    ]);
+  });
+
+  it('shows a SLAAC host’s address and gateway as the simulation reports them', async () => {
+    const backend = { ...scripted([]).backend, ipv6Status: async () => SLAAC };
+    const { run } = await prompt(backend, { edit: withIpv6({ mode: 'auto' }) });
+    expect(await run('ipv6config')).toEqual([
+      '',
+      'Ethernet adapter FastEthernet0:',
+      '',
+      '   Connection-specific DNS Suffix  . :',
+      `   Link-local IPv6 Address . . . . . : ${PC1_LINK_LOCAL}`,
+      '   IPv6 Address. . . . . . . . . . . : 2001:DB8:1:0:FCA8:41FF:FE78:498F/64',
+      '   Default Gateway . . . . . . . . . : FE80::1',
+      '',
+    ]);
+    expect(await run('ipconfig')).toContain(
+      '   IPv6 Address. . . . . . . . . . . : 2001:DB8:1:0:FCA8:41FF:FE78:498F',
+    );
+  });
+
+  it('shows a SLAAC host’s link-local address alone when the simulation cannot say', async () => {
+    const backend: HostBackend = {
+      ...scripted([]).backend,
+      ipv6Status: () => Promise.reject(new Error('IPV6CONFIG: no engine')),
+    };
+    const { run } = await prompt(backend, { edit: withIpv6({ mode: 'auto' }) });
+    expect((await run('ipv6config')).slice(-4)).toEqual([
+      `   Link-local IPv6 Address . . . . . : ${PC1_LINK_LOCAL}`,
+      '   IPv6 Address. . . . . . . . . . . : ::',
+      '   Default Gateway . . . . . . . . . : ::',
+      '',
+    ]);
+  });
+
+  it('shows a static host’s IPv6 from its config, with /all', async () => {
+    const ipv6 = {
+      mode: 'static' as const,
+      address: { address: ip6('2001:db8:1::10'), prefixLength: 64 },
+      gateway: ip6('fe80::1'),
+    };
+    const { run } = await prompt(scripted([]).backend, { edit: withIpv6(ipv6) });
+    expect((await run('ipv6config /all')).slice(-6)).toEqual([
+      '   Physical Address. . . . . . . . . : FE-A8-41-78-49-8F',
+      `   Link-local IPv6 Address . . . . . : ${PC1_LINK_LOCAL}`,
+      '   IPv6 Address. . . . . . . . . . . : 2001:DB8:1::10/64',
+      '   Default Gateway . . . . . . . . . : FE80::1',
+      '   DNS Servers . . . . . . . . . . . : ::',
+      '',
+    ]);
   });
 });
 
