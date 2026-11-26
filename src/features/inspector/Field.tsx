@@ -1,3 +1,4 @@
+import type { HTMLAttributes } from 'react';
 import { cn } from '@/ui/cn';
 
 /** A labelled monospace input for addresses, with its error underneath. */
@@ -8,6 +9,7 @@ export function Field({
   error,
   placeholder,
   autoFocus,
+  inputMode = 'decimal',
   onChange,
 }: {
   id: string;
@@ -16,6 +18,8 @@ export function Field({
   error: string | undefined;
   placeholder?: string;
   autoFocus?: boolean;
+  /** The on-screen keyboard to offer: digits and dots by default, for IPv4. */
+  inputMode?: HTMLAttributes<HTMLInputElement>['inputMode'];
   onChange: (value: string) => void;
 }) {
   return (
@@ -30,7 +34,7 @@ export function Field({
         autoFocus={autoFocus}
         spellCheck={false}
         autoComplete="off"
-        inputMode="decimal"
+        inputMode={inputMode}
         aria-invalid={error !== undefined}
         aria-describedby={error ? `${id}-error` : undefined}
         onChange={(event) => onChange(event.target.value)}

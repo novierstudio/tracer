@@ -10,6 +10,7 @@ import { useState } from 'react';
 import { formatShortcut } from '@/app/shell/shortcuts';
 import { addressOf, gatewayOf } from '@/engine/l3/hostAddress';
 import { HostAddressForm } from '@/features/inspector/HostAddressForm';
+import { HostIpv6Form } from '@/features/inspector/HostIpv6Form';
 import { formatCidr } from '@/features/inspector/ipv4';
 import { useHostAddressing } from '@/features/simulation/hostAddresses';
 import { linkAt, type DeviceId } from '@/model';
@@ -98,8 +99,11 @@ function Desktop({ device, focusPrompt }: Props) {
         <h3 className="ml-1 truncate text-xs font-medium text-fg-1">{title}</h3>
       </div>
       {app === 'ip' ? (
-        <div className="px-3 py-3">
+        <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-3 py-3">
+          <h4 className="text-2xs font-medium text-fg-3">IPv4</h4>
           <HostAddressForm device={device} />
+          <h4 className="border-t border-line pt-3 text-2xs font-medium text-fg-3">IPv6</h4>
+          <HostIpv6Form device={device} ipv6Status={hostBackend.ipv6Status} />
         </div>
       ) : app === 'browser' ? (
         <WebBrowser device={device.id} backend={hostBackend} />
