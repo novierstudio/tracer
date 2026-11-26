@@ -616,7 +616,7 @@ describe('mapPktXml', () => {
           { type: 'Router', name: 'R1', ports: [{}], config: ['interface FastEthernet0/0'] },
           pc('PC1'),
         ],
-        [{ from: '2', fromPort: 'RS 232', to: '1', toPort: 'Console', cable: 'eRollOver' }],
+        [{ from: '0', fromPort: 'Wireless0', to: '1', toPort: 'Console', cable: 'eRollOver' }],
       ),
     );
     expect(byHostname(result.topology, 'L1').ports).toEqual([]);
@@ -624,6 +624,21 @@ describe('mapPktXml', () => {
     expect(entriesOf(result, 'link-dropped')).toMatchObject([
       { reason: { kind: 'port-not-imported' } },
     ]);
+  });
+
+  it("imports a console cable from a PC's RS 232 port to a router's Console port", () => {
+    const { topology, report } = imported(
+      networkXml(
+        [
+          { type: 'Router', name: 'R1', ports: [{}], config: ['interface FastEthernet0/0'] },
+          pc('PC1'),
+        ],
+        [{ from: '1', fromPort: 'RS 232', to: '0', toPort: 'Console', cable: 'eRollOver' }],
+      ),
+    );
+    expect(report.links).toEqual({ imported: 1, dropped: 0 });
+    const [link] = Object.values(topology.links);
+    expect(link).toMatchObject({ cable: 'console', a: { port: 'RS232' }, b: { port: 'Console' } });
   });
 
   it('rejects XML that is not a Packet Tracer network', () => {
