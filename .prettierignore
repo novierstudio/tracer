@@ -1,1 +1,3 @@
 pnpm-lock.yaml
+# Written by src/labs/build.ts through labs.test.ts, which compares them byte for byte.
+src/labs/*.tracer.json

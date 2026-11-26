@@ -92,6 +92,14 @@ function labBuilder(id: string) {
       });
     },
 
+    /** A PC that asks a DHCP server for its address. */
+    dhcpPc(name: string, x: number, y: number) {
+      add(name, 'pc', x, y, (device) => {
+        if (device.kind !== 'pc') throw new Error(`${name} is not a PC`);
+        device.config.ipv4 = { mode: 'dhcp' };
+      });
+    },
+
     cable(a: [string, string], b: [string, string], kind: Cable = { cable: 'straight' }) {
       const link = {
         id: LinkId.parse(`lnk_${tag}${a[0]}${b[0]}`),
@@ -276,10 +284,44 @@ function stpTriangle() {
   return lab.topology;
 }
 
+function dhcpRouter() {
+  const lab = labBuilder('dhcp-router');
+  lab.ios('R1', 'router-2g2s', 232, 40, [
+    'ip dhcp excluded-address 192.168.1.1 192.168.1.10',
+    'ip dhcp pool LAN',
+    ' network 192.168.1.0 255.255.255.0',
+    ' default-router 192.168.1.1',
+    ' dns-server 8.8.8.8',
+    'interface GigabitEthernet0/0',
+    ' ip address 192.168.1.1 255.255.255.0',
+    ' no shutdown',
+  ]);
+  lab.ios('SW1', 'switch-24', 232, 232, []);
+  lab.dhcpPc('PC1', 40, 424);
+  lab.dhcpPc('PC2', 424, 424);
+  lab.cable(['SW1', 'GigabitEthernet0/1'], ['R1', 'GigabitEthernet0/0']);
+  lab.cable(['PC1', 'FastEthernet0'], ['SW1', 'FastEthernet0/1']);
+  lab.cable(['PC2', 'FastEthernet0'], ['SW1', 'FastEthernet0/2']);
+  lab.note(
+    'pool',
+    360,
+    -16,
+    'R1’s pool LAN lends 192.168.1.0/24, with R1 as the gateway. It never lends .1 to .10, which are kept for routers and servers.',
+  );
+  lab.note(
+    'dora',
+    136,
+    512,
+    'Both PCs are set to DHCP. Each asks with a Discover when its cable comes up: Discover, Offer, Request, Ack.',
+  );
+  return lab.topology;
+}
+
 export const BUILDERS: Record<string, () => Topology> = {
   'two-pcs-switch': twoPcsSwitch,
   'two-lans-router': twoLansRouter,
   'static-routes-serial': staticRoutesSerial,
   'router-on-a-stick': routerOnAStick,
   'stp-triangle': stpTriangle,
+  'dhcp-router': dhcpRouter,
 };
