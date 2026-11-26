@@ -1,3 +1,4 @@
+import { addressOf, gatewayOf } from '@/engine/l3/hostAddress';
 import {
   formatSubnetMask,
   type Device,
@@ -5,7 +6,7 @@ import {
   type MacAddress,
   type Port,
 } from '@/model';
-import type { ArpTableEntry, PingReply, TraceProbe } from './backend';
+import type { ArpTableEntry, HostAddressing, PingReply, TraceProbe } from './backend';
 
 export type HostDevice = Extract<Device, { kind: 'pc' | 'server' }>;
 
@@ -29,13 +30,66 @@ function entry(label: string, value = ''): string {
   return `   ${leader}: ${value}`.trimEnd();
 }
 
+/** A value on the line under an `entry`, as Windows lists a second DNS server. */
+const continued = (value: string) => `${' '.repeat(39)}${value}`;
+
 const DNS_SUFFIX = '   Connection-specific DNS Suffix  . :';
 
-/** `ipconfig`, and with `all`, `ipconfig /all`. `connected` is whether a cable is plugged in. */
-export function formatIpconfig(device: HostDevice, connected: boolean, all: boolean): string[] {
+/**
+ * What the host's config alone says its addressing is. Only the simulation knows a DHCP host's,
+ * so without it a DHCP host has none.
+ */
+export function configAddressing(device: HostDevice): HostAddressing {
+  const { ipv4 } = device.config;
+  if (ipv4.mode === 'dhcp') return { kind: 'unassigned' };
+  const { address, gateway, dns } = ipv4;
+  return { kind: 'static', address, gateway, dns: dns ? [dns] : [] };
+}
+
+const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const MONTHS = [
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
+];
+
+/** `Thursday, November 26, 2026 9:41:07 AM`, as Windows writes a lease's times, in local time. */
+export function windowsDate(date: Date): string {
+  const hours = date.getHours();
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const time = `${hours % 12 === 0 ? 12 : hours % 12}:${pad(date.getMinutes())}:${pad(date.getSeconds())} ${hours < 12 ? 'AM' : 'PM'}`;
+  return `${DAYS[date.getDay()]}, ${MONTHS[date.getMonth()]} ${date.getDate()}, ${date.getFullYear()} ${time}`;
+}
+
+/** A host's live addressing for `ipconfig`, and the date each simulated time falls on. */
+export type IpconfigView = {
+  readonly addressing: HostAddressing;
+  readonly dateOf: (time: number) => Date;
+};
+
+/**
+ * `ipconfig`, and with `all`, `ipconfig /all`. `connected` is whether a cable is plugged in.
+ * `live` is what the simulation says the host's addressing is; without it, the config's.
+ */
+export function formatIpconfig(
+  device: HostDevice,
+  connected: boolean,
+  all: boolean,
+  live?: IpconfigView,
+): string[] {
   const port = addressPort(device);
   if (!port) return ['', 'No network adapters.', ''];
   const { ipv4 } = device.config;
+  const addressing = live?.addressing ?? configAddressing(device);
   const head = all ? ['', entry('Host Name', device.config.hostname)] : [];
   const hardware = all
     ? [
@@ -54,18 +108,34 @@ export function formatIpconfig(device: HostDevice, connected: boolean, all: bool
       '',
     ];
   }
-  const address = ipv4.mode === 'static' ? ipv4.address : undefined;
-  const gateway = ipv4.mode === 'static' ? ipv4.gateway : undefined;
-  const dns = ipv4.mode === 'static' ? ipv4.dns : undefined;
+  const address = addressOf(addressing);
+  const [dns, ...moreDns] =
+    addressing.kind === 'static' || addressing.kind === 'leased' ? addressing.dns : [];
+  const lease =
+    all && addressing.kind === 'leased' && live
+      ? [
+          entry('Lease Obtained', windowsDate(live.dateOf(addressing.obtainedAt))),
+          entry(
+            'Lease Expires',
+            addressing.expiresAt === undefined
+              ? 'Never'
+              : windowsDate(live.dateOf(addressing.expiresAt)),
+          ),
+        ]
+      : [];
   return [
     ...head,
     ...adapter,
     DNS_SUFFIX,
     ...hardware,
-    entry('IPv4 Address', address?.address ?? '0.0.0.0'),
+    addressing.kind === 'autoconfigured'
+      ? entry('Autoconfiguration IPv4 Address', addressing.address.address)
+      : entry('IPv4 Address', address?.address ?? '0.0.0.0'),
     entry('Subnet Mask', address ? formatSubnetMask(address.prefixLength) : '0.0.0.0'),
-    entry('Default Gateway', gateway),
-    ...(all ? [entry('DNS Servers', dns)] : []),
+    ...lease,
+    entry('Default Gateway', gatewayOf(addressing)),
+    ...(all && addressing.kind === 'leased' ? [entry('DHCP Server', addressing.server)] : []),
+    ...(all ? [entry('DNS Servers', dns), ...moreDns.map(continued)] : []),
     '',
   ];
 }

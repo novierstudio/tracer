@@ -9,7 +9,15 @@ import { engineBackend } from './engineBackend';
 const client = vi.hoisted(() => ({
   ping: vi.fn(),
   traceroute: vi.fn(),
-  sim: { arpTable: vi.fn(), clearArp: vi.fn(), cancel: vi.fn() },
+  dhcpRenew: vi.fn(),
+  onBatch: vi.fn(),
+  sim: {
+    arpTable: vi.fn(),
+    clearArp: vi.fn(),
+    cancel: vi.fn(),
+    hostIp: vi.fn(),
+    dhcpRelease: vi.fn(),
+  },
 }));
 vi.mock('@/engine/client', () => ({ startEngine: async () => client }));
 
@@ -136,5 +144,33 @@ describe('the engine host backend', () => {
     expect(client.sim.clearArp).toHaveBeenCalledWith(PC, '192.168.1.11');
     client.sim.clearArp.mockResolvedValue({ ok: false, error: 'powered-off' });
     await expect(backend.clearArp(PC)).rejects.toThrow('ARP: the device is powered off.');
+  });
+});
+
+describe('the engine host backend and DHCP', () => {
+  const backend = engineBackend(createEditorStore());
+
+  it('reads the host’s addressing with the simulated clock of the latest batch', async () => {
+    const addressing = { kind: 'unassigned' };
+    client.sim.hostIp.mockResolvedValue({ ok: true, value: addressing });
+    client.onBatch.mockImplementation((listener: (batch: { now: number }) => void) =>
+      listener({ now: 4200 }),
+    );
+    expect(await engineBackend(createEditorStore()).hostIp(PC)).toEqual({ addressing, now: 4200 });
+  });
+
+  it('resolves a renewal with what the client heard', async () => {
+    client.dhcpRenew.mockImplementation(
+      async (_device: unknown, listener: (o: unknown) => void) => {
+        setTimeout(() => listener({ kind: 'failed' }), 1);
+        return { ok: true, value: undefined };
+      },
+    );
+    expect(await backend.renewDhcp(PC)).toEqual({ kind: 'failed' });
+  });
+
+  it('says why a device cannot release', async () => {
+    client.sim.dhcpRelease.mockResolvedValue({ ok: false, error: 'powered-off' });
+    await expect(backend.releaseDhcp(PC)).rejects.toThrow('IPCONFIG: the device is powered off.');
   });
 });

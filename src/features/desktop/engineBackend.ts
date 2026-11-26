@@ -1,11 +1,12 @@
 import type {
   DeviceUnavailable,
+  DhcpOutcome,
   PingEvent,
   PingSummary,
   ProbeHandle,
   TraceEvent,
 } from '@/engine/api';
-import type { TopologySource } from '@/engine/client';
+import type { SimClient, TopologySource } from '@/engine/client';
 import type { Result } from '@/model';
 import type { HostBackend } from './backend';
 
@@ -48,7 +49,16 @@ async function follow<E, Last extends E>(
  * the client `startEngine` shares with the rest of the app. The client loads on first use.
  */
 export function engineBackend(source: TopologySource): HostBackend {
-  const engine = () => import('@/engine/client').then(({ startEngine }) => startEngine(source));
+  // The simulated clock as of the latest batch, which a paused simulation leaves standing still.
+  let now = 0;
+  let tracked: Promise<SimClient> | undefined;
+  const engine = () =>
+    (tracked ??= import('@/engine/client')
+      .then(({ startEngine }) => startEngine(source))
+      .then((client) => {
+        client.onBatch((batch) => void (now = batch.now));
+        return client;
+      }));
   return {
     async ping(device, target, options, onReply, signal) {
       const client = await engine();
@@ -81,6 +91,23 @@ export function engineBackend(source: TopologySource): HostBackend {
       const cleared = await (await engine()).sim.clearArp(device, address);
       if (!cleared.ok) throw new Error(`ARP: ${UNAVAILABLE[cleared.error]}`);
       return cleared.value;
+    },
+    async hostIp(device) {
+      const addressing = await (await engine()).sim.hostIp(device);
+      if (!addressing.ok) throw new Error(`IPCONFIG: ${UNAVAILABLE[addressing.error]}`);
+      return { addressing: addressing.value, now };
+    },
+    async renewDhcp(device) {
+      const client = await engine();
+      let settle!: (outcome: DhcpOutcome) => void;
+      const outcome = new Promise<DhcpOutcome>((resolve) => (settle = resolve));
+      const started = await client.dhcpRenew(device, (heard) => settle(heard));
+      if (!started.ok) throw new Error(`IPCONFIG: ${UNAVAILABLE[started.error]}`);
+      return outcome;
+    },
+    async releaseDhcp(device) {
+      const released = await (await engine()).sim.dhcpRelease(device);
+      if (!released.ok) throw new Error(`IPCONFIG: ${UNAVAILABLE[released.error]}`);
     },
   };
 }

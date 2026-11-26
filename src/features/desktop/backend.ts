@@ -1,7 +1,26 @@
-import type { ArpTableEntry, PingOptions, PingReply, TraceOptions, TraceProbe } from '@/engine/api';
+import type {
+  ArpTableEntry,
+  DhcpOutcome,
+  HostAddressing,
+  PingOptions,
+  PingReply,
+  TraceOptions,
+  TraceProbe,
+} from '@/engine/api';
 import type { DeviceId, Ipv4Address } from '@/model';
 
-export type { ArpTableEntry, PingOptions, PingReply, TraceOptions, TraceProbe };
+export type {
+  ArpTableEntry,
+  DhcpOutcome,
+  HostAddressing,
+  PingOptions,
+  PingReply,
+  TraceOptions,
+  TraceProbe,
+};
+
+/** A host's IPv4 settings as the simulation runs them, read at simulated time `now`. */
+export type LiveAddressing = { readonly addressing: HostAddressing; readonly now: number };
 
 /**
  * Everything the Command Prompt asks of the network, in the engine's own types. `engineBackend.ts`
@@ -35,4 +54,10 @@ export interface HostBackend {
   arpTable(device: DeviceId): Promise<ArpTableEntry[]>;
   /** Forgets `address`, or every learned address. Resolves with how many entries went. */
   clearArp(device: DeviceId, address?: Ipv4Address): Promise<number>;
+  /** What the host's address is now, which for a DHCP host only the simulation knows. */
+  hostIp(device: DeviceId): Promise<LiveAddressing>;
+  /** `ipconfig /renew`: resolves with the lease, or word that none came. */
+  renewDhcp(device: DeviceId): Promise<DhcpOutcome>;
+  /** `ipconfig /release`: the host gives its lease back. */
+  releaseDhcp(device: DeviceId): Promise<void>;
 }

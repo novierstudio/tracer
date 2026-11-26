@@ -2,9 +2,11 @@
 import { Terminal } from '@xterm/headless';
 import { describe, expect, it, vi } from 'vitest';
 import { buildOffice } from '@/features/inspector/testing';
-import { Ipv4Address, type DeviceId } from '@/model';
-import type { HostBackend, PingReply, TraceProbe } from './backend';
-import { formatReply, isHostDevice } from './format';
+import type { Lease } from '@/engine/api';
+import type { SimTime } from '@/engine/core/time';
+import { Ipv4Address, type DeviceId, type MacAddress, type PrefixLength } from '@/model';
+import type { DhcpOutcome, HostAddressing, HostBackend, PingReply, TraceProbe } from './backend';
+import { formatReply, isHostDevice, type HostDevice } from './format';
 import { hostShell } from './shell';
 import { createHostTty, PROMPT } from './tty';
 
@@ -22,6 +24,12 @@ const reply = (timeMs: number): PingReply => ({
 });
 
 type ScriptOptions = { trace: readonly TraceProbe[]; hang: boolean; learned: number };
+
+type PromptOptions = {
+  edit?: (device: HostDevice) => HostDevice;
+  connected?: boolean;
+  wallClock?: () => number;
+};
 
 /**
  * Answers each echo request from `script` in turn, a tick apart; after the script, it hangs. A
@@ -61,15 +69,24 @@ function scripted(
       cleared.push(address);
       return address ? Math.min(learned, 1) : learned;
     },
+    hostIp: async () => ({ addressing: { kind: 'unassigned' }, now: 0 }),
+    renewDhcp: async () => ({ kind: 'failed' }),
+    releaseDhcp: async () => {},
   };
   return { backend, calls, cleared, signals };
 }
 
-/** PC1's prompt in the office lab, drawn by a real terminal. */
-async function prompt(backend: HostBackend) {
+/** PC1's prompt in the office lab, drawn by a real terminal. `edit` changes PC1 first. */
+async function prompt(
+  backend: HostBackend,
+  { edit = (device) => device, connected = true, wallClock }: PromptOptions = {},
+) {
   const { pc } = buildOffice();
   if (!isHostDevice(pc)) throw new Error('PC1 is not a host');
-  const tty = createHostTty(hostShell({ host: () => ({ device: pc, connected: true }), backend }));
+  const device = edit(pc);
+  const tty = createHostTty(
+    hostShell({ host: () => ({ device, connected }), backend, ...(wallClock && { wallClock }) }),
+  );
   const term = new Terminal({ ...SIZE, allowProposedApi: true });
   const written: Promise<void>[] = [];
   const write = (data: string) => {
@@ -316,6 +333,9 @@ describe('the Command Prompt', () => {
       traceroute: () => Promise.reject(new Error('TRACERT: no engine')),
       arpTable: () => Promise.reject(new Error('ARP: no engine')),
       clearArp: async () => 0,
+      hostIp: () => Promise.reject(new Error('IPCONFIG: no engine')),
+      renewDhcp: () => Promise.reject(new Error('IPCONFIG: no engine')),
+      releaseDhcp: () => Promise.reject(new Error('IPCONFIG: no engine')),
     };
     const { run } = await prompt(failing);
     expect(await run('arp -a')).toEqual(['ARP: no engine', '']);
@@ -331,5 +351,139 @@ describe('the Command Prompt', () => {
   it('says why a command did not parse', async () => {
     const { run } = await prompt(scripted([]).backend);
     expect(await run('show ip route')).toEqual(['Invalid Command.', '']);
+  });
+});
+
+describe('DHCP in the Command Prompt', () => {
+  const asDhcp = (device: HostDevice): HostDevice => ({
+    ...device,
+    config: { ...device.config, ipv4: { mode: 'dhcp' } },
+  });
+  const lease: Lease = {
+    address: { address: ip('192.168.1.11'), prefixLength: 24 as PrefixLength },
+    gateway: ip('192.168.1.1'),
+    dns: [ip('8.8.8.8'), ip('8.8.4.4')],
+    server: ip('192.168.1.1'),
+    via: '02:00:00:00:00:01' as MacAddress,
+    obtainedAt: 5_000 as SimTime,
+    expiresAt: (5_000 + 86_400_000) as SimTime,
+  };
+  const LEASE: HostAddressing = { kind: 'leased', ...lease };
+
+  /** A backend whose host holds `addressing`, read at simulated time 65 s. */
+  function dhcpBackend(addressing: HostAddressing, renewal?: DhcpOutcome | 'hang') {
+    let current = addressing;
+    const released = vi.fn(async () => {
+      current = { kind: 'unassigned' };
+    });
+    const backend: HostBackend = {
+      ...scripted([]).backend,
+      hostIp: async () => ({ addressing: current, now: 65_000 }),
+      renewDhcp: () =>
+        renewal === 'hang'
+          ? new Promise(() => {})
+          : Promise.resolve(renewal ?? { kind: 'bound', lease }),
+      releaseDhcp: released,
+    };
+    return { backend, released };
+  }
+
+  it('shows the leased address, and its lease, server and DNS servers with /all', async () => {
+    // The simulation reads 65 s at wall-clock 9:42:07 AM, so the lease came at 9:41:07 AM.
+    const wall = new Date(2026, 10, 26, 9, 42, 7).getTime();
+    const { run } = await prompt(dhcpBackend(LEASE).backend, {
+      edit: asDhcp,
+      wallClock: () => wall,
+    });
+    expect(await run('ipconfig')).toEqual([
+      '',
+      'Ethernet adapter FastEthernet0:',
+      '',
+      '   Connection-specific DNS Suffix  . :',
+      '   IPv4 Address. . . . . . . . . . . : 192.168.1.11',
+      '   Subnet Mask . . . . . . . . . . . : 255.255.255.0',
+      '   Default Gateway . . . . . . . . . : 192.168.1.1',
+      '',
+    ]);
+    const all = await run('ipconfig /all');
+    expect(all).toContain('   DHCP Enabled. . . . . . . . . . . : Yes');
+    expect(all.slice(-8)).toEqual([
+      '   Subnet Mask . . . . . . . . . . . : 255.255.255.0',
+      '   Lease Obtained. . . . . . . . . . : Thursday, November 26, 2026 9:41:07 AM',
+      '   Lease Expires . . . . . . . . . . : Friday, November 27, 2026 9:41:07 AM',
+      '   Default Gateway . . . . . . . . . : 192.168.1.1',
+      '   DHCP Server . . . . . . . . . . . : 192.168.1.1',
+      '   DNS Servers . . . . . . . . . . . : 8.8.8.8',
+      '                                       8.8.4.4',
+      '',
+    ]);
+  });
+
+  it('shows a self-assigned address as Windows does', async () => {
+    const addressing: HostAddressing = {
+      kind: 'autoconfigured',
+      address: { address: ip('169.254.12.34'), prefixLength: 16 as PrefixLength },
+    };
+    const { run } = await prompt(dhcpBackend(addressing).backend, { edit: asDhcp });
+    expect(await run('ipconfig')).toEqual([
+      '',
+      'Ethernet adapter FastEthernet0:',
+      '',
+      '   Connection-specific DNS Suffix  . :',
+      '   Autoconfiguration IPv4 Address. . : 169.254.12.34',
+      '   Subnet Mask . . . . . . . . . . . : 255.255.0.0',
+      '   Default Gateway . . . . . . . . . :',
+      '',
+    ]);
+  });
+
+  it('releases the lease and shows the adapter without an address', async () => {
+    const { backend, released } = dhcpBackend(LEASE);
+    const { run } = await prompt(backend, { edit: asDhcp });
+    expect(await run('ipconfig /release')).toContain(
+      '   IPv4 Address. . . . . . . . . . . : 0.0.0.0',
+    );
+    expect(released).toHaveBeenCalledOnce();
+  });
+
+  it('renews the lease and shows it, or says the server could not be reached', async () => {
+    const renewed = await prompt(dhcpBackend(LEASE).backend, { edit: asDhcp });
+    expect(await renewed.run('ipconfig /renew')).toContain(
+      '   IPv4 Address. . . . . . . . . . . : 192.168.1.11',
+    );
+    const failed = await prompt(dhcpBackend(LEASE, { kind: 'failed' }).backend, { edit: asDhcp });
+    // The terminal wraps the message at 80 columns.
+    expect((await failed.run('ipconfig /renew')).join('')).toBe(
+      'An error occurred while renewing interface FastEthernet0 : unable to contact your DHCP server. Request has timed out.',
+    );
+  });
+
+  it('gives the prompt back on Ctrl+C while a renewal waits', async () => {
+    const { type, idle, screen } = await prompt(dhcpBackend(LEASE, 'hang').backend, {
+      edit: asDhcp,
+    });
+    type('ipconfig /renew\r');
+    type('\x03');
+    await idle();
+    expect((await screen()).slice(-4)).toEqual([`${PROMPT}ipconfig /renew`, '^C', '', PROMPT]);
+  });
+
+  it('refuses /release and /renew on a static adapter or with no cable', async () => {
+    const statik = await prompt(scripted([]).backend);
+    expect((await statik.run('ipconfig /renew')).join('')).toBe(
+      'The operation failed as no adapter is in the state permissible for this operation.',
+    );
+    const unplugged = await prompt(dhcpBackend(LEASE).backend, { edit: asDhcp, connected: false });
+    expect((await unplugged.run('ipconfig /release')).join('')).toBe(
+      'No operation can be performed on FastEthernet0 while it has its media disconnected.',
+    );
+  });
+
+  it('pings from its leased address', async () => {
+    const { backend } = dhcpBackend(LEASE);
+    const pinged = scripted([reply(1)]);
+    const { run } = await prompt({ ...backend, ping: pinged.backend.ping }, { edit: asDhcp });
+    const lines = await run('ping -n 1 192.168.1.1');
+    expect(lines).toContain('Reply from 192.168.1.1: bytes=32 time=1ms TTL=255');
   });
 });
