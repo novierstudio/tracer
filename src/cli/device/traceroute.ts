@@ -1,4 +1,5 @@
 import type { TraceEvent } from '../../engine/api';
+import { iosAddress } from '../../model/ipv6';
 import type { TraceStream } from './query';
 
 /**
@@ -30,7 +31,7 @@ export function tracerouteOutput({ target }: TraceStream) {
       }
       if (event.kind === 'timeout') return `${text} * `;
       if (event.from !== from) {
-        text += ` ${event.from}`;
+        text += ` ${iosAddress(event.from)}`;
         from = event.from;
       }
       if (event.kind === 'unreachable') return `${text} ${UNREACHABLE[event.code]} `;

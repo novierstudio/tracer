@@ -1,5 +1,5 @@
-import type { Ipv4Address } from '../../model';
-import { ipv4, keyword, num, type Segment } from '../params';
+import type { IpAddress } from '../../model/ipv6';
+import { ipv4, keyword, num, type Keyword, type Param, type Segment } from '../params';
 import { defineCommand } from '../tree';
 import type { DeviceContext } from './context';
 
@@ -32,13 +32,12 @@ const PING_OFFLINE = ['% The simulation is not running, so there is nothing to p
 const PING_DEFAULTS = { count: 5, seconds: 2 };
 
 interface PingArgs {
-  readonly target: Ipv4Address;
+  readonly target: IpAddress;
   readonly count?: number;
   readonly seconds?: number;
 }
 
 const ping = keyword('ping', 'Send echo messages');
-const target = ipv4('target', 'Ping destination address');
 const repeat = [
   keyword('repeat', 'specify repeat count'),
   num('count', 1, 2147483647, 'Repeat count'),
@@ -48,23 +47,37 @@ const timeout = [
   num('seconds', 0, 3600, 'Timeout in seconds'),
 ] as const;
 
-/** `ping <ip> [repeat N] [timeout S]`, the options in either order. */
-function pingCommand(options: readonly Segment[]) {
-  return command({
-    modes: EXEC,
-    path: [ping, target, ...options],
-    run: (args, ctx) => {
-      const {
-        target,
-        count = PING_DEFAULTS.count,
-        seconds = PING_DEFAULTS.seconds,
-      } = args as PingArgs;
-      // The engine needs a timeout above zero; IOS's `timeout 0` gives up at once.
-      const timeoutMs = Math.max(seconds * 1000, 1);
-      ctx.stream({ kind: 'ping', target, options: { count, timeoutMs } });
-      return PING_OFFLINE;
-    },
-  });
+type Target = Param<'target', IpAddress>;
+
+/**
+ * `ping [words] <target> [repeat N] [timeout S]`, the options in either order. `words` sit between
+ * `ping` and the target, as `ipv6` does in `ping ipv6 2001:db8::1`.
+ */
+export function pingCommands(words: readonly Keyword[], target: Target) {
+  const forms: readonly (readonly Segment[])[] = [
+    [],
+    repeat,
+    timeout,
+    [...repeat, ...timeout],
+    [...timeout, ...repeat],
+  ];
+  return forms.map((options) =>
+    command({
+      modes: EXEC,
+      path: [ping, ...words, target, ...options],
+      run: (args, ctx) => {
+        const {
+          target,
+          count = PING_DEFAULTS.count,
+          seconds = PING_DEFAULTS.seconds,
+        } = args as PingArgs;
+        // The engine needs a timeout above zero; IOS's `timeout 0` gives up at once.
+        const timeoutMs = Math.max(seconds * 1000, 1);
+        ctx.stream({ kind: 'ping', target, options: { count, timeoutMs } });
+        return PING_OFFLINE;
+      },
+    }),
+  );
 }
 
 const TRACE_OFFLINE = ['% The simulation is not running, so there is nothing to trace through.'];
@@ -72,25 +85,22 @@ const TRACE_OFFLINE = ['% The simulation is not running, so there is nothing to 
 /** IOS probes each hop 3 times, waits 3 seconds for each probe, and gives up after 30 hops. */
 export const TRACE_OPTIONS = { maxHops: 30, probesPerHop: 3, timeoutMs: 3000 };
 
-/** EXEC commands that read the session or the simulation rather than the config. */
-export const execCommands = [
-  pingCommand([]),
-  pingCommand(repeat),
-  pingCommand(timeout),
-  pingCommand([...repeat, ...timeout]),
-  pingCommand([...timeout, ...repeat]),
-  command({
+/** `traceroute [words] <target>`, with `words` as in `pingCommands`. */
+export function tracerouteCommand(words: readonly Keyword[], target: Target) {
+  return command({
     modes: EXEC,
-    path: [
-      keyword('traceroute', 'Trace route to destination'),
-      ipv4('target', 'Trace route to destination address'),
-    ],
-    run: (args, ctx) => {
-      const { target } = args as { target: Ipv4Address };
+    path: [keyword('traceroute', 'Trace route to destination'), ...words, target],
+    run: ({ target }, ctx) => {
       ctx.stream({ kind: 'traceroute', target, options: TRACE_OPTIONS });
       return TRACE_OFFLINE;
     },
-  }),
+  });
+}
+
+/** EXEC commands that read the session or the simulation rather than the config. */
+export const execCommands = [
+  ...pingCommands([], ipv4('target', 'Ping destination address')),
+  tracerouteCommand([], ipv4('target', 'Trace route to destination address')),
   command({
     modes: EXEC,
     path: [show, keyword('history', 'Information about Terminal history')],

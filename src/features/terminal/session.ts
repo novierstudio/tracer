@@ -51,6 +51,7 @@ export type SimQueries = {
       | 'aclHits'
       | 'natTranslations'
       | 'clearNatTranslations'
+      | 'ipv6Status'
   ]: Remote<SimAPI[K]>;
 };
 
@@ -85,6 +86,7 @@ export function engineSource(sim: SimLink, device: DeviceId): EngineSource {
     aclHits: () => sim.aclHits(device).then(valueOf),
     natTranslations: () => sim.natTranslations(device).then(valueOf),
     natCleared: () => sim.clearNatTranslations(device).then(valueOf),
+    ipv6: () => sim.ipv6Status(device).then(valueOf),
   };
 }
 

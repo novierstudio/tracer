@@ -3,6 +3,7 @@ import type {
   ArpTableEntry,
   DeviceUnavailable,
   DhcpBindingEntry,
+  Ipv6Status,
   MacTableEntry,
   NatTranslationEntry,
   PingListener,
@@ -14,7 +15,8 @@ import type {
   TraceListener,
   TraceOptions,
 } from '../../engine/api';
-import type { Ipv4Address, PortId, Result } from '../../model';
+import type { PortId, Result } from '../../model';
+import type { IpAddress } from '../../model/ipv6';
 import type { IosDevice } from './context';
 import { pingOutput } from './ping';
 import { tracerouteOutput } from './traceroute';
@@ -38,6 +40,7 @@ export interface EngineAnswers {
   readonly natTranslations: readonly NatTranslationEntry[];
   /** `clear ip nat translation *`: how many translations it cleared. Asking clears them. */
   readonly natCleared: number;
+  readonly ipv6: Ipv6Status;
 }
 
 export type EngineQueryKind = keyof EngineAnswers;
@@ -99,14 +102,14 @@ export async function answerQuery<K extends EngineQueryKind>(
 /** `ping`: echo requests whose fates arrive as the simulation runs. */
 export interface PingStream {
   readonly kind: 'ping';
-  readonly target: Ipv4Address;
+  readonly target: IpAddress;
   readonly options: PingOptions;
 }
 
 /** `traceroute`: probes with growing TTLs whose fates arrive as the simulation runs. */
 export interface TraceStream {
   readonly kind: 'traceroute';
-  readonly target: Ipv4Address;
+  readonly target: IpAddress;
   readonly options: TraceOptions;
 }
 
@@ -121,9 +124,9 @@ type Started = Promise<Result<ProbeHandle, DeviceUnavailable>>;
 /** Opens streams on the simulation for one device. */
 export interface StreamSource {
   /** Starts a ping. Its events go to `listener` as simulated time passes. */
-  ping(target: Ipv4Address, options: PingOptions, listener: PingListener): Started;
+  ping(target: IpAddress, options: PingOptions, listener: PingListener): Started;
   /** Starts a traceroute. Its events go to `listener` as simulated time passes. */
-  traceroute(target: Ipv4Address, options: TraceOptions, listener: TraceListener): Started;
+  traceroute(target: IpAddress, options: TraceOptions, listener: TraceListener): Started;
   /** Stops a ping or traceroute, so no more requests go out. */
   cancel(handle: ProbeHandle): Promise<void>;
 }
