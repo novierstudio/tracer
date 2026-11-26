@@ -1,7 +1,8 @@
 import type { Device, LabSettings, MacAddress, PortId, Switchport, VlanId } from '@/model';
 import { carriesVlan, vlanAllowed } from '@/model/vlans';
 import { ms, type SimDuration, type SimTime } from '../core/time';
-import type { DeviceContext, SimModule } from '../module';
+import type { DeviceContext, ModuleContext, SimModule } from '../module';
+import type { SwitchL2Status } from './status';
 import { PVST_MAC, type EthernetFrame } from '../pdu';
 import {
   isHeld,
@@ -225,3 +226,8 @@ export function spanningTreeOf(
 }
 
 export type { SpanningTreeVlan };
+
+/** The switch's EtherChannels and port security, for their show commands. */
+export function switchL2Status(_ctx: ModuleContext<SwitchState>): SwitchL2Status {
+  return { etherchannels: [], portSecurity: [], errDisabled: [] };
+}

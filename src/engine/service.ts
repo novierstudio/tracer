@@ -20,7 +20,8 @@ import { after, ms } from './core/time';
 import type { Engine } from './engine';
 import type { EventId } from './events';
 import { createHistory, stepInstant, type History, type Input } from './history';
-import { macTable, spanningTreeOf, switchingModule } from './l2/switching';
+import { discoveryModule, discoveryStatus } from './l2/discovery';
+import { macTable, spanningTreeOf, switchingModule, switchL2Status } from './l2/switching';
 import { aclHits } from './l3/acl';
 import { arpTable, clearArp } from './l3/arp';
 import { hostAddressingOf, routesOf, type IpContext } from './l3/context';
@@ -407,6 +408,20 @@ export function createSimService({
       engine.withModule(device, switchingModule, (ctx) =>
         spanningTreeOf(ctx.device, ctx.state, ctx.settings),
       ),
+    layer2Status(device) {
+      const discovery = engine.withModule(device, discoveryModule, discoveryStatus);
+      if (!discovery.ok) return discovery;
+      const switched = engine.withModule(device, switchingModule, switchL2Status);
+      const ports = engine.withModule(device, discoveryModule, (ctx) =>
+        Object.fromEntries(ctx.device.ports.map((port) => [port.id, ctx.portUp(port.id)])),
+      );
+      const none = { etherchannels: [], portSecurity: [], errDisabled: [] };
+      return ok({
+        ...discovery.value,
+        ...(switched.ok ? switched.value : none),
+        ports: ports.ok ? ports.value : {},
+      });
+    },
     portStates: (device) =>
       engine.withModule(device, ipModule, (ctx) =>
         Object.fromEntries(ctx.device.ports.map((port) => [port.id, ctx.portUp(port.id)])),

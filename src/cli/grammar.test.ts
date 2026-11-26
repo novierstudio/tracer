@@ -289,7 +289,7 @@ describe('grammar: ? help', () => {
     [
       'interface ',
       GLOBAL_CONFIG,
-      ['FastEthernet', 'GigabitEthernet', 'Loopback', 'Serial', 'Vlan', 'range'],
+      ['FastEthernet', 'GigabitEthernet', 'Loopback', 'Port-channel', 'Serial', 'Vlan', 'range'],
     ],
   ])('%j in %o lists %o', (input, mode, expected) => {
     expect(names(input, mode)).toEqual(expected);

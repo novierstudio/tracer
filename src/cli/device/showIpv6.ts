@@ -227,6 +227,7 @@ export function showIpv6Route(status: Ipv6Status | undefined): readonly string[]
 
 const NEIGHBOR_SHORT: Readonly<Record<InterfaceType, string>> = {
   Loopback: 'Lo',
+  'Port-channel': 'Po',
   FastEthernet: 'Fa',
   GigabitEthernet: 'Gig',
   Serial: 'Se',

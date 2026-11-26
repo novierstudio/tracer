@@ -62,18 +62,35 @@ export const SubinterfaceId = z
   .brand<'SubinterfaceId'>();
 export type SubinterfaceId = z.infer<typeof SubinterfaceId>;
 
-export const InterfaceId = z.union([PortId, VirtualInterfaceId, SubinterfaceId]);
+/** The most EtherChannel groups a switch has, and so the highest `Port-channel` number. */
+export const MAX_CHANNEL_GROUP = 48;
+
+/** A switch's EtherChannel, `Port-channel1` to `Port-channel48`: the bundle a channel group forms. */
+export const PortChannelId = z
+  .string()
+  .regex(/^Port-channel[1-9]\d*$/, 'Invalid interface name')
+  .refine(
+    (name) => Number(name.slice('Port-channel'.length)) <= MAX_CHANNEL_GROUP,
+    'Interface number out of range',
+  )
+  .brand<'PortChannelId'>();
+export type PortChannelId = z.infer<typeof PortChannelId>;
+
+export const InterfaceId = z.union([PortId, VirtualInterfaceId, SubinterfaceId, PortChannelId]);
 export type InterfaceId = z.infer<typeof InterfaceId>;
 
 /** Every interface type name, in the order IOS lists interfaces in a running-config. */
 export const INTERFACE_TYPES = [
   'Loopback',
+  'Port-channel',
   'FastEthernet',
   'GigabitEthernet',
   'Serial',
   'Vlan',
 ] as const satisfies readonly (
-  (typeof PORT_NAME_PREFIX)[keyof typeof PORT_NAME_PREFIX] | keyof typeof VIRTUAL_INTERFACE_LIMIT
+  | (typeof PORT_NAME_PREFIX)[keyof typeof PORT_NAME_PREFIX]
+  | keyof typeof VIRTUAL_INTERFACE_LIMIT
+  | 'Port-channel'
 )[];
 export type InterfaceType = (typeof INTERFACE_TYPES)[number];
 
@@ -84,6 +101,16 @@ export const Port = z.discriminatedUnion('kind', [
 export type Port = z.infer<typeof Port>;
 export type PortKind = Port['kind'];
 
+/** Per-interface CDP and LLDP. Absent means on, where the protocol runs at all. */
+const discoveryInterfaceFields = {
+  /** `no cdp enable`: CDP neither sends nor listens on the interface. */
+  cdpEnable: z.literal(false).optional(),
+  /** `no lldp transmit`. */
+  lldpTransmit: z.literal(false).optional(),
+  /** `no lldp receive`. */
+  lldpReceive: z.literal(false).optional(),
+};
+
 const interfaceFields = {
   shutdown: z.boolean(),
   description: z.string().optional(),
@@ -91,6 +118,7 @@ const interfaceFields = {
   speed: z.union([z.literal(10), z.literal(100), z.literal(1000)]).optional(),
   /** On an Ethernet port. Absent means auto. */
   duplex: z.enum(['full', 'half']).optional(),
+  ...discoveryInterfaceFields,
 };
 
 /** `ip helper-address`: where a router relays the DHCP broadcasts it hears on an interface. */
@@ -207,6 +235,46 @@ export const Switchport = z.discriminatedUnion('mode', [
 ]);
 export type Switchport = z.infer<typeof Switchport>;
 
+/** `channel-group N mode M`: `on` bundles unconditionally, the others negotiate with LACP or PAgP. */
+export const CHANNEL_MODES = ['active', 'auto', 'desirable', 'on', 'passive'] as const;
+export const ChannelMode = z.enum(CHANNEL_MODES);
+export type ChannelMode = z.infer<typeof ChannelMode>;
+
+export const ChannelGroup = z.object({
+  group: z.int().min(1).max(MAX_CHANNEL_GROUP),
+  mode: ChannelMode,
+});
+export type ChannelGroup = z.infer<typeof ChannelGroup>;
+
+/** `switchport port-security maximum`: how many secure addresses a port takes, 1 to 132. */
+export const MAX_SECURE_ADDRESSES = 132;
+
+/** A secure address the config holds: typed with `mac-address`, or learned with `mac-address sticky`. */
+export const SecureAddress = z.object({ mac: MacAddress, sticky: z.boolean() });
+export type SecureAddress = z.infer<typeof SecureAddress>;
+
+export const PortSecurityViolation = z.enum(['protect', 'restrict', 'shutdown']);
+export type PortSecurityViolation = z.infer<typeof PortSecurityViolation>;
+
+/**
+ * An access port's port security. IOS keeps the settings while `switchport port-security` is off,
+ * so `enabled` is a field of its own. Absent fields are the IOS defaults.
+ */
+export const PortSecurity = z.object({
+  enabled: z.boolean(),
+  /** Absent means 1. */
+  maximum: z.int().min(1).max(MAX_SECURE_ADDRESSES).optional(),
+  /** Absent means shutdown. */
+  violation: PortSecurityViolation.optional(),
+  /** `mac-address sticky`: addresses the port learns go into the running-config. */
+  sticky: z.literal(true).optional(),
+  /** `aging time`, in minutes. Absent means secure addresses never age. */
+  agingTime: z.int().min(1).max(1440).optional(),
+  /** Static and sticky addresses, in the order they were added. */
+  addresses: z.array(SecureAddress).default(() => []),
+});
+export type PortSecurity = z.infer<typeof PortSecurity>;
+
 /** `spanning-tree cost`: what a port adds to the path cost to the root, from 1 to 200000000. */
 export const PathCost = z.int().min(1).max(200_000_000).brand<'PathCost'>();
 export type PathCost = z.infer<typeof PathCost>;
@@ -228,8 +296,41 @@ export const SwitchInterface = z.object({
   helperAddresses,
   /** A routed port's access lists. */
   ...accessGroupFields,
+  /**
+   * `switchport mode access` typed. Tracer has no DTP, so an access port switches either way, but
+   * IOS takes port security only on a port set to access, and lists the line in its config.
+   */
+  modeAccess: z.literal(true).optional(),
+  /** `channel-group`: the port is a member of that group's EtherChannel. */
+  channelGroup: ChannelGroup.optional(),
+  portSecurity: PortSecurity.optional(),
 });
 export type SwitchInterface = z.infer<typeof SwitchInterface>;
+
+/**
+ * `interface Port-channelN`. Its switchport settings are the bundle's, and IOS copies each one
+ * to the member ports as it is set.
+ */
+export const PortChannelInterface = z.object({
+  shutdown: z.boolean(),
+  description: z.string().optional(),
+  switchport: Switchport,
+  modeAccess: z.literal(true).optional(),
+  portfast: z.literal(true).optional(),
+  stpCost: PathCost.optional(),
+});
+export type PortChannelInterface = z.infer<typeof PortChannelInterface>;
+
+/** `port-channel load-balance`: which addresses pick a bundle's member link. Absent means src-mac. */
+export const LoadBalance = z.enum([
+  'dst-ip',
+  'dst-mac',
+  'src-dst-ip',
+  'src-dst-mac',
+  'src-ip',
+  'src-mac',
+]);
+export type LoadBalance = z.infer<typeof LoadBalance>;
 
 /** A switch port that switches: every port but a multilayer switch's routed ports. */
 export type SwitchedInterface = SwitchInterface & { readonly switchport: Switchport };
@@ -627,6 +728,14 @@ const iosFields = {
   sshRetries: z.int().min(0).max(5).optional(),
   /** Absent until the first access list, and again once the last one goes. */
   accessLists: z.record(AclName, AccessList).optional(),
+  /** `no cdp run`: CDP is on unless the config turns it off. */
+  cdpRun: z.literal(false).optional(),
+  /** `cdp timer`: seconds between advertisements. Absent means 60. */
+  cdpTimer: z.int().min(5).max(254).optional(),
+  /** `cdp holdtime`: seconds a neighbour keeps an advertisement. Absent means 180. */
+  cdpHoldtime: z.int().min(10).max(255).optional(),
+  /** `lldp run`: LLDP is off unless the config turns it on. */
+  lldpRun: z.literal(true).optional(),
   /** The saved config in NVRAM, as running-config lines. Absent until the first save. */
   startupConfig: z.array(z.string()).optional(),
   unknownLines: z.array(z.string()),
@@ -670,6 +779,19 @@ export const SwitchConfig = z.object({
   ipRouting: z.literal(true).optional(),
   /** `ip route`, on a multilayer switch only. They take effect with `ip routing`. */
   staticRoutes: z.array(StaticRoute).optional(),
+  /** `interface Port-channelN`, by name. Absent until the first channel group. */
+  portChannels: z.record(PortChannelId, PortChannelInterface).optional(),
+  loadBalance: LoadBalance.optional(),
+  /**
+   * `errdisable recovery cause psecure-violation`, and `errdisable recovery interval` in
+   * seconds. Absent means err-disabled ports stay down until shut and unshut.
+   */
+  errdisableRecovery: z
+    .object({
+      psecureViolation: z.literal(true).optional(),
+      interval: z.int().min(30).max(86400).optional(),
+    })
+    .optional(),
 });
 export type SwitchConfig = z.infer<typeof SwitchConfig>;
 

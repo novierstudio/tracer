@@ -1,5 +1,13 @@
 import type { OutputStream } from '@/cli';
-import { decode, feed, initialState, reduce, type Input, type LineState } from './discipline';
+import {
+  decode,
+  feed,
+  initialState,
+  interject,
+  reduce,
+  type Input,
+  type LineState,
+} from './discipline';
 import { isStream, type TerminalSession } from './session';
 
 /** Characters of output kept for replay, about the 5000 rows xterm keeps as scrollback. */
@@ -18,6 +26,8 @@ export interface Tty {
   readonly history: LineState['history'];
   /** Keys typed into a view of `size`. The view that typed sets the geometry. */
   input(data: string, size: Size): void;
+  /** Prints messages the device logs on its own, such as `%LINK-3-UPDOWN`, between lines typed. */
+  log(lines: readonly string[]): void;
   /** Calls `write` with each chunk of new output until the returned function is called. */
   subscribe(write: (out: string) => void): () => void;
 }
@@ -96,6 +106,11 @@ export function createTty(session: TerminalSession, greeting: readonly string[] 
       } else {
         held.push(...decode(data));
       }
+    },
+    log(lines) {
+      // While a command's output or a --More-- page is on screen, the message follows it as is.
+      if (held || line.more) write(lines.map((text) => `\r\n${text}`).join('') + '\r\n');
+      else write(interject(session, line, lines));
     },
     subscribe(write) {
       views.add(write);

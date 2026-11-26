@@ -58,9 +58,15 @@ export default defineConfig([
           ],
           patterns: [
             {
+<<<<<<< HEAD
               regex: '^@/model(?!/(vlans|defaults|result|ipv6|remote)$)(/.*)?$',
               message:
                 'Value imports into the simulation worker must come from @/model/vlans, @/model/defaults, @/model/result, @/model/ipv6 or @/model/remote, so zod stays out of the worker.',
+=======
+              regex: '^@/model(?!/(vlans|defaults|result|ipv6|l2)$)(/.*)?$',
+              message:
+                'Value imports into the simulation worker must come from @/model/vlans, @/model/defaults, @/model/result, @/model/ipv6 or @/model/l2, so zod stays out of the worker.',
+>>>>>>> 077026b (feat(model): add the data for CDP, LLDP, EtherChannel and port security)
               allowTypeImports: true,
             },
           ],

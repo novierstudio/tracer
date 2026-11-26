@@ -1,4 +1,4 @@
-import type { DeviceId, Endpoint, LinkId, PortId } from '@/model';
+import type { DeviceId, Endpoint, LinkId, MacAddress, PortId } from '@/model';
 import type { SimTime } from './core/time';
 import type { Frame } from './frame';
 
@@ -42,7 +42,26 @@ export type NoteEvent = {
   text: string;
 };
 
-export type SimEvent = FrameEvent | LinkEvent | NoteEvent;
+/** A message a router or switch printed on its console, such as `%LINK-3-UPDOWN: ...`. */
+export type SyslogEvent = {
+  kind: 'syslog';
+  id: EventId;
+  time: SimTime;
+  device: DeviceId;
+  text: string;
+};
+
+/** A switch learned a sticky secure address, which belongs in the port's running-config. */
+export type StickyMacEvent = {
+  kind: 'sticky-mac';
+  id: EventId;
+  time: SimTime;
+  device: DeviceId;
+  port: PortId;
+  mac: MacAddress;
+};
+
+export type SimEvent = FrameEvent | LinkEvent | NoteEvent | SyslogEvent | StickyMacEvent;
 
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
 

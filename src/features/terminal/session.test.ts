@@ -62,6 +62,7 @@ function lab() {
     natTranslations: async (device) => sim.natTranslations(device),
     clearNatTranslations: async (device) => sim.clearNatTranslations(device),
     ipv6Status: async (device) => sim.ipv6Status(device),
+    layer2Status: async (device) => sim.layer2Status(device),
     now: () => engine.now,
     ping: async (...args) => sim.ping(...args),
     traceroute: async (...args) => sim.traceroute(...args),

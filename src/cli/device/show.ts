@@ -466,6 +466,7 @@ interface Hardware {
 
 const HARDWARE: Record<InterfaceType, Hardware> = {
   Loopback: { name: 'Loopback', bandwidth: 8000000, delay: 5000, encapsulation: 'LOOPBACK' },
+  'Port-channel': { name: 'EtherChannel', bandwidth: 100000, delay: 100, encapsulation: 'ARPA' },
   FastEthernet: { name: 'Lance', bandwidth: 100000, delay: 100, encapsulation: 'ARPA' },
   GigabitEthernet: {
     name: 'CN Gigabit Ethernet',

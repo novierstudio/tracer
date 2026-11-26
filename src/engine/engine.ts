@@ -195,6 +195,10 @@ export function createEngine({
         random,
         note: (text) =>
           log.append({ kind: 'note', time: now, device: id, module: module.id, text }),
+        syslog: (text) => log.append({ kind: 'syslog', time: now, device: id, text }),
+        learnSticky: (port, mac) =>
+          log.append({ kind: 'sticky-mac', time: now, device: id, port, mac }),
+        relink: () => relink((link) => link.a.device === id || link.b.device === id),
         learnedRoutes: () =>
           (running.get(id) ?? []).flatMap((other) => other.module.routes?.(other.ctx) ?? []),
       },
@@ -223,6 +227,34 @@ export function createEngine({
         slot.module.onLinkChange?.(slot.ctx, end.port, up);
       }
     }
+  }
+
+  /** Whether a module on the device has taken the port down, as by err-disabling it. */
+  function disabled({ device, port }: Endpoint) {
+    return (running.get(device) ?? []).some((slot) => slot.module.disablesPort?.(slot.ctx, port));
+  }
+
+  /** Brings the chosen links up or down as their ends allow, and returns those that changed. */
+  function linkTransitions(chosen: (link: Link) => boolean): [Link, boolean][] {
+    const transitions: [Link, boolean][] = [];
+    for (const state of links.values()) {
+      if (!chosen(state.link)) continue;
+      const { a, b, cable } = state.link;
+      const up =
+        endUp(devices.get(a.device), a.port, cable) &&
+        endUp(devices.get(b.device), b.port, cable) &&
+        !disabled(a) &&
+        !disabled(b);
+      if (up === state.up) continue;
+      state.up = up;
+      if (up) state.generation = ++generations;
+      transitions.push([state.link, up]);
+    }
+    return transitions;
+  }
+
+  function relink(chosen: (link: Link) => boolean) {
+    for (const [link, up] of linkTransitions(chosen)) linkChanged(link, up);
   }
 
   function indexPorts() {
@@ -262,15 +294,7 @@ export function createEngine({
 
     for (const id of touched) if (running.has(id) && !devices.get(id)?.powered) stop(id);
 
-    for (const state of links.values()) {
-      const { a, b, cable } = state.link;
-      const up =
-        endUp(devices.get(a.device), a.port, cable) && endUp(devices.get(b.device), b.port, cable);
-      if (up === state.up) continue;
-      state.up = up;
-      if (up) state.generation = ++generations;
-      transitions.push([state.link, up]);
-    }
+    transitions.push(...linkTransitions(() => true));
     for (const [link, up] of transitions) linkChanged(link, up);
 
     for (const id of touched) {
