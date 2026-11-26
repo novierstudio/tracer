@@ -15,22 +15,32 @@ import {
   type Ipv4Packet,
   type OspfPacket,
 } from '@/engine/pdu';
+import type { Ipv6Packet } from '@/engine/pdu6';
 import type { Ipv4Address, MacAddress, PrefixLength, VlanId } from '@/model';
+import { ipv6MulticastMac, UNSPECIFIED_IPV6 } from '@/model/ipv6';
 import {
   dnsAnswer,
   dnsNoSuchName,
   dnsQuery,
+  echoRequest6,
   httpOk,
+  neighborAdvertisement,
+  neighborSolicitation,
   ospfAck,
   ospfDbd,
   ospfHello,
   ospfLsr,
   ospfLsu,
   ospfPacket,
+  PC1_MAC,
+  R1_IPV6,
+  R1_MAC,
   ripPacket,
   ripRequest,
   ripV1Response,
   ripV2Response,
+  routerAdvertisement,
+  routerSolicitation,
   tcpRefusal,
   webPacket,
   webSession,
@@ -182,6 +192,26 @@ const webFrame = (payload: Parameters<typeof webPacket>[0]): Frame => ({
   payload: webPacket(payload),
 });
 
+/** An IPv6 packet in an untagged Ethernet frame: to its group's MAC, or between PC1 and R1. */
+function ipv6Frame(packet: Ipv6Packet): Frame {
+  const fromPc = packet.payload.type !== 'router-advertisement' && packet.src !== R1_IPV6;
+  const group = packet.dst.startsWith('ff');
+  return {
+    kind: 'ethernet',
+    dst: group ? ipv6MulticastMac(packet.dst) : fromPc ? R1_MAC : PC1_MAC,
+    src: fromPc ? PC1_MAC : R1_MAC,
+    payload: packet,
+  };
+}
+
+const hopLimitExceeded: Ipv6Packet = {
+  kind: 'ipv6',
+  src: R1_IPV6,
+  dst: echoRequest6.src,
+  hopLimit: 64,
+  payload: { kind: 'icmpv6', type: 'time-exceeded', original: { ...echoRequest6, hopLimit: 1 } },
+};
+
 /** Every PDU kind the engine sends, by name. */
 const FRAMES: Record<string, Frame> = {
   'ARP request': arpRequest,
@@ -242,6 +272,27 @@ const FRAMES: Record<string, Frame> = {
   'DNS query': webFrame(dnsQuery),
   'DNS answer': webFrame(dnsAnswer),
   'DNS no such name': webFrame(dnsNoSuchName),
+  'ICMPv6 echo': ipv6Frame(echoRequest6),
+  'ICMPv6 time exceeded': ipv6Frame(hopLimitExceeded),
+  'ICMPv6 unreachable': ipv6Frame({
+    ...hopLimitExceeded,
+    payload: {
+      kind: 'icmpv6',
+      type: 'destination-unreachable',
+      code: 'no-route',
+      original: echoRequest6,
+    },
+  }),
+  'HDLC ICMPv6 echo': { kind: 'hdlc', payload: echoRequest6 },
+  'neighbor solicitation': ipv6Frame(neighborSolicitation),
+  'duplicate address check': ipv6Frame({
+    ...neighborSolicitation,
+    src: UNSPECIFIED_IPV6,
+    payload: { kind: 'icmpv6', type: 'neighbor-solicitation', target: echoRequest6.src },
+  }),
+  'neighbor advertisement': ipv6Frame(neighborAdvertisement),
+  'router solicitation': ipv6Frame(routerSolicitation),
+  'router advertisement': ipv6Frame(routerAdvertisement),
 };
 
 const fieldsOf = (dissection: Dissection) => dissection.layers.flatMap((layer) => layer.fields);
@@ -882,5 +933,157 @@ describe('an ICMP error about a TCP segment', () => {
       },
     };
     expect(field(dissect(frame), 'quoted.start')!.value).toBe('TCP 49152 → 80, seq 4000000000');
+  });
+});
+
+describe('an IPv6 packet', () => {
+  /** The IPv6 header and what follows it, without Ethernet's header, padding and frame check. */
+  const ipv6Of = (dissection: Dissection) => {
+    const start = field(dissection, 'ipv6.version')!.bytes![0];
+    const end = field(dissection, 'ethernet.padding')?.bytes![0] ?? dissection.bytes.length - 4;
+    return [...dissection.bytes.slice(start, end)];
+  };
+  /** An ICMPv6 message checks out when its sum with the pseudo-header comes to zero. */
+  const checksumOk = (packet: number[]) => {
+    const message = packet.slice(40);
+    const pseudo = [...packet.slice(8, 40), 0, 0, message.length >> 8, message.length & 0xff];
+    return internetChecksum([...pseudo, 0, 0, 0, 58, ...message]) === 0;
+  };
+
+  it('lays an echo request out byte for byte, with a checksum worked out by hand', () => {
+    const dissection = dissect(FRAMES['ICMPv6 echo']!);
+    expect(dissection.layers.map((layer) => layer.name)).toEqual(['Ethernet II', 'IPv6', 'ICMPv6']);
+    expect(bytesOf(dissection, 'ethernet.type')).toEqual([0x86, 0xdd]);
+    expect(field(dissection, 'ethernet.type')!.value).toBe('0x86DD (IPv6)');
+    // The pseudo-header's words sum to 0x2DCA + 0x2DCB (the addresses) + 8 (the length) + 0x3A
+    // (next header), and the message's to 0x8002: 0xDBD9 in all, whose complement is 0x2426.
+    expect(ipv6Of(dissection)).toEqual([
+      ...[0x60, 0, 0, 0, 0, 8, 58, 128],
+      ...[0x20, 0x01, 0x0d, 0xb8, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x10],
+      ...[0x20, 0x01, 0x0d, 0xb8, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x10],
+      ...[128, 0, 0x24, 0x26, 0, 1, 0, 1],
+    ]);
+    expect(field(dissection, 'icmpv6.checksum')!.value).toBe('0x2426');
+    expect(field(dissection, 'ipv6.length')!.value).toBe('8 bytes');
+    expect(field(dissection, 'ipv6.next')!.value).toBe('58 (ICMPv6)');
+    expect(field(dissection, 'ipv6.hopLimit')!.value).toBe('128');
+    expect(field(dissection, 'icmpv6.type')!.value).toBe('128 (echo request)');
+    expect(field(dissection, 'icmpv6.seq')!.value).toBe('1');
+    expect(dissection.layers[1]!.summary).toBe('2001:db8:1::10 → 2001:db8:2::10, hop limit 128');
+  });
+
+  it('lays a neighbor solicitation out with its target and source MAC option', () => {
+    const dissection = dissect(FRAMES['neighbor solicitation']!);
+    const packet = ipv6Of(dissection);
+    expect(packet.slice(40)).toEqual([
+      ...[135, 0, 0x51, 0xe0, 0, 0, 0, 0],
+      ...[0x20, 0x01, 0x0d, 0xb8, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+      ...[1, 1, 0x00, 0xd0, 0x97, 0x12, 0x34, 0x56],
+    ]);
+    expect(checksumOk(packet)).toBe(true);
+    expect(bytesOf(dissection, 'ethernet.dst')).toEqual([0x33, 0x33, 0xff, 0, 0, 1]);
+    expect(field(dissection, 'ethernet.dst')!.explain).toMatch(/solicited-node/);
+    expect(field(dissection, 'ipv6.dst')!.value).toBe('ff02::1:ff00:1');
+    expect(field(dissection, 'ipv6.dst')!.explain).toMatch(/solicited-node/);
+    expect(field(dissection, 'ipv6.hopLimit')!.explain).toMatch(/never crossed a router/);
+    expect(field(dissection, 'icmpv6.option.1')!.value).toBe(PC1_MAC);
+    expect(dissection.layers.map((layer) => layer.summary).slice(1)).toEqual([
+      '2001:db8:1::10 → ff02::1:ff00:1, hop limit 255',
+      'Neighbor solicitation for 2001:db8:1::1',
+    ]);
+  });
+
+  it('calls a solicitation from the unspecified address a duplicate address check', () => {
+    const dissection = dissect(FRAMES['duplicate address check']!);
+    expect(field(dissection, 'ipv6.src')!.explain).toMatch(/no address yet/);
+    expect(field(dissection, 'icmpv6.target')!.explain).toMatch(/duplicate address detection/);
+    expect(field(dissection, 'icmpv6.option.1')).toBeUndefined();
+    expect(checksumOk(ipv6Of(dissection))).toBe(true);
+  });
+
+  it('lays a neighbor advertisement out with its flags and the MAC it answers with', () => {
+    const dissection = dissect(FRAMES['neighbor advertisement']!);
+    expect(bytesOf(dissection, 'icmpv6.flags')).toEqual([0xe0, 0, 0, 0]);
+    expect(field(dissection, 'icmpv6.flags')!.value).toBe('0xE0 (Router, Solicited, Override)');
+    expect(bytesOf(dissection, 'icmpv6.option.2')).toEqual([2, 1, 0x00, 0xd0, 0x58, 0xaa, 0xbb, 1]);
+    expect(dissection.layers.at(-1)!.summary).toBe(
+      `Neighbor advertisement: 2001:db8:1::1 is at ${R1_MAC}`,
+    );
+    expect(checksumOk(ipv6Of(dissection))).toBe(true);
+  });
+
+  it('lays a router advertisement out with its MTU and prefix options', () => {
+    const dissection = dissect(FRAMES['router advertisement']!);
+    const packet = ipv6Of(dissection);
+    expect(packet.length).toBe(104);
+    expect(packet.slice(40, 44)).toEqual([134, 0, 0xdb, 0x6d]);
+    expect(checksumOk(packet)).toBe(true);
+    expect(packet.slice(44, 56)).toEqual([64, 0, 0x07, 0x08, 0, 0, 0, 0, 0, 0, 0, 0]);
+    expect(bytesOf(dissection, 'icmpv6.option.5')).toEqual([5, 1, 0, 0, 0, 0, 0x05, 0xdc]);
+    expect(packet.slice(72)).toEqual([
+      ...[3, 4, 64, 0xc0],
+      ...[0, 0x27, 0x8d, 0, 0, 0x09, 0x3a, 0x80, 0, 0, 0, 0],
+      ...[0x20, 0x01, 0x0d, 0xb8, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    ]);
+    expect(field(dissection, 'icmpv6.prefix.0.prefix')!.value).toBe('2001:db8:1::/64');
+    expect(field(dissection, 'icmpv6.prefix.0.flags')!.value).toBe('0xC0 (on-link, autonomous)');
+    expect(field(dissection, 'icmpv6.prefix.0.valid')!.value).toBe('2592000 s (30 days)');
+    expect(field(dissection, 'icmpv6.routerLifetime')!.value).toBe('1800 s (30 minutes)');
+    expect(field(dissection, 'icmpv6.flags')!.value).toBe('0x00 (none)');
+    expect(field(dissection, 'ethernet.dst')!.explain).toMatch(/all nodes/);
+    expect(field(dissection, 'ipv6.src')!.explain).toMatch(/link-local/);
+    expect(dissection.layers.at(-1)!.summary).toBe('Router advertisement, prefix 2001:db8:1::/64');
+  });
+
+  it('sends a router solicitation to the all-routers group', () => {
+    const dissection = dissect(FRAMES['router solicitation']!);
+    expect(bytesOf(dissection, 'ethernet.dst')).toEqual([0x33, 0x33, 0, 0, 0, 2]);
+    expect(field(dissection, 'ethernet.dst')!.explain).toMatch(/all routers/);
+    expect(field(dissection, 'ipv6.dst')!.explain).toMatch(/only the IPv6 routers/);
+    expect(checksumOk(ipv6Of(dissection))).toBe(true);
+  });
+
+  it('quotes the whole packet an error is about, while it fits in 1280 bytes', () => {
+    const dissection = dissect(FRAMES['ICMPv6 time exceeded']!);
+    expect(dissection.layers.map((layer) => layer.name)).toEqual([
+      'Ethernet II',
+      'IPv6',
+      'ICMPv6',
+      'Packet it is about',
+    ]);
+    const packet = ipv6Of(dissection);
+    expect(checksumOk(packet)).toBe(true);
+    expect(field(dissection, 'ipv6.length')!.value).toBe('56 bytes');
+    expect(field(dissection, 'quoted.header')!.value).toBe(
+      '2001:db8:1::10 → 2001:db8:2::10, hop limit 1',
+    );
+    const echo = ipv6Of(dissect(FRAMES['ICMPv6 echo']!));
+    expect(packet.slice(48)).toEqual([...echo.slice(0, 7), 1, ...echo.slice(8)]);
+    expect(field(dissection, 'quoted.payload')!.value).toBe('ICMPv6 echo request, id 1, seq 1');
+
+    const unreachable = dissect(FRAMES['ICMPv6 unreachable']!);
+    expect(field(unreachable, 'icmpv6.code')!.value).toBe('0 (no route)');
+    expect(unreachable.layers[2]!.summary).toBe('Destination unreachable (no route)');
+  });
+
+  it('cuts a quoted packet off at the minimum MTU', () => {
+    const nested = (depth: number): Ipv6Packet =>
+      depth === 0
+        ? echoRequest6
+        : {
+            ...hopLimitExceeded,
+            payload: { kind: 'icmpv6', type: 'time-exceeded', original: nested(depth - 1) },
+          };
+    const dissection = dissect({ kind: 'hdlc', payload: nested(40) });
+    expect(field(dissection, 'ipv6.length')!.value).toBe('1240 bytes');
+  });
+
+  it('frames IPv6 on a serial link in Cisco HDLC', () => {
+    const dissection = dissect(FRAMES['HDLC ICMPv6 echo']!);
+    expect(dissection.layers.map((layer) => layer.name)).toEqual(['Cisco HDLC', 'IPv6', 'ICMPv6']);
+    expect(dissection.layers[0]!.summary).toBe('Serial link, IPv6 inside');
+    expect(field(dissection, 'hdlc.protocol')!.value).toBe('0x86DD (IPv6)');
+    expect(bytesOf(dissection, 'hdlc.protocol')).toEqual([0x86, 0xdd]);
+    expect(dissection.bytes.length).toBe(1 + 4 + 48 + 2 + 1);
   });
 });

@@ -12,6 +12,7 @@ export type Part = {
 export const u16 = (value: number) => [(value >> 8) & 0xff, value & 0xff];
 export const u32 = (value: number) => [...u16(Math.floor(value / 0x10000)), ...u16(value & 0xffff)];
 export const ipBytes = (address: string) => address.split('.').map(Number);
+export const macBytes = (mac: string) => mac.split(':').map((part) => parseInt(part, 16));
 export const hex = (value: number, digits: number) =>
   `0x${value.toString(16).toUpperCase().padStart(digits, '0')}`;
 
