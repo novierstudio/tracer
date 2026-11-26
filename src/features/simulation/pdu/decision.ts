@@ -17,9 +17,26 @@ import {
   type RipMessage,
   type RipVersion,
 } from '@/engine/pdu';
+import { isNdp, type Ipv6Packet, type RouterAdvertisement } from '@/engine/pdu6';
 import type { TcpSegment } from '@/engine/tcp';
 import { shortPortName } from '@/features/canvas/cables';
 import type { Device, Ipv4Address, MacAddress, PortId, VlanId } from '@/model';
+import {
+  ALL_NODES,
+  ALL_ROUTERS,
+  configuredIpv6Addresses,
+  eui64Address,
+  eui64Mac,
+  interfaceLinkLocal,
+  ipv6Enabled,
+  isIpv6,
+  isIpv6Multicast,
+  linkLocalOf,
+  solicitedNode,
+  UNSPECIFIED_IPV6,
+  type IpAddress,
+  type Ipv6Address,
+} from '@/model/ipv6';
 
 /**
  * What the receiving device did with a frame, read from the frames it sent while it handled
@@ -30,12 +47,26 @@ export type Decision =
   | { kind: 'link-test' }
   | { kind: 'spanning-tree'; out: readonly PortId[] }
   | { kind: 'routed'; out: PortId; ttl: readonly [number, number] }
+  /** IPv6 has a hop limit where IPv4 has a TTL. */
+  | { kind: 'routed'; out: PortId; hopLimit: readonly [number, number] }
   | { kind: 'switched'; out: PortId; retag: Retag }
   | { kind: 'flooded'; out: readonly PortId[]; vlan: VlanId | undefined; broadcast: boolean }
-  | { kind: 'replied'; reply: 'echo' | 'arp'; out: PortId }
-  | { kind: 'resolving'; nextHop: Ipv4Address; out: PortId; forThisDevice: boolean }
-  | { kind: 'learned'; ip: Ipv4Address; mac: MacAddress; released: readonly PortId[] }
-  | { kind: 'received'; message: 'echo-reply' | 'time-exceeded' | 'unreachable'; from: Ipv4Address }
+  /** `neighbor` answers a neighbor solicitation, `router` a router solicitation. */
+  | { kind: 'replied'; reply: 'echo' | 'arp' | 'neighbor' | 'router'; out: PortId }
+  /** An IPv4 next hop is resolved by ARP, an IPv6 one by a neighbor solicitation. */
+  | { kind: 'resolving'; nextHop: IpAddress; out: PortId; forThisDevice: boolean }
+  | { kind: 'learned'; ip: IpAddress; mac: MacAddress; released: readonly PortId[] }
+  | { kind: 'received'; message: 'echo-reply' | 'time-exceeded' | 'unreachable'; from: IpAddress }
+  /**
+   * A device set to autoconfigure took a router advertisement: the addresses it formed by SLAAC,
+   * and whether it now uses the router as its default gateway.
+   */
+  | {
+      kind: 'autoconfigured';
+      router: Ipv6Address;
+      addresses: readonly Ipv6Address[];
+      gateway: boolean;
+    }
   | { kind: 'dhcp'; step: DhcpStep }
   /** A host took a DNS message or TCP segment for it: a step of fetching a web page. */
   | { kind: 'web'; step: WebStep }
@@ -84,8 +115,11 @@ export type Retag =
 
 export type DropReason =
   | { kind: 'ttl-expired' }
-  | { kind: 'no-route'; dst: Ipv4Address }
-  | { kind: 'no-route-back'; dst: Ipv4Address }
+  | { kind: 'hop-limit-expired' }
+  | { kind: 'no-route'; dst: IpAddress }
+  | { kind: 'no-route-back'; dst: IpAddress }
+  /** Nobody answered the router's neighbor solicitations for an IPv6 destination on its link. */
+  | { kind: 'address-unreachable'; dst: Ipv6Address }
   /** An access list on the device denied the packet. */
   | { kind: 'acl-deny' }
   | { kind: 'tagged-on-access' }
@@ -96,7 +130,12 @@ export type DropReason =
 export type IgnoreReason =
   | { kind: 'other-mac'; dst: MacAddress }
   | { kind: 'arp-for-other'; target: Ipv4Address }
-  | { kind: 'other-ip'; dst: Ipv4Address }
+  | { kind: 'other-ip'; dst: IpAddress }
+  /** An IPv6 multicast group the device has not joined. */
+  | { kind: 'other-group'; group: Ipv6Address }
+  | { kind: 'neighbor-for-other'; target: Ipv6Address }
+  /** A router advertisement reached a device that does not autoconfigure. */
+  | { kind: 'no-autoconfig' }
   | { kind: 'bpdu' }
   | { kind: 'dhcp-for-other'; client: MacAddress }
   | { kind: 'dhcp-not-server'; message: DhcpMessage['type'] }
@@ -512,6 +551,202 @@ function decideIp(
   return { kind: 'ignored', reason: { kind: 'other-ip', dst: packet.dst } };
 }
 
+const ipv6Of = (frame: Frame): Ipv6Packet | undefined =>
+  (frame.kind === 'hdlc' || frame.kind === 'ethernet') && frame.payload.kind === 'ipv6'
+    ? frame.payload
+    : undefined;
+
+/**
+ * The IPv6 addresses the device's config gives it: every link-local and every configured address.
+ * A host's SLAAC addresses are not among them.
+ */
+function ownIpv6Addresses(device: Device): Ipv6Address[] {
+  switch (device.kind) {
+    case 'pc':
+    case 'server': {
+      const { ipv6 } = device.config;
+      const linkLocals = device.ports.flatMap((port) =>
+        port.kind === 'serial' ? [] : [linkLocalOf(port.mac)],
+      );
+      return ipv6?.mode === 'static' && ipv6.address
+        ? [...linkLocals, ipv6.address.address]
+        : linkLocals;
+    }
+    case 'router': {
+      const { interfaces, subinterfaces } = device.config;
+      return [...Object.entries(interfaces), ...Object.entries(subinterfaces)].flatMap(
+        ([id, iface]) => {
+          const config = iface?.ipv6;
+          // A subinterface builds its EUI-64 identifiers from its port's MAC.
+          const mac = eui64Mac(device.ports, id.split('.')[0]);
+          if (!config || !ipv6Enabled(config) || !mac) return [];
+          const configured = configuredIpv6Addresses(config, mac).map((cidr) => cidr.address);
+          return [interfaceLinkLocal(config, mac), ...configured];
+        },
+      );
+    }
+    case 'switch':
+      return [];
+  }
+}
+
+/**
+ * The multicast groups the device listens to: all nodes, all routers on a router that routes
+ * IPv6, and the solicited-node group of each of its addresses. A SLAAC address shares its
+ * EUI-64 identifier, and so its group, with the link-local address.
+ */
+function ipv6Groups(device: Device, own: readonly Ipv6Address[]): Ipv6Address[] {
+  if (own.length === 0) return [];
+  const router = device.kind === 'router' && device.config.ipv6UnicastRouting === true;
+  return [ALL_NODES, ...(router ? [ALL_ROUTERS] : []), ...own.map(solicitedNode)];
+}
+
+/** The same packet, one router further on. IPv6 has no identification field to match. */
+const isForward6 = (packet: Ipv6Packet, next: Ipv6Packet) =>
+  next.src === packet.src &&
+  next.dst === packet.dst &&
+  next.hopLimit === packet.hopLimit - 1 &&
+  JSON.stringify(next.payload) === JSON.stringify(packet.payload);
+
+/**
+ * What a device set to autoconfigure took from a router advertisement: the addresses it checked
+ * with duplicate address detection if it sent any, else the EUI-64 address in each /64 it may
+ * autoconfigure in.
+ */
+function autoconfigure(
+  device: Device,
+  port: PortId,
+  packet: Ipv6Packet,
+  advert: RouterAdvertisement,
+  sent: readonly SentFrame[],
+): Decision {
+  const host = device.kind === 'pc' || device.kind === 'server';
+  const auto =
+    device.kind === 'pc' || device.kind === 'server'
+      ? device.config.ipv6?.mode === 'auto'
+      : device.kind === 'router' && device.config.interfaces[port]?.ipv6?.autoconfig === true;
+  if (!auto) return { kind: 'ignored', reason: { kind: 'no-autoconfig' } };
+  const checked = sent.flatMap(({ frame }) => {
+    const probe = ipv6Of(frame);
+    return probe?.src === UNSPECIFIED_IPV6 && probe.payload.type === 'neighbor-solicitation'
+      ? [probe.payload.target]
+      : [];
+  });
+  const mac = eui64Mac(device.ports, port);
+  const derived = advert.prefixes.flatMap(({ prefix, autonomous }) =>
+    autonomous && prefix.prefixLength === 64 && mac ? [eui64Address(prefix.address, mac)] : [],
+  );
+  return {
+    kind: 'autoconfigured',
+    router: packet.src,
+    addresses: checked.length > 0 ? checked : derived,
+    gateway: host && advert.routerLifetime > 0,
+  };
+}
+
+/**
+ * What a device did with an IPv6 packet. Its answers come first, as for IPv4: a forwarded copy,
+ * an ICMPv6 reply or error, or Neighbor Discovery.
+ */
+function decideIpv6(
+  device: Device,
+  frame: Frame,
+  port: PortId,
+  packet: Ipv6Packet,
+  sent: readonly SentFrame[],
+): Decision {
+  const own = ownIpv6Addresses(device);
+  const group = isIpv6Multicast(packet.dst);
+  if (group && !ipv6Groups(device, own).includes(packet.dst)) {
+    return { kind: 'ignored', reason: { kind: 'other-group', group: packet.dst } };
+  }
+  if (!group && frame.kind === 'ethernet' && !ownMac(device, frame.dst)) {
+    return { kind: 'ignored', reason: { kind: 'other-mac', dst: frame.dst } };
+  }
+  // A host does not route, so a packet that reached it is for it, SLAAC addresses included.
+  const mine =
+    group || own.includes(packet.dst) || device.kind === 'pc' || device.kind === 'server';
+  for (const { port: out, frame: next } of sent) {
+    const forwarded = ipv6Of(next);
+    if (forwarded && isForward6(packet, forwarded)) {
+      return { kind: 'routed', out, hopLimit: [packet.hopLimit, forwarded.hopLimit] };
+    }
+  }
+  const message = packet.payload;
+  for (const { port: out, frame: next } of sent) {
+    const reply = ipv6Of(next);
+    const answer = reply?.payload;
+    switch (answer?.type) {
+      case 'echo-reply':
+        return { kind: 'replied', reply: 'echo', out };
+      case 'time-exceeded':
+        return { kind: 'dropped', reason: { kind: 'hop-limit-expired' }, notified: out };
+      case 'destination-unreachable': {
+        const reason: DropReason =
+          answer.code === 'no-route'
+            ? { kind: 'no-route', dst: packet.dst }
+            : { kind: 'address-unreachable', dst: packet.dst };
+        return { kind: 'dropped', reason, notified: out };
+      }
+      case 'neighbor-advertisement':
+        if (message.type === 'neighbor-solicitation') {
+          return { kind: 'replied', reply: 'neighbor', out };
+        }
+        break;
+      case 'router-advertisement':
+        if (message.type === 'router-solicitation')
+          return { kind: 'replied', reply: 'router', out };
+        break;
+      case 'neighbor-solicitation':
+        // From the unspecified address, it checks an address of the device's own.
+        if (reply?.src !== UNSPECIFIED_IPV6) {
+          return { kind: 'resolving', nextHop: answer.target, out, forThisDevice: mine };
+        }
+        break;
+    }
+  }
+  switch (message.type) {
+    case 'neighbor-solicitation':
+      return own.includes(message.target)
+        ? { kind: 'silent' }
+        : { kind: 'ignored', reason: { kind: 'neighbor-for-other', target: message.target } };
+    case 'neighbor-advertisement': {
+      const released = sent.filter((s) => {
+        const waiting = ipv6Of(s.frame);
+        return waiting && !isNdp(waiting.payload);
+      });
+      return {
+        kind: 'learned',
+        ip: message.target,
+        mac: message.targetMac,
+        released: released.map((s) => s.port),
+      };
+    }
+    case 'router-solicitation':
+      return { kind: 'silent' };
+    case 'router-advertisement':
+      return autoconfigure(device, port, packet, message, sent);
+  }
+  if (mine) {
+    switch (message.type) {
+      case 'echo-reply':
+        return { kind: 'received', message: 'echo-reply', from: packet.src };
+      case 'time-exceeded':
+        return { kind: 'received', message: 'time-exceeded', from: packet.src };
+      case 'destination-unreachable':
+        return { kind: 'received', message: 'unreachable', from: packet.src };
+      case 'echo-request':
+        return { kind: 'dropped', reason: { kind: 'no-route-back', dst: packet.src } };
+    }
+  }
+  if (device.kind === 'router' && device.config.ipv6UnicastRouting) {
+    return packet.hopLimit <= 1
+      ? { kind: 'dropped', reason: { kind: 'hop-limit-expired' } }
+      : { kind: 'dropped', reason: { kind: 'no-route', dst: packet.dst } };
+  }
+  return { kind: 'ignored', reason: { kind: 'other-ip', dst: packet.dst } };
+}
+
 /** What `device`, the frame's receiver, did with it. Undefined when the device is gone. */
 export function decide(event: FrameEvent, device: Device | undefined): Decision | undefined {
   if (event.outcome === 'link-down') return { kind: 'lost' };
@@ -525,6 +760,8 @@ export function decide(event: FrameEvent, device: Device | undefined): Decision 
   if (frame.kind === 'ethernet' && frame.payload.kind === 'bpdu') {
     return { kind: 'ignored', reason: { kind: 'bpdu' } };
   }
+  const packet6 = ipv6Of(frame);
+  if (packet6) return decideIpv6(device, frame, event.to.port, packet6, sent);
   const rip = ripFor(device, frame);
   const ospf = ospfFor(device, frame);
   const local =
@@ -549,10 +786,14 @@ export function dropLabel(decision: Decision | undefined): string | undefined {
   switch (decision.reason.kind) {
     case 'ttl-expired':
       return 'TTL expired';
+    case 'hop-limit-expired':
+      return 'Hop limit expired';
     case 'no-route':
       return 'No route';
     case 'no-route-back':
       return 'No route back';
+    case 'address-unreachable':
+      return 'No neighbor';
     case 'acl-deny':
       return 'ACL deny';
     case 'tagged-on-access':
@@ -586,12 +827,28 @@ function describeSwitched(name: string, out: PortId, retag: Retag): string {
   }
 }
 
+function describeReplied(name: string, { reply, out }: Extract<Decision, { kind: 'replied' }>) {
+  const port = shortPortName(out);
+  switch (reply) {
+    case 'echo':
+      return `${name} is the destination, so it sent an echo reply back out ${port}.`;
+    case 'arp':
+      return `${name} owns the address asked for, so it sent an ARP reply with its MAC out ${port}.`;
+    case 'neighbor':
+      return `${name} owns the address asked for, so it sent a neighbor advertisement with its MAC out ${port}.`;
+    case 'router':
+      return `${name} routes IPv6, so it answered with a router advertisement out ${port}.`;
+  }
+}
+
 function describeReceived(name: string, decision: Extract<Decision, { kind: 'received' }>) {
   switch (decision.message) {
     case 'echo-reply':
       return `The echo reply reached ${name}: the ping succeeded.`;
     case 'time-exceeded':
-      return `${name} heard from ${decision.from} that its packet ran out of TTL on the way.`;
+      return isIpv6(decision.from)
+        ? `${name} heard from ${decision.from} that its packet ran out of hop limit on the way.`
+        : `${name} heard from ${decision.from} that its packet ran out of TTL on the way.`;
     case 'unreachable':
       return `${name} heard from ${decision.from} that the destination cannot be reached.`;
   }
@@ -603,10 +860,14 @@ function describeDrop(name: string, { reason, notified }: Extract<Decision, { ki
   switch (reason.kind) {
     case 'ttl-expired':
       return `The TTL ran out at ${name}, so it dropped the packet${notice('Time Exceeded')}.`;
+    case 'hop-limit-expired':
+      return `The hop limit ran out at ${name}, so it dropped the packet${notice('Time Exceeded')}.`;
     case 'no-route':
       return `${name} has no route to ${reason.dst}, so it dropped the packet${notice('Destination Unreachable')}.`;
     case 'no-route-back':
       return `${name} is the destination but has no route back to ${reason.dst}, so it could not reply.`;
+    case 'address-unreachable':
+      return `Nothing on ${name}'s link answered for ${reason.dst}, so it dropped the packet${notice('Destination Unreachable (address unreachable)')}.`;
     case 'acl-deny':
       return `An access list on ${name} denied the packet, so it dropped it${notice('Destination Unreachable (administratively prohibited)')}.`;
     case 'tagged-on-access':
@@ -705,7 +966,13 @@ function describeIgnore(name: string, reason: IgnoreReason) {
     case 'arp-for-other':
       return `${name} ignored it: the request asks for ${reason.target}, which is not ${name}'s address.`;
     case 'other-ip':
-      return `${name} ignored it: it is for ${reason.dst}, and ${name} does not route.`;
+      return `${name} ignored it: it is for ${reason.dst}, and ${name} does not route${isIpv6(reason.dst) ? ' IPv6' : ''}.`;
+    case 'other-group':
+      return `${name} ignored it: it is for ${reason.group}${GROUP_NAMES[reason.group] ?? ''}, a group ${name} has not joined.`;
+    case 'neighbor-for-other':
+      return `${name} ignored it: the solicitation asks for ${reason.target}, which is not ${name}'s address.`;
+    case 'no-autoconfig':
+      return `${name} ignored it: it is not set to autoconfigure IPv6, so it takes no address from router advertisements.`;
     case 'bpdu':
       return `${name} ignored it: only switches run spanning tree.`;
     case 'dhcp-for-other':
@@ -719,6 +986,25 @@ function describeIgnore(name: string, reason: IgnoreReason) {
     case 'rip-version':
       return `${name} ignored it: it is RIPv${reason.version}, and ${name} is set to RIP version ${reason.accepts} only.`;
   }
+}
+
+const GROUP_NAMES: Partial<Record<Ipv6Address, string>> = {
+  [ALL_NODES]: ' (all nodes)',
+  [ALL_ROUTERS]: ' (all IPv6 routers)',
+};
+
+function describeAutoconfigured(
+  name: string,
+  { router, addresses, gateway }: Extract<Decision, { kind: 'autoconfigured' }>,
+) {
+  const took = `${name} took the router advertisement from ${router}`;
+  if (addresses.length === 0) {
+    return gateway
+      ? `${took} and uses it as its default gateway. It advertised no prefix to form an address from.`
+      : `${took}. It advertised no prefix to form an address from.`;
+  }
+  const formed = `${took} and gave itself ${addresses.join(' and ')} by SLAAC`;
+  return gateway ? `${formed}, with ${router} as its default gateway.` : `${formed}.`;
 }
 
 function describeRip(name: string, { command, version, out }: Extract<Decision, { kind: 'rip' }>) {
@@ -769,8 +1055,11 @@ export function describeDecision(decision: Decision, name: string): string {
       return decision.out.length > 0
         ? `${name} fed the BPDU to spanning tree and sent its own BPDU out ${list(decision.out)}.`
         : `${name} fed the BPDU to spanning tree, which uses it to elect the root and choose the ports that forward.`;
-    case 'routed':
-      return `${name} forwarded it out ${shortPortName(decision.out)} and lowered the TTL from ${decision.ttl[0]} to ${decision.ttl[1]}.`;
+    case 'routed': {
+      const [counter, [before, after]] =
+        'hopLimit' in decision ? ['hop limit', decision.hopLimit] : ['TTL', decision.ttl];
+      return `${name} forwarded it out ${shortPortName(decision.out)} and lowered the ${counter} from ${before} to ${after}.`;
+    }
     case 'switched':
       return describeSwitched(name, decision.out, decision.retag);
     case 'flooded': {
@@ -781,17 +1070,19 @@ export function describeDecision(decision: Decision, name: string): string {
       return `${name} flooded it out ${plural(decision.out.length, 'port')} (${list(decision.out)}): ${why}${where} except the one it came in on.`;
     }
     case 'replied':
-      return decision.reply === 'echo'
-        ? `${name} is the destination, so it sent an echo reply back out ${shortPortName(decision.out)}.`
-        : `${name} owns the address asked for, so it sent an ARP reply with its MAC out ${shortPortName(decision.out)}.`;
-    case 'resolving':
+      return describeReplied(name, decision);
+    case 'resolving': {
+      const ask = isIpv6(decision.nextHop) ? 'a neighbor solicitation' : 'an ARP request';
       return decision.forThisDevice
-        ? `${name} is the destination. Before it can reply it needs the MAC of ${decision.nextHop}, so it sent an ARP request out ${shortPortName(decision.out)}.`
-        : `${name} needs the MAC of next hop ${decision.nextHop}, so it held the packet and sent an ARP request out ${shortPortName(decision.out)}.`;
+        ? `${name} is the destination. Before it can reply it needs the MAC of ${decision.nextHop}, so it sent ${ask} out ${shortPortName(decision.out)}.`
+        : `${name} needs the MAC of next hop ${decision.nextHop}, so it held the packet and sent ${ask} out ${shortPortName(decision.out)}.`;
+    }
     case 'learned':
       return decision.released.length > 0
         ? `${name} learned that ${decision.ip} is at ${decision.mac} and sent the waiting packet out ${list(decision.released)}.`
-        : `${name} learned that ${decision.ip} is at ${decision.mac} and saved it in its ARP cache.`;
+        : `${name} learned that ${decision.ip} is at ${decision.mac} and saved it in its ${isIpv6(decision.ip) ? 'neighbor' : 'ARP'} cache.`;
+    case 'autoconfigured':
+      return describeAutoconfigured(name, decision);
     case 'received':
       return describeReceived(name, decision);
     case 'dhcp':

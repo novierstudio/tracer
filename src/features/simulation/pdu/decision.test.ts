@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { EventId, FrameEvent } from '@/engine/events';
+import type { Frame } from '@/engine/frame';
+import type { Ipv6Packet } from '@/engine/pdu6';
 import {
   ALL_D_ROUTERS,
   ALL_SPF_ROUTERS,
@@ -24,20 +26,36 @@ import {
   type Topology,
 } from '@/model';
 import {
+  eui64Address,
+  ipv6MulticastMac,
+  solicitedNode,
+  UNSPECIFIED_IPV6,
+  type Ipv6Address,
+} from '@/model/ipv6';
+import {
   dnsAnswer,
   dnsNoSuchName,
   dnsQuery,
+  echoRequest6,
+  neighborAdvertisement,
+  neighborSolicitation,
   ospfAck,
   ospfDbd,
   ospfHello,
   ospfLsr,
   ospfLsu,
   ospfPacket,
+  PC1_IPV6,
   pingFrames,
+  R1_IPV6,
+  R1_LINK_LOCAL,
+  R1_MAC,
   ripPacket,
   ripRequest,
   ripV1Response,
   ripV2Response,
+  routerAdvertisement,
+  routerSolicitation,
   tcpRefusal,
   webPacket,
   webSession,
@@ -633,5 +651,248 @@ describe('fetching a web page', () => {
     expect(sentence(pc2, elsewhere)).toBe(
       'PC2 ignored it: it is for 192.168.2.99, and PC2 does not route.',
     );
+  });
+});
+
+describe('an IPv6 frame', () => {
+  const v6 = (text: string) => text as Ipv6Address;
+  const routed = routedLab();
+  const { lab, pc1, pc2, r1 } = routed;
+  const cidr6 = (address: string) => ({ address: v6(address), prefixLength: 64 });
+  /** R1 routes IPv6 with 2001:db8:1::1 and fe80::1 on Gi0/0; PC1 autoconfigures; PC2 is static. */
+  lab.edit(r1, (device) =>
+    device.kind === 'router'
+      ? {
+          ...device,
+          config: {
+            ...device.config,
+            ipv6UnicastRouting: true,
+            interfaces: {
+              ...device.config.interfaces,
+              [PortId.parse('GigabitEthernet0/0')]: {
+                ...device.config.interfaces[PortId.parse('GigabitEthernet0/0')]!,
+                ipv6: {
+                  linkLocal: R1_LINK_LOCAL,
+                  addresses: [{ cidr: cidr6('2001:db8:1::1'), eui64: false }],
+                },
+              },
+            },
+          },
+        }
+      : device,
+  );
+  lab.edit(pc1, (device) =>
+    device.kind === 'pc'
+      ? { ...device, config: { ...device.config, ipv6: { mode: 'auto' } } }
+      : device,
+  );
+  lab.edit(pc2, (device) =>
+    device.kind === 'pc'
+      ? {
+          ...device,
+          config: {
+            ...device.config,
+            ipv6: { mode: 'static', address: cidr6('2001:db8:2::10'), gateway: v6('fe80::1') },
+          },
+        }
+      : device,
+  );
+  const router = lab.device(r1);
+  const pc1Mac = macOf(lab.device(pc1), 'FastEthernet0')!;
+  const pc2Mac = macOf(lab.device(pc2), 'FastEthernet0')!;
+  const r1Mac = macOf(router, 'GigabitEthernet0/0')!;
+  const gi0 = PortId.parse('GigabitEthernet0/0');
+  const gi1 = PortId.parse('GigabitEthernet0/1');
+  const fa0 = PortId.parse('FastEthernet0');
+
+  /** `packet` in an Ethernet frame to `dst`: a device's MAC, or the MAC of the group it is sent to. */
+  const frame = (packet: Ipv6Packet, dst?: MacAddress): EthernetFrame => ({
+    kind: 'ethernet',
+    src: mac(9),
+    dst: dst ?? ipv6MulticastMac(packet.dst),
+    payload: packet,
+  });
+  const out = (port: PortId, packet: Ipv6Packet, dst: MacAddress = mac(9)) => ({
+    port,
+    frame: frame(packet, dst),
+  });
+  function told(to: DeviceId, port: string, arrived: Frame, sent: FrameEvent['sent'] = []) {
+    const device = lab.device(to);
+    const event = { ...arrival(to, port, arrived as EthernetFrame, sent), frame: arrived };
+    const decision = decide(event, device)!;
+    return { sentence: describeDecision(decision, device.config.hostname), decision };
+  }
+  const sentence = (...args: Parameters<typeof told>) => told(...args).sentence;
+  const icmp = (payload: Ipv6Packet['payload'], src = R1_IPV6, dst = PC1_IPV6): Ipv6Packet => ({
+    kind: 'ipv6',
+    src,
+    dst,
+    hopLimit: 64,
+    payload,
+  });
+
+  it('tells each step of a ping across R1, with the hop limit it lowered', () => {
+    const atR1 = frame(echoRequest6, r1Mac);
+    const forwarded = { ...echoRequest6, hopLimit: 127 };
+    const solicit: Ipv6Packet = {
+      ...neighborSolicitation,
+      src: v6('fe80::1'),
+      dst: solicitedNode(forwarded.dst),
+      payload: { kind: 'icmpv6', type: 'neighbor-solicitation', target: forwarded.dst },
+    };
+    const reply = icmp({ kind: 'icmpv6', type: 'echo-reply', id: 1, seq: 1 }, forwarded.dst);
+    expect([
+      sentence(r1, 'GigabitEthernet0/0', atR1, [out(gi1, forwarded)]),
+      sentence(r1, 'GigabitEthernet0/0', atR1, [out(gi1, solicit, ipv6MulticastMac(solicit.dst))]),
+      sentence(pc2, 'FastEthernet0', frame(forwarded, pc2Mac), [out(fa0, reply)]),
+      sentence(pc1, 'FastEthernet0', frame(reply, pc1Mac)),
+    ]).toEqual([
+      'R1 forwarded it out Gi0/1 and lowered the hop limit from 128 to 127.',
+      'R1 needs the MAC of next hop 2001:db8:2::10, so it held the packet and sent a neighbor solicitation out Gi0/1.',
+      'PC2 is the destination, so it sent an echo reply back out Fa0.',
+      'The echo reply reached PC1: the ping succeeded.',
+    ]);
+  });
+
+  it('says R1 dropped a packet whose hop limit ran out, or that it has no route for', () => {
+    const lastHop = frame({ ...echoRequest6, hopLimit: 1 }, r1Mac);
+    const exceeded = icmp({ kind: 'icmpv6', type: 'time-exceeded', original: echoRequest6 });
+    const expired = told(r1, 'GigabitEthernet0/0', lastHop, [out(gi0, exceeded)]);
+    expect(expired.sentence).toBe(
+      'The hop limit ran out at R1, so it dropped the packet and sent Time Exceeded back out Gi0/0.',
+    );
+    expect(dropLabel(expired.decision)).toBe('Hop limit expired');
+
+    const nowhere = { ...echoRequest6, dst: v6('2001:db8:9::1') };
+    const unreachable = (code: 'no-route' | 'address-unreachable') =>
+      icmp({ kind: 'icmpv6', type: 'destination-unreachable', code, original: nowhere });
+    const noRoute = told(r1, 'GigabitEthernet0/0', frame(nowhere, r1Mac), [
+      out(gi0, unreachable('no-route')),
+    ]);
+    expect(noRoute.sentence).toBe(
+      'R1 has no route to 2001:db8:9::1, so it dropped the packet and sent Destination Unreachable back out Gi0/0.',
+    );
+    expect(dropLabel(noRoute.decision)).toBe('No route');
+    const unanswered = told(r1, 'GigabitEthernet0/0', frame(nowhere, r1Mac), [
+      out(gi0, unreachable('address-unreachable')),
+    ]);
+    expect(unanswered.sentence).toBe(
+      "Nothing on R1's link answered for 2001:db8:9::1, so it dropped the packet and sent Destination Unreachable (address unreachable) back out Gi0/0.",
+    );
+    // A router tells nobody about an ICMPv6 error it cannot deliver.
+    expect(sentence(r1, 'GigabitEthernet0/0', lastHop)).toBe(
+      'The hop limit ran out at R1, so it dropped the packet.',
+    );
+  });
+
+  it('says what the sender heard from the router', () => {
+    const original = { ...echoRequest6, hopLimit: 1 };
+    const exceeded = icmp({ kind: 'icmpv6', type: 'time-exceeded', original });
+    const unreachable = icmp({
+      kind: 'icmpv6',
+      type: 'destination-unreachable',
+      code: 'no-route',
+      original,
+    });
+    expect(sentence(pc1, 'FastEthernet0', frame(exceeded, pc1Mac))).toBe(
+      'PC1 heard from 2001:db8:1::1 that its packet ran out of hop limit on the way.',
+    );
+    expect(sentence(pc1, 'FastEthernet0', frame(unreachable, pc1Mac))).toBe(
+      'PC1 heard from 2001:db8:1::1 that the destination cannot be reached.',
+    );
+  });
+
+  it('answers a neighbor solicitation for its own address, and ignores the rest', () => {
+    const toGroup = frame(neighborSolicitation);
+    const advert = { ...neighborAdvertisement, dst: neighborSolicitation.src };
+    expect(sentence(r1, 'GigabitEthernet0/0', toGroup, [out(gi0, advert)])).toBe(
+      'R1 owns the address asked for, so it sent a neighbor advertisement with its MAC out Gi0/0.',
+    );
+    expect(sentence(pc2, 'FastEthernet0', toGroup)).toBe(
+      'PC2 ignored it: it is for ff02::1:ff00:1, a group PC2 has not joined.',
+    );
+    // 2001:db8:5::1 shares its last 24 bits, and so its group, with R1's address.
+    const other: Ipv6Packet = {
+      ...neighborSolicitation,
+      payload: { kind: 'icmpv6', type: 'neighbor-solicitation', target: v6('2001:db8:5::1') },
+    };
+    expect(sentence(r1, 'GigabitEthernet0/0', frame(other))).toBe(
+      "R1 ignored it: the solicitation asks for 2001:db8:5::1, which is not R1's address.",
+    );
+  });
+
+  it('learns the MAC a neighbor advertisement carries and sends what waited for it', () => {
+    const advert = frame(neighborAdvertisement, pc1Mac);
+    expect(sentence(pc1, 'FastEthernet0', advert, [out(fa0, echoRequest6, r1Mac)])).toBe(
+      `PC1 learned that 2001:db8:1::1 is at ${R1_MAC} and sent the waiting packet out Fa0.`,
+    );
+    expect(sentence(pc1, 'FastEthernet0', advert)).toBe(
+      `PC1 learned that 2001:db8:1::1 is at ${R1_MAC} and saved it in its neighbor cache.`,
+    );
+  });
+
+  it('has a router answer a router solicitation, which hosts do not listen for', () => {
+    const solicit = frame(routerSolicitation);
+    expect(sentence(r1, 'GigabitEthernet0/0', solicit, [out(gi0, routerAdvertisement)])).toBe(
+      'R1 routes IPv6, so it answered with a router advertisement out Gi0/0.',
+    );
+    expect(sentence(pc2, 'FastEthernet0', solicit)).toBe(
+      'PC2 ignored it: it is for ff02::2 (all IPv6 routers), a group PC2 has not joined.',
+    );
+  });
+
+  it('has a host set to autoconfigure take a router advertisement, and a static host ignore it', () => {
+    const advert = frame(routerAdvertisement);
+    const slaac = eui64Address(v6('2001:db8:1::'), pc1Mac);
+    expect(sentence(pc1, 'FastEthernet0', advert)).toBe(
+      `PC1 took the router advertisement from fe80::1 and gave itself ${slaac} by SLAAC, with fe80::1 as its default gateway.`,
+    );
+    // The address it checks for duplicates is the one it formed.
+    const checked = v6('2001:db8:1::abcd');
+    const probe: Ipv6Packet = {
+      ...neighborSolicitation,
+      src: UNSPECIFIED_IPV6,
+      dst: solicitedNode(checked),
+      payload: { kind: 'icmpv6', type: 'neighbor-solicitation', target: checked },
+    };
+    expect(sentence(pc1, 'FastEthernet0', advert, [out(fa0, probe)])).toBe(
+      'PC1 took the router advertisement from fe80::1 and gave itself 2001:db8:1::abcd by SLAAC, with fe80::1 as its default gateway.',
+    );
+    const leaving = { ...routerAdvertisement.payload, routerLifetime: 0, prefixes: [] };
+    expect(
+      sentence(pc1, 'FastEthernet0', frame({ ...routerAdvertisement, payload: leaving })),
+    ).toBe(
+      'PC1 took the router advertisement from fe80::1. It advertised no prefix to form an address from.',
+    );
+    expect(sentence(pc2, 'FastEthernet0', advert)).toBe(
+      'PC2 ignored it: it is not set to autoconfigure IPv6, so it takes no address from router advertisements.',
+    );
+  });
+
+  it('ignores a frame for another MAC, and a packet a router that does not route IPv6 is sent', () => {
+    expect(sentence(pc2, 'FastEthernet0', frame(echoRequest6, mac(7)))).toBe(
+      "PC2 ignored it: it is addressed to 02:00:00:00:00:07, not to PC2's MAC.",
+    );
+    const plain = routedLab();
+    const plainMac = macOf(plain.lab.device(plain.r1), 'GigabitEthernet0/0')!;
+    const event = arrival(plain.r1, 'GigabitEthernet0/0', frame(echoRequest6, plainMac), []);
+    expect(describeDecision(decide(event, plain.lab.device(plain.r1))!, 'R1')).toBe(
+      'R1 ignored it: it is for 2001:db8:2::10, and R1 does not route IPv6.',
+    );
+  });
+
+  it('says a host cannot answer a ping it has no route back for', () => {
+    expect(sentence(pc2, 'FastEthernet0', frame(echoRequest6, pc2Mac))).toBe(
+      'PC2 is the destination but has no route back to 2001:db8:1::10, so it could not reply.',
+    );
+  });
+
+  it('reads IPv6 on a serial link, where there is no MAC to match', () => {
+    const serial: Frame = { kind: 'hdlc', payload: echoRequest6 };
+    expect(
+      sentence(r1, 'Serial0/0/0', serial, [
+        { port: gi1, frame: frame({ ...echoRequest6, hopLimit: 127 }, mac(8)) },
+      ]),
+    ).toBe('R1 forwarded it out Gi0/1 and lowered the hop limit from 128 to 127.');
   });
 });
