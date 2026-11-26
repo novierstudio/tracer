@@ -34,7 +34,7 @@ function recordingContext() {
 
 const colour = { fill: '#2563eb', text: '#ffffff' };
 const palette: Palette = {
-  protocols: { arp: colour, icmp: colour, stp: colour, hello: colour },
+  protocols: { arp: colour, icmp: colour, dhcp: colour, stp: colour, hello: colour },
   outline: '#fefefe',
   accent: '#5b5bd6',
   error: '#c81e1e',
