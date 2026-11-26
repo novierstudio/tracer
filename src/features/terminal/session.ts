@@ -13,6 +13,7 @@ import {
 import type { SimAPI } from '@/engine/api';
 import { describeTopologyError, type DeviceId, type Result } from '@/model';
 import type { EditorStore } from '@/model/store';
+import type { RemoteHooks } from './remote';
 
 /**
  * A line's output: lines, a promise of them when a show command waits on the simulation, or a
@@ -64,6 +65,11 @@ export type SimLink = SimQueries & {
     ...args: Parameters<SimAPI['traceroute']>
   ) => Promise<ReturnType<SimAPI['traceroute']>>;
   readonly cancel: Remote<SimAPI['cancel']>;
+  readonly openTerminal: (
+    ...args: Parameters<SimAPI['openTerminal']>
+  ) => Promise<ReturnType<SimAPI['openTerminal']>>;
+  readonly terminalSend: Remote<SimAPI['terminalSend']>;
+  readonly terminalClose: Remote<SimAPI['terminalClose']>;
 };
 
 /** Where to reach the simulation. It rejects when there is none, as in a test without a worker. */
@@ -72,8 +78,11 @@ export type EngineLink = () => Promise<SimLink>;
 const valueOf = <T>(result: Result<T, unknown>): T | undefined =>
   result.ok ? result.value : undefined;
 
-/** The simulation's answers for one device. A device it cannot run gives no answer. */
-export function engineSource(sim: SimLink, device: DeviceId): EngineSource {
+/**
+ * The simulation's answers for one device. A device it cannot run gives no answer. The vty
+ * sessions on it come from the terminals, which open them.
+ */
+export function engineSource(sim: SimLink, device: DeviceId, remote?: RemoteHooks): EngineSource {
   return {
     routes: () => sim.routes(device).then(valueOf),
     arp: () => sim.arpTable(device).then(valueOf),
@@ -87,7 +96,7 @@ export function engineSource(sim: SimLink, device: DeviceId): EngineSource {
     natTranslations: () => sim.natTranslations(device).then(valueOf),
     natCleared: () => sim.clearNatTranslations(device).then(valueOf),
     ipv6: () => sim.ipv6Status(device).then(valueOf),
-    sessions: async () => undefined,
+    sessions: async () => remote?.sessions(device),
   };
 }
 
@@ -106,9 +115,10 @@ async function answerLive(
   device: DeviceId,
   query: EngineQuery,
   fallback: readonly string[],
+  remote: RemoteHooks | undefined,
 ): Promise<readonly string[]> {
   try {
-    return (await answerQuery(query, engineSource(await engine(), device))) ?? fallback;
+    return (await answerQuery(query, engineSource(await engine(), device, remote))) ?? fallback;
   } catch {
     return fallback;
   }
@@ -121,12 +131,14 @@ const NO_COMPLETION: CompleteResult = { line: undefined, candidates: [] };
  * has it now, so GUI edits between lines show, and commits the line's config edit as one undo step.
  * A show command that reads live state asks the simulation through `engine`, and a ping streams
  * from it; without one, or when the simulation cannot answer, it prints what the config alone says.
+ * `remote` opens the Telnet and SSH sessions the CLI asks for, and ends this one when it exits.
  */
 export function deviceTerminal(
   store: EditorStore,
   id: DeviceId,
   session: DeviceSession,
   engine?: EngineLink,
+  remote?: RemoteHooks,
 ): TerminalSession {
   // The device can vanish between a store change and the view unmounting.
   const device = (): IosDevice | undefined => {
@@ -136,14 +148,16 @@ export function deviceTerminal(
   const run = (line: string): Reply => {
     const current = device();
     if (!current) return [];
-    const { output, update, query, stream } = session.run(current, line);
+    const { output, update, query, stream, connect, disconnect } = session.run(current, line);
     const committed = update && store.getState().updateConfig(update);
     const printed =
       committed && !committed.ok
         ? [...output, `% ${describeTopologyError(committed.error)}`]
         : output;
+    if (disconnect && remote) return [...printed, ...remote.disconnect()];
+    if (connect && remote) return remote.connect(id, connect);
     if (!engine) return printed;
-    if (query) return answerLive(engine, id, query, printed);
+    if (query) return answerLive(engine, id, query, printed, remote);
     if (stream)
       return openStream(stream, () => engine().then((sim) => streamSource(sim, id)), printed);
     return printed;
