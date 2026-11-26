@@ -180,6 +180,13 @@ export function createEngine({
         forwards: (port, vlan) =>
           slot.ctx.portUp(port) &&
           !(running.get(id) ?? []).some((other) => other.module.holdsVlan?.(other.ctx, port, vlan)),
+        bundleOf: (port) => {
+          for (const other of running.get(id) ?? []) {
+            const bundle = other.module.bundleOf?.(other.ctx, port);
+            if (bundle !== undefined) return bundle;
+          }
+          return undefined;
+        },
         send: (port, frame) => send({ device: id, port }, frame),
         setTimer: (key, delay) => {
           const pending = slot.timers.get(key);

@@ -16,6 +16,11 @@ export interface DeviceContext {
    * spanning tree does on a port that is not forwarding. A switch's VLAN interface uses only these.
    */
   forwards(port: PortId, vlan: VlanId): boolean;
+  /**
+   * The bundle a port is bundled into now, as an EtherChannel member is into its port-channel, or
+   * undefined. A frame flooded out of a bundle leaves by one member only.
+   */
+  bundleOf(port: PortId): string | undefined;
   /** Sends a frame out of a port. A port with no cable sends nothing. */
   send(port: PortId, frame: Frame): void;
   /** Fires `onTimer(key)` after `delay`. Setting a key again replaces its pending timer. */
@@ -75,6 +80,8 @@ export interface SimModule<S = unknown> {
    * ends while any module says so. Call `relink` when the answer changes.
    */
   disablesPort?(ctx: ModuleContext<S>, port: PortId): boolean;
+  /** The bundle the module has bundled the port into, if any. See `bundleOf`. */
+  bundleOf?(ctx: ModuleContext<S>, port: PortId): string | undefined;
   /** Whether the module holds an up port back from forwarding `vlan`'s frames. See `forwards`. */
   holdsVlan?(ctx: ModuleContext<S>, port: PortId, vlan: VlanId): boolean;
   /**

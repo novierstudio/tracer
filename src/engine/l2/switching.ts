@@ -3,7 +3,35 @@ import { carriesVlan, vlanAllowed } from '@/model/vlans';
 import { ms, type SimDuration, type SimTime } from '../core/time';
 import type { DeviceContext, ModuleContext, SimModule } from '../module';
 import type { SwitchL2Status } from './status';
-import { PVST_MAC, type EthernetFrame } from '../pdu';
+import { CDP_MAC, LLDP_MAC, PVST_MAC, SLOW_PROTOCOLS_MAC, type EthernetFrame } from '../pdu';
+import {
+  bridgePortUp,
+  bridgeView,
+  bundled,
+  createChannelState,
+  etherchannelStatus,
+  isPortChannel,
+  logicalPort,
+  logicalPorts,
+  memberFor,
+  onChannelTimer,
+  portChannelPort,
+  receiveChannelPdu,
+  syncChannels,
+  type ChannelChange,
+  type ChannelState,
+} from './etherchannel';
+import {
+  checkSource,
+  createSecurityState,
+  errDisabledPorts,
+  forgetDynamic,
+  isErrDisabled,
+  onSecurityTimer,
+  portSecurityStatus,
+  syncSecurity,
+  type SecurityState,
+} from './portSecurity';
 import {
   isHeld,
   onStpTimer,
@@ -36,7 +64,12 @@ type Switch = Extract<Device, { kind: 'switch' }>;
  * absent. Spanning tree runs in the same module because the relay reads its port states on every
  * frame and ages addresses by its topology changes, and a module's state is its own.
  */
-export type SwitchState = { readonly table: Map<string, Learned>; readonly stp: StpState };
+export type SwitchState = {
+  readonly table: Map<string, Learned>;
+  readonly stp: StpState;
+  readonly channel: ChannelState;
+  readonly security: SecurityState;
+};
 
 const tableKey = (vlan: VlanId, mac: MacAddress) => `${vlan} ${mac}`;
 
@@ -102,108 +135,197 @@ function forget(state: SwitchState, drop: (entry: Learned) => boolean) {
 const prune = (state: SwitchState, now: SimTime) =>
   forget(state, (entry) => !fresh(state, entry, now));
 
-/** Spanning tree's view of the switch. Its BPDUs leave from the port's own MAC, tagged as data. */
-function stpContext(ctx: DeviceContext, device: Switch): StpContext {
+/**
+ * Spanning tree's view of the switch: its bridge view, where each port-channel in use is one port
+ * and bundled members are none. A port-channel's BPDUs leave by its first bundled member.
+ */
+function stpContext(ctx: DeviceContext, device: Switch, state: SwitchState): StpContext {
+  const view = bridgeView(device, state.channel);
   return {
     get now() {
       return ctx.now;
     },
-    device,
+    device: view,
     get settings() {
       return ctx.settings;
     },
-    portUp: (port) => ctx.portUp(port),
+    portUp: (port) => bridgePortUp(ctx, device, state.channel, port),
     setTimer: (key, delay) => ctx.setTimer(key, delay),
     clearTimer: (key) => ctx.clearTimer(key),
     note: (text) => ctx.note(text),
     sendBpdu(port, vlan, bpdu) {
-      const switchport = device.config.interfaces[port]?.switchport;
-      const hardware = device.ports.find((candidate) => candidate.id === port);
-      if (!switchport || !hardware || hardware.kind === 'serial') return;
+      const switchport = view.config.interfaces[port]?.switchport;
+      const out = isPortChannel(port) ? bundled(state.channel, device, groupOf(port))[0] : port;
+      const hardware = device.ports.find((candidate) => candidate.id === out);
+      if (!switchport || !out || !hardware || hardware.kind === 'serial') return;
       const frame: EthernetFrame = {
         kind: 'ethernet',
         dst: PVST_MAC,
         src: hardware.mac,
         payload: bpdu,
       };
-      ctx.send(port, egressFrame(switchport, vlan, frame));
+      ctx.send(out, egressFrame(switchport, vlan, frame));
     },
   };
 }
 
-function sync(ctx: DeviceContext, state: SwitchState) {
-  const { device } = ctx;
-  if (device.kind === 'switch') syncStp(stpContext(ctx, device), state.stp);
+const groupOf = (port: PortId) => Number(port.slice('Port-channel'.length));
+
+/** `%LINK-3-UPDOWN` and `%LINEPROTO-5-UPDOWN` for a port-channel that came up or went down. */
+function announceChannels(ctx: DeviceContext, change: ChannelChange) {
+  for (const [groups, state] of [
+    [change.up, 'up'],
+    [change.down, 'down'],
+  ] as const) {
+    for (const group of groups) {
+      const name = portChannelPort(group);
+      ctx.syslog(`%LINK-3-UPDOWN: Interface ${name}, changed state to ${state}`);
+      ctx.syslog(
+        `%LINEPROTO-5-UPDOWN: Line protocol on Interface ${name}, changed state to ${state}`,
+      );
+    }
+  }
 }
+
+/** Forgets addresses learned on a port the bridge no longer has, as a member that joined a bundle. */
+function forgetGonePorts(device: Switch, state: SwitchState) {
+  const ports = new Set(logicalPorts(device, state.channel));
+  forget(state, (entry) => !ports.has(entry.port));
+}
+
+/** Brings EtherChannel, the MAC table and spanning tree in line with the config and links. */
+function sync(ctx: DeviceContext, state: SwitchState, change?: ChannelChange) {
+  const { device } = ctx;
+  if (device.kind !== 'switch') return;
+  announceChannels(ctx, change ?? syncChannels(ctx, device, state.channel));
+  forgetGonePorts(device, state);
+  syncStp(stpContext(ctx, device, state), state.stp);
+}
+
+/** The bridge's own control frames: CDP, LLDP, LACP and PAgP never cross a switch. */
+const isLinkLocal = (frame: EthernetFrame) =>
+  frame.dst === CDP_MAC || frame.dst === LLDP_MAC || frame.dst === SLOW_PROTOCOLS_MAC;
 
 /**
  * A transparent bridge. It learns each source address on its port and VLAN, sends a frame for a
  * known address out that one port, floods the rest out every other up port in the VLAN, and never
  * sends a frame back out the port it arrived on. Spanning tree decides which ports take part: a
  * port learns once it is learning or forwarding, and only a forwarding port relays frames.
+ *
+ * An EtherChannel is one port to the bridge: it learns addresses on the port-channel, spanning
+ * tree runs on it, and a frame out of it leaves by the member its addresses hash to. Port
+ * security checks each frame's source on a secure port before the bridge learns it.
  */
 export const switchingModule: SimModule<SwitchState> = {
   id: 'switching',
   init(ctx) {
-    const state: SwitchState = { table: new Map(), stp: new Map() };
+    const state: SwitchState = {
+      table: new Map(),
+      stp: new Map(),
+      channel: createChannelState(),
+      security: createSecurityState(),
+    };
     sync(ctx, state);
     return state;
   },
   onFrame(ctx, ingress, frame) {
     const { device, now, state } = ctx;
     if (frame.kind !== 'ethernet' || device.kind !== 'switch') return;
-    const interfaces = device.config.interfaces;
-    const arrivedOn = interfaces[ingress];
+    const { payload } = frame;
+    if (payload.kind === 'lacp' || payload.kind === 'pagp') {
+      const change = receiveChannelPdu(ctx, device, state.channel, ingress, payload);
+      if (change?.membership) sync(ctx, state, change);
+      return;
+    }
+    if (isLinkLocal(frame)) return;
+    const logical = logicalPort(device, state.channel, ingress);
+    if (logical === undefined) return;
+    const interfaces = bridgeView(device, state.channel).config.interfaces;
+    const arrivedOn = interfaces[logical];
     const vlan = arrivedOn?.switchport && ingressVlan(arrivedOn.switchport, frame);
     if (vlan === undefined) return;
 
     prune(state, now);
-    if (frame.payload.kind === 'bpdu') {
-      receiveBpdu(stpContext(ctx, device), state.stp, vlan, ingress, frame.payload);
+    if (payload.kind === 'bpdu') {
+      receiveBpdu(stpContext(ctx, device, state), state.stp, vlan, logical, payload);
       return;
     }
-    const arrivedState = portState(state.stp, vlan, ingress);
+    const arrivedState = portState(state.stp, vlan, logical);
     if (arrivedState !== 'learning' && arrivedState !== 'forwarding') return;
     if (!isGroup(frame.src)) {
+      const verdict = checkSource(ctx, device, state.security, ingress, vlan, frame.src);
+      if (verdict === 'err-disable') ctx.relink();
+      if (verdict !== 'forward') return;
       state.table.set(tableKey(vlan, frame.src), {
         vlan,
         mac: frame.src,
-        port: ingress,
+        port: logical,
         learnedAt: now,
       });
     }
     if (arrivedState !== 'forwarding' || ownAddress(device, frame.dst)) return;
     const known = isGroup(frame.dst) ? undefined : state.table.get(tableKey(vlan, frame.dst));
-    const out = known ? [known.port] : device.ports.map((port) => port.id);
+    const out = known ? [known.port] : logicalPorts(device, state.channel);
 
     for (const port of out) {
       const switchport = interfaces[port]?.switchport;
-      if (port === ingress || !switchport || portState(state.stp, vlan, port) !== 'forwarding')
+      if (port === logical || !switchport || portState(state.stp, vlan, port) !== 'forwarding')
         continue;
-      ctx.send(port, egressFrame(switchport, vlan, frame));
+      const member = isPortChannel(port)
+        ? memberFor(device, state.channel, groupOf(port), frame)
+        : port;
+      if (member) ctx.send(member, egressFrame(switchport, vlan, frame));
     }
   },
   onTimer(ctx, key) {
-    const { device } = ctx;
+    const { device, state } = ctx;
     if (device.kind !== 'switch') return;
-    prune(ctx.state, ctx.now);
-    onStpTimer(stpContext(ctx, device), ctx.state.stp, key);
+    prune(state, ctx.now);
+    const change = onChannelTimer(ctx, device, state.channel, key);
+    if (change?.membership) sync(ctx, state, change);
+    if (change || key.startsWith('ec ')) return;
+    if (onSecurityTimer(ctx, state.security, key)) {
+      ctx.relink();
+      return;
+    }
+    onStpTimer(stpContext(ctx, device, state), state.stp, key);
   },
   onLinkChange(ctx, port, up) {
-    if (!up) forget(ctx.state, (entry) => entry.port === port);
+    if (!up) {
+      forget(ctx.state, (entry) => entry.port === port);
+      forgetDynamic(ctx.state.security, port);
+    }
     sync(ctx, ctx.state);
   },
   onConfigChange(ctx) {
-    const { device } = ctx;
+    const { device, state } = ctx;
     if (device.kind !== 'switch') return;
-    forget(ctx.state, (entry) => {
-      const switchport = device.config.interfaces[entry.port]?.switchport;
+    const recovered = syncSecurity(ctx, device, state.security);
+    const interfaces = bridgeView(device, state.channel).config.interfaces;
+    forget(state, (entry) => {
+      const switchport = interfaces[entry.port]?.switchport;
       return !switchport || !carriesVlan(switchport, entry.vlan);
     });
-    sync(ctx, ctx.state);
+    sync(ctx, state);
+    if (recovered) ctx.relink();
   },
-  holdsPort: (ctx, port) => isHeld(ctx.state.stp, port),
-  holdsVlan: (ctx, port, vlan) => portState(ctx.state.stp, vlan, port) !== 'forwarding',
+  holdsPort(ctx, port) {
+    const { device, state } = ctx;
+    const logical = device.kind === 'switch' ? logicalPort(device, state.channel, port) : port;
+    return logical === undefined || isHeld(state.stp, logical);
+  },
+  holdsVlan(ctx, port, vlan) {
+    const { device, state } = ctx;
+    const logical = device.kind === 'switch' ? logicalPort(device, state.channel, port) : port;
+    return logical === undefined || portState(state.stp, vlan, logical) !== 'forwarding';
+  },
+  disablesPort: (ctx, port) => isErrDisabled(ctx.state.security, port),
+  bundleOf(ctx, port) {
+    const { device, state } = ctx;
+    if (device.kind !== 'switch') return undefined;
+    const logical = logicalPort(device, state.channel, port);
+    return logical !== undefined && isPortChannel(logical) ? logical : undefined;
+  },
 };
 
 /** The addresses the switch knows now, by VLAN then MAC, as `show mac address-table` lists them. */
@@ -222,12 +344,19 @@ export function spanningTreeOf(
 ): SpanningTreeVlan[] {
   if (device.kind !== 'switch') return [];
   const own = STP_TIMES[settings.stpTimers];
-  return spanningTree(device, state.stp, own, (instance) => agingOf(instance) / 1000);
+  const view = bridgeView(device, state.channel);
+  return spanningTree(view, state.stp, own, (instance) => agingOf(instance) / 1000);
 }
 
 export type { SpanningTreeVlan };
 
 /** The switch's EtherChannels and port security, for their show commands. */
-export function switchL2Status(_ctx: ModuleContext<SwitchState>): SwitchL2Status {
-  return { etherchannels: [], portSecurity: [], errDisabled: [] };
+export function switchL2Status(ctx: ModuleContext<SwitchState>): SwitchL2Status {
+  const { device, state } = ctx;
+  if (device.kind !== 'switch') return { etherchannels: [], portSecurity: [], errDisabled: [] };
+  return {
+    etherchannels: etherchannelStatus(device, state.channel),
+    portSecurity: portSecurityStatus(ctx, device, state.security),
+    errDisabled: errDisabledPorts(state.security),
+  };
 }
