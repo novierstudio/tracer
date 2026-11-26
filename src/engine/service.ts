@@ -1,4 +1,5 @@
-import { err, ok, type DeviceId, type Result } from '@/model';
+import type { DeviceId } from '@/model';
+import { err, ok, type Result } from '@/model/result';
 import type {
   DeviceUnavailable,
   DhcpOutcome,

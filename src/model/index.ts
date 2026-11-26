@@ -1,4 +1,5 @@
 export * from './commands';
+export * from './defaults';
 export * from './file';
 export * from './ids';
 export * from './result';

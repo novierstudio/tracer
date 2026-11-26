@@ -1,12 +1,5 @@
-import {
-  labSettings,
-  type Device,
-  type DeviceId,
-  type LabSettings,
-  type Link,
-  type LinkId,
-  type Topology,
-} from '@/model';
+import type { Device, DeviceId, LabSettings, Link, LinkId, Topology } from '@/model';
+import { labSettings } from '@/model/defaults';
 
 /**
  * The new value of every device and link that changed, or null for one that was removed, and the

@@ -1,14 +1,5 @@
-import {
-  DEFAULT_LAB_SETTINGS,
-  labSettings,
-  type Device,
-  type DeviceId,
-  type Endpoint,
-  type LabSettings,
-  type Link,
-  type LinkId,
-  type Topology,
-} from '@/model';
+import { DEFAULT_LAB_SETTINGS, labSettings } from '@/model/defaults';
+import type { Device, DeviceId, Endpoint, LabSettings, Link, LinkId, Topology } from '@/model';
 import { err, ok, type Result } from '@/model/result';
 import { cloneState } from './core/clone';
 import { createEventLog, type EventLog } from './core/log';

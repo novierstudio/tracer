@@ -222,9 +222,6 @@ export const DhcpLease = z.union([
 ]);
 export type DhcpLease = z.infer<typeof DhcpLease>;
 
-/** The lease IOS gives a pool with no `lease` line: one day. */
-export const DEFAULT_DHCP_LEASE = DhcpLease.parse(1440);
-
 /** IOS takes up to 8 addresses on one `default-router` or `dns-server` line. */
 export const MAX_DHCP_OPTION_ADDRESSES = 8;
 
@@ -509,8 +506,6 @@ export const LabSettings = z.object({
 });
 export type LabSettings = z.infer<typeof LabSettings>;
 
-export const DEFAULT_LAB_SETTINGS: LabSettings = { stpTimers: 'fast', routingTimers: 'fast' };
-
 const TopologyShape = z.object({
   version: z.literal(TOPOLOGY_VERSION),
   meta: z.object({ name: z.string(), createdAt: z.iso.datetime(), updatedAt: z.iso.datetime() }),
@@ -549,10 +544,6 @@ export const Topology = TopologyShape.superRefine((topology, ctx) => {
     }
   }
 });
-
-/** The lab's settings, with the defaults for a lab that names none. */
-export const labSettings = (topology: Topology): LabSettings =>
-  topology.settings ?? DEFAULT_LAB_SETTINGS;
 
 export function emptyTopology({ name, now }: { name: string; now: Date }): Topology {
   const timestamp = now.toISOString();

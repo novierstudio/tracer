@@ -1,12 +1,12 @@
 import { produce, type Draft } from 'immer';
 import type { AnnotationId, DeviceId, IdSource, LinkId } from './ids';
+import { labSettings } from './defaults';
 import { err, ok, type Result } from './result';
 import {
   factoryRouterLines,
   factorySwitchLines,
   findDeviceProblem,
   findLinkProblem,
-  labSettings,
   VirtualInterfaceId,
   type Annotation,
   type Cable,

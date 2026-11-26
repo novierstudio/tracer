@@ -4,7 +4,8 @@ import { addLink, createLink, updateConfig, type LinkSpec } from './commands';
 import { parseTopology, parseTopologyJson, serializeTopology } from './file';
 import { AnnotationId } from './ids';
 import { buildLab, end, expectOk, port } from './testing';
-import { BridgePriority, labSettings, PathCost, type Topology } from './topology';
+import { labSettings } from './defaults';
+import { BridgePriority, PathCost, type Topology } from './topology';
 import { Ipv4Address, PrefixLength, VlanId } from './values';
 
 function richLab() {
