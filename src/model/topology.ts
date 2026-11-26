@@ -397,6 +397,35 @@ export type HostIpv4 = z.infer<typeof HostIpv4>;
 export const HostConfig = z.object({ hostname: Hostname, ipv4: HostIpv4 });
 export type HostConfig = z.infer<typeof HostConfig>;
 
+/** A DNS name: dot-separated labels of letters, digits and hyphens. Kept in lower case. */
+export const DomainName = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .max(253, 'A name must be at most 253 characters')
+  .regex(
+    /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$/,
+    'A name must be labels of letters, digits and hyphens, joined by dots',
+  )
+  .brand<'DomainName'>();
+export type DomainName = z.infer<typeof DomainName>;
+
+/** An A record: the IPv4 address a DNS server gives for a name. */
+export const DnsRecord = z.object({ name: DomainName, address: Ipv4Address });
+export type DnsRecord = z.infer<typeof DnsRecord>;
+
+/** The services a server runs, as its Services tab sets them. */
+export const ServerServices = z.object({
+  dns: z.object({ enabled: z.boolean(), records: z.array(DnsRecord) }),
+  /** The one page the server serves, at `/` and `/index.html`. */
+  http: z.object({ enabled: z.boolean(), indexHtml: z.string() }),
+});
+export type ServerServices = z.infer<typeof ServerServices>;
+
+/** Absent `services` means a server as it ships: see `serverServices`. */
+export const ServerConfig = HostConfig.extend({ services: ServerServices.optional() });
+export type ServerConfig = z.infer<typeof ServerConfig>;
+
 const deviceFields = {
   id: DeviceId,
   model: z.string().min(1),
@@ -409,7 +438,7 @@ const DeviceShape = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('router'), ...deviceFields, config: RouterConfig }),
   z.object({ kind: z.literal('switch'), ...deviceFields, config: SwitchConfig }),
   z.object({ kind: z.literal('pc'), ...deviceFields, config: HostConfig }),
-  z.object({ kind: z.literal('server'), ...deviceFields, config: HostConfig }),
+  z.object({ kind: z.literal('server'), ...deviceFields, config: ServerConfig }),
 ]);
 export type Device = z.infer<typeof DeviceShape>;
 export type DeviceKind = Device['kind'];
