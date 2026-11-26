@@ -1,6 +1,6 @@
 // No runtime imports: the simulation worker uses these, and must not pull in zod.
 import { portOf, type ConsolePortKind } from './remote';
-import type { Cable, DeviceKind, Endpoint, PortId, PortKind, Topology } from './topology';
+import type { Cable, DeviceKind, Endpoint, Link, PortId, PortKind, Topology } from './topology';
 
 /** What a cable is made of, and so which ports it plugs into. */
 export type Medium = 'copper' | 'fiber' | 'serial' | 'console';
@@ -38,11 +38,12 @@ export type CopperEnd = {
 
 /**
  * Whether a copper port receives on the pins hosts and routers transmit on (MDI-X), as switch
- * ports do. Like ports take a crossover cable and unlike ports a straight-through one.
+ * and hub ports do. Like ports take a crossover cable and unlike ports a straight-through one.
  */
 export function isMdiX(end: CopperEnd): boolean {
   switch (end.kind) {
     case 'switch':
+    case 'hub':
       return true;
     case 'router':
     case 'pc':
@@ -94,4 +95,13 @@ export function cableEnd(topology: Topology, endpoint: Endpoint): CableEnd | und
   const device = topology.devices[endpoint.device];
   const port = device && portOf(device, endpoint.port);
   return device && port && { device: device.kind, id: port.id, port };
+}
+
+/** Whether the link's cable works between its ends, as `copperWorks` judges a copper one. */
+export function cableWorks(topology: Topology, link: Link): boolean {
+  if (link.cable !== 'straight' && link.cable !== 'crossover') return true;
+  const [a, b] = [link.a, link.b].map((endpoint) => cableEnd(topology, endpoint));
+  if (!a || !b) return false;
+  const copper = (end: CableEnd) => ({ kind: end.device, port: end.id, portKind: end.port.kind });
+  return copperWorks(link.cable, copper(a), copper(b));
 }

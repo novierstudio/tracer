@@ -344,6 +344,8 @@ export function createDevice(
         kind: spec.kind,
         config: { ipv4: { mode: 'static' }, ...spec.config, hostname },
       };
+    case 'hub':
+      return { ...fields, kind: 'hub', config: { ...spec.config, hostname } };
     default: {
       const exhaustive: never = spec;
       return exhaustive;
@@ -390,6 +392,8 @@ function withConfig(device: Device, update: ConfigUpdate): Device | undefined {
       return device.kind === 'pc' ? { ...device, config: update.config } : undefined;
     case 'server':
       return device.kind === 'server' ? { ...device, config: update.config } : undefined;
+    case 'hub':
+      return device.kind === 'hub' ? { ...device, config: update.config } : undefined;
     default: {
       const exhaustive: never = update;
       return exhaustive;

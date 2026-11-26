@@ -1,17 +1,28 @@
 import { PortId, type DeviceKind, type PortKind } from '@/model';
 import type { PortSpec } from '@/model';
 
-export const DEVICE_CATEGORIES = ['routers', 'switches', 'end-devices', 'servers'] as const;
+export const DEVICE_CATEGORIES = ['routers', 'switches', 'hubs', 'end-devices', 'servers'] as const;
 export type DeviceCategory = (typeof DEVICE_CATEGORIES)[number];
 
 export const CATEGORY_LABELS: Record<DeviceCategory, string> = {
   routers: 'Routers',
   switches: 'Switches',
+  hubs: 'Hubs',
   'end-devices': 'End devices',
   servers: 'Servers',
 };
 
-export type DeviceIconName = 'router' | 'switch' | 'multilayer-switch' | 'pc' | 'laptop' | 'server';
+export type DeviceIconName =
+  'router' | 'switch' | 'multilayer-switch' | 'pc' | 'laptop' | 'server' | 'hub';
+
+/** The icon for a device whose model the catalog does not know, by its kind. */
+export const KIND_ICONS: Record<DeviceKind, DeviceIconName> = {
+  router: 'router',
+  switch: 'switch',
+  pc: 'pc',
+  server: 'server',
+  hub: 'hub',
+};
 
 export type DeviceModel = {
   readonly id: string;
@@ -41,6 +52,13 @@ function ports(kind: PortKind, slot: string, first: number, count: number): Port
 }
 
 const fiber = (specs: PortSpec[]): PortSpec[] => specs.map((spec) => ({ ...spec, fiber: true }));
+
+/** Packet Tracer's `Port 0`, `Port 1`, …: how a hub names its ports. */
+const numbered = (count: number): PortSpec[] =>
+  Array.from({ length: count }, (_, i) => ({
+    kind: 'fastEthernet',
+    id: PortId.parse(`Port${i}`),
+  }));
 
 const single = (kind: PortKind): PortSpec[] => [
   { kind, id: PortId.parse(`${PORT_PREFIX[kind]}0`) },
@@ -102,6 +120,15 @@ export const DEVICE_MODELS = [
     icon: 'multilayer-switch',
     ports: [...ports('fastEthernet', '0/', 1, 24), ...ports('gigabitEthernet', '0/', 1, 2)],
     multilayer: true,
+  },
+  {
+    id: 'hub',
+    name: 'Hub',
+    category: 'hubs',
+    kind: 'hub',
+    hostnamePrefix: 'Hub',
+    icon: 'hub',
+    ports: numbered(6),
   },
   {
     id: 'pc',

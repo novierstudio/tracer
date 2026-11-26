@@ -5,7 +5,7 @@ import { LABEL_GAP, snapCentre, TILE } from './geometry';
 type LayoutEngine = (graph: ElkNode) => Promise<ElkNode>;
 
 // Links point down the network: routers on top, then switches, then the hosts.
-const TIER: Record<DeviceKind, number> = { router: 0, switch: 1, pc: 2, server: 2 };
+const TIER: Record<DeviceKind, number> = { router: 0, switch: 1, hub: 1, pc: 2, server: 2 };
 
 // Room for the hostname and address under each tile, so labels never collide.
 function box(device: Device) {

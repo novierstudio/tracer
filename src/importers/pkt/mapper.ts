@@ -128,6 +128,7 @@ const KIND_LABEL: Record<DeviceKind, string> = {
   switch: 'Switch',
   pc: 'PC',
   server: 'Server',
+  hub: 'Hub',
 };
 
 // The interface name prefix of each PORT/TYPE.
@@ -354,6 +355,9 @@ function mapDevice(pt: PtDevice, rule: KindRule, position: Point, ctx: Context):
     case 'pc':
     case 'server':
       device = { ...fields, kind, config: hostConfig(pt, hostname, id, entries) };
+      break;
+    case 'hub':
+      device = { ...fields, kind, config: { hostname } };
       break;
     default: {
       const exhaustive: never = kind;

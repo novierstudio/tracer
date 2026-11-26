@@ -142,9 +142,14 @@ export type Traffic = ReturnType<typeof createTraffic>;
 /** Why a frame was dropped, such as "No route", or undefined when it was not. */
 export type DropLabeller = (event: FrameEvent) => string | undefined;
 
-/** All a frame says by itself: whether its link was down. The overlay brings the rest. */
-const linkDrops: DropLabeller = (event) =>
-  event.outcome === 'link-down' ? 'Link down' : undefined;
+const OUTCOME_DROPS: Record<FrameEvent['outcome'], string | undefined> = {
+  delivered: undefined,
+  'link-down': 'Link down',
+  collision: 'Collision',
+};
+
+/** All a frame says by itself: whether its link was down or it collided. The overlay brings the rest. */
+const linkDrops: DropLabeller = (event) => OUTCOME_DROPS[event.outcome];
 
 /**
  * The chips the overlay draws. In realtime, a frame sent the instant another arrived at its

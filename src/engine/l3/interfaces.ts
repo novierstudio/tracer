@@ -162,6 +162,8 @@ export function ipInterfaces(
       };
       return [...routedPorts(device, routedAddress, links), ...svis(device, links)];
     }
+    case 'hub':
+      return [];
     default: {
       const exhaustive: never = device;
       return exhaustive;

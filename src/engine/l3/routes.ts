@@ -112,6 +112,8 @@ function configuredRoutes(
         ? [{ prefix: DEFAULT_ROUTE, nextHop: { kind: 'address', address: gateway } }]
         : [];
     }
+    case 'hub':
+      return [];
     default: {
       const exhaustive: never = device;
       return exhaustive;

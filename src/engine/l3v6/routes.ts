@@ -52,6 +52,7 @@ function configuredRoutes(
       ];
     }
     case 'switch':
+    case 'hub':
       return [];
     default: {
       const exhaustive: never = device;

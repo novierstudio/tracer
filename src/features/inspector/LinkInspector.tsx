@@ -112,7 +112,7 @@ function EndpointCard({
   const device = topology.devices[end.device];
   if (!device) return null;
   const row = portRows(topology, device).find((candidate) => candidate.id === end.port);
-  const address = row && row.layer !== 'switched' && row.ipv4 ? formatCidr(row.ipv4) : undefined;
+  const address = row && 'ipv4' in row && row.ipv4 ? formatCidr(row.ipv4) : undefined;
   return (
     <li>
       <button

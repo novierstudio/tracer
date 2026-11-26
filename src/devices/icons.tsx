@@ -49,6 +49,13 @@ const GLYPHS: Record<DeviceIconName, ReactNode> = {
       <circle cx="16.5" cy="35" r="1.5" fill={ACCENT} stroke="none" />
     </>
   ),
+  // A thin box that sends what it hears both ways at once.
+  hub: (
+    <>
+      <rect x="8" y="17" width="32" height="14" rx="3.5" />
+      <path d="M14 24h20M17.5 20.5 14 24l3.5 3.5M30.5 20.5 34 24l-3.5 3.5" stroke={ACCENT} />
+    </>
+  ),
 };
 
 type DeviceIconProps = Omit<SVGProps<SVGSVGElement>, 'name'> & { name: DeviceIconName };

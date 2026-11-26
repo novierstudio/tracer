@@ -8,6 +8,7 @@ function adminUp(device: Device, port: PortId): boolean {
       return device.config.interfaces[port]?.shutdown === false;
     case 'pc':
     case 'server':
+    case 'hub':
       return true;
     default: {
       const exhaustive: never = device;

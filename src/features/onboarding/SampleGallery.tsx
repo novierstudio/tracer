@@ -1,6 +1,6 @@
 import { ArrowRightIcon, LoaderCircleIcon } from 'lucide-react';
 import { useState } from 'react';
-import type { DeviceIconName } from '@/devices/catalog';
+import { KIND_ICONS } from '@/devices/catalog';
 import { DeviceIcon } from '@/devices/icons';
 import {
   DIFFICULTY_LABELS,
@@ -13,13 +13,6 @@ import type { DeviceKind } from '@/model';
 import { cn } from '@/ui/cn';
 import { Dialog, DialogContent } from '@/ui/dialog';
 import { openSample } from './openSample';
-
-const ICON: Record<DeviceKind, DeviceIconName> = {
-  router: 'router',
-  switch: 'switch',
-  pc: 'pc',
-  server: 'server',
-};
 
 const DIFFICULTY_STYLE: Record<Difficulty, string> = {
   beginner: 'bg-ok/10 text-ok',
@@ -48,7 +41,7 @@ function LabCard({
           <span className="flex items-center gap-2.5" aria-hidden>
             {(Object.entries(lab.devices) as [DeviceKind, number][]).map(([kind, n]) => (
               <span key={kind} className="flex items-center gap-1 text-2xs text-fg-3 tabular-nums">
-                <DeviceIcon name={ICON[kind]} className="size-6 text-fg-2" />
+                <DeviceIcon name={KIND_ICONS[kind]} className="size-6 text-fg-2" />
                 {n > 1 && `×${n}`}
               </span>
             ))}

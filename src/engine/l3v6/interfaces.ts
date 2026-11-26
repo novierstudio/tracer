@@ -171,6 +171,7 @@ export function ipv6Interfaces(device: Device, links: Links, state: Ipv6State): 
       ];
     }
     case 'switch':
+    case 'hub':
       return [];
     default: {
       const exhaustive: never = device;

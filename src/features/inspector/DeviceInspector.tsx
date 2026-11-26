@@ -44,12 +44,18 @@ type Props = {
 
 /** Routers and switches get an IOS CLI; end hosts get a desktop, as in the UI/UX doc. */
 const isHost = (device: Device) => device.kind === 'pc' || device.kind === 'server';
+const hasConsole = (device: Device) =>
+  isHost(device) || device.kind === 'router' || device.kind === 'switch';
 
 export function DeviceInspector({ device, topology, tab, onTabChange, focusConsole }: Props) {
   const rows = portRows(topology, device);
   const host = isHost(device);
-  // Only a server has services; the tab kept from one falls back to Config on other devices.
-  const shown = tab === 'services' && device.kind !== 'server' ? 'config' : tab;
+  // Only a server has services, and a hub has no console; a tab kept from another device falls
+  // back to Config.
+  const shown =
+    (tab === 'services' && device.kind !== 'server') || (tab === 'console' && !hasConsole(device))
+      ? 'config'
+      : tab;
   return (
     <Tabs
       value={shown}
@@ -62,7 +68,9 @@ export function DeviceInspector({ device, topology, tab, onTabChange, focusConso
         <TabsTrigger value="interfaces">Interfaces</TabsTrigger>
         <TabsTrigger value="config">Config</TabsTrigger>
         {device.kind === 'server' && <TabsTrigger value="services">Services</TabsTrigger>}
-        <TabsTrigger value="console">{host ? 'Desktop' : 'CLI'}</TabsTrigger>
+        {hasConsole(device) && (
+          <TabsTrigger value="console">{host ? 'Desktop' : 'CLI'}</TabsTrigger>
+        )}
       </TabsList>
       <div className="min-h-0 flex-1 overflow-y-auto">
         <TabsContent value="overview">
@@ -79,7 +87,7 @@ export function DeviceInspector({ device, topology, tab, onTabChange, focusConso
             <ServicesTab key={device.id} device={device} />
           </TabsContent>
         )}
-        {host ? (
+        {!hasConsole(device) ? null : host ? (
           <TabsContent value="console" className="h-full">
             <HostDesktop device={device} focusPrompt={focusConsole} />
           </TabsContent>
@@ -283,6 +291,16 @@ function PortLegend() {
 function ConfigTab({ device, rows }: { device: Device; rows: PortRow[] }) {
   if (device.kind === 'router' || device.kind === 'switch') {
     return <IosConfigTab key={device.id} device={device} rows={rows} />;
+  }
+  if (device.kind === 'hub') {
+    return (
+      <Section title="Hub">
+        <p className="text-xs text-fg-2">
+          A hub has nothing to configure. It repeats every frame out of every other port, and its
+          ports share one segment, so two frames that reach it at once collide.
+        </p>
+      </Section>
+    );
   }
   return (
     <>

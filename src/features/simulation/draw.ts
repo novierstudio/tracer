@@ -210,7 +210,8 @@ function drawChip(
   if (dropped) {
     const r = 6 * scale * size;
     ctx.globalAlpha = alpha;
-    drawCross(ctx, p, r, palette.error, palette.outline);
+    if (chip.event.outcome === 'collision') drawBurst(ctx, p, r, palette.error, palette.outline);
+    else drawCross(ctx, p, r, palette.error, palette.outline);
     if (dimmed) {
       ctx.globalAlpha = alpha * WASH;
       ctx.beginPath();
@@ -364,6 +365,37 @@ function drawCross(
   ctx.lineWidth = 2;
   ctx.lineCap = 'round';
   ctx.stroke();
+}
+
+/** A frame lost to a collision: a jagged burst where a cross marks other drops. */
+function drawBurst(
+  ctx: CanvasRenderingContext2D,
+  p: Vec,
+  r: number,
+  colour: string,
+  outline: string,
+) {
+  const points = 9;
+  ctx.beginPath();
+  for (let i = 0; i < points * 2; i++) {
+    const reach = i % 2 === 0 ? r + 5 : r * 0.55 + 1;
+    const angle = (Math.PI * i) / points - Math.PI / 2;
+    const x = p.x + Math.cos(angle) * reach;
+    const y = p.y + Math.sin(angle) * reach;
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+  ctx.closePath();
+  ctx.fillStyle = colour;
+  ctx.fill();
+  ctx.strokeStyle = outline;
+  ctx.lineWidth = 1.5;
+  ctx.lineJoin = 'round';
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(p.x, p.y, r * 0.3, 0, Math.PI * 2);
+  ctx.fillStyle = '#ffffff';
+  ctx.fill();
 }
 
 /** Rings spreading from devices that flood or broadcast a frame. Paint them under the chips. */

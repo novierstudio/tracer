@@ -20,6 +20,8 @@ export const ARP_TIMEOUT: Record<DeviceKind, SimDuration> = {
   switch: ms(4 * 60 * 60_000),
   pc: ms(2 * 60_000),
   server: ms(2 * 60_000),
+  // A hub runs no IP.
+  hub: ms(0),
 };
 
 /** A request unanswered for this long is sent again, up to ARP_TRIES requests in all. */

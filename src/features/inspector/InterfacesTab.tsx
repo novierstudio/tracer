@@ -109,6 +109,7 @@ function AddressCell({
   short: string;
 }) {
   if (row.layer === 'switched') return <span className="text-fg-2">{row.vlan}</span>;
+  if (row.layer === 'plain') return <span className="text-fg-2">{row.label}</span>;
   const text = row.ipv4 ? formatCidr(row.ipv4) : null;
   if (row.layer === 'host') {
     return text ? (
@@ -143,7 +144,7 @@ function AddressEditor({
   onSave: (cidr: Ipv4Cidr | undefined) => void;
   onDone: () => void;
 }) {
-  const initial = row.layer !== 'switched' && row.ipv4 ? row.ipv4 : undefined;
+  const initial = 'ipv4' in row && row.ipv4 ? row.ipv4 : undefined;
   const [address, setAddress] = useState<string>(initial?.address ?? '');
   const [mask, setMask] = useState(initial ? formatSubnetMask(initial.prefixLength) : '');
   const [errors, setErrors] = useState<AddressErrors>({});

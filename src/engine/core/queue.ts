@@ -15,6 +15,8 @@ export type EventQueue<T> = {
   /** Removes a queued entry. Harmless on one that was already popped or cancelled. */
   cancel(entry: QueueEntry<T>): void;
   peek(): QueueEntry<T> | undefined;
+  /** Removes every queued entry `match` picks, and returns them in the order they would pop. */
+  take(match: (entry: QueueEntry<T>) => boolean): QueueEntry<T>[];
   pop(): QueueEntry<T> | undefined;
   clear(): void;
   /** The queued entries in no particular order, and the push counter, for a snapshot. */
@@ -80,6 +82,18 @@ export function createEventQueue<T>(): EventQueue<T> {
     return heap[0];
   }
 
+  function cancel(handle: QueueEntry<T>) {
+    const entry = handle as Entry<T>;
+    if (!entry.queued) return;
+    entry.queued = false;
+    cancelled += 1;
+    if (cancelled >= COMPACT_MIN_CANCELLED && cancelled * 2 > heap.length) {
+      heap = heap.filter((candidate) => candidate.queued);
+      cancelled = 0;
+      for (let index = (heap.length >> 1) - 1; index >= 0; index--) siftDown(index);
+    }
+  }
+
   return {
     push(time, value) {
       const entry: Entry<T> = { time, seq: seq++, value, queued: true };
@@ -87,18 +101,13 @@ export function createEventQueue<T>(): EventQueue<T> {
       siftUp(heap.length - 1);
       return entry;
     },
-    cancel(handle) {
-      const entry = handle as Entry<T>;
-      if (!entry.queued) return;
-      entry.queued = false;
-      cancelled += 1;
-      if (cancelled >= COMPACT_MIN_CANCELLED && cancelled * 2 > heap.length) {
-        heap = heap.filter((candidate) => candidate.queued);
-        cancelled = 0;
-        for (let index = (heap.length >> 1) - 1; index >= 0; index--) siftDown(index);
-      }
-    },
+    cancel,
     peek,
+    take(match) {
+      const taken = heap.filter((entry) => entry.queued && match(entry));
+      for (const entry of taken) cancel(entry);
+      return taken.sort((a, b) => (before(a, b) ? -1 : 1));
+    },
     pop() {
       const top = peek();
       if (!top) return undefined;

@@ -1,5 +1,5 @@
 import { Position, type Edge, type EdgeChange, type Node, type NodeChange } from '@xyflow/react';
-import { findDeviceModel, type DeviceIconName } from '@/devices/catalog';
+import { findDeviceModel, KIND_ICONS, type DeviceIconName } from '@/devices/catalog';
 import type {
   AnnotationId,
   AnnotationKind,
@@ -8,7 +8,6 @@ import type {
   Cable,
   Device,
   DeviceId,
-  DeviceKind,
   Link,
   LinkId,
   Move,
@@ -73,13 +72,6 @@ function bundleOf(link: Link, devices: Topology['devices']): string | undefined 
 }
 export type CableFlowEdge = Edge<CableEdgeData, 'cable'>;
 
-const KIND_ICON: Record<DeviceKind, DeviceIconName> = {
-  router: 'router',
-  switch: 'switch',
-  pc: 'pc',
-  server: 'server',
-};
-
 // Edges join tile centres. Declaring the handles and size up front means React Flow never has to
 // measure a node before drawing its links.
 export const CENTRE_HANDLE = { id: 'centre' } as const;
@@ -141,7 +133,7 @@ function address(device: Device): string | undefined {
 function nodeData(device: Device, used: number): DeviceNodeData {
   return {
     hostname: device.config.hostname,
-    icon: findDeviceModel(device.model)?.icon ?? KIND_ICON[device.kind],
+    icon: findDeviceModel(device.model)?.icon ?? KIND_ICONS[device.kind],
     address: address(device),
     dhcp: (device.kind === 'pc' || device.kind === 'server') && device.config.ipv4.mode === 'dhcp',
     powered: device.powered,

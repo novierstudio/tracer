@@ -40,6 +40,11 @@ export type Engine = {
   ): Result<R, DeviceUnavailable>;
   /** What each end of each link in the simulation is doing now. */
   linkStates(): Record<LinkId, LinkStatus>;
+  /**
+   * Whether frames that reach a shared segment, such as a hub, at the same instant collide, as in
+   * Packet Tracer's Simulation mode. Off, as in realtime, each arrives in turn.
+   */
+  detectCollisions(on: boolean): void;
   /** Everything the run depends on now, so `restore` can return to this moment. */
   snapshot(): EngineSnapshot;
   /**
@@ -124,6 +129,7 @@ export function createEngine({
   let loading = false;
   // What the device handling an arriving frame sends, while it handles it.
   let handling: SentFrame[] | undefined;
+  let collisions = false;
 
   function random() {
     const draw = drawRandom(randomState);
@@ -347,11 +353,53 @@ export function createEngine({
     }
   }
 
+  type Arrival = Extract<Scheduled, { kind: 'arrival' }>;
+
+  function deliverable(item: Arrival) {
+    const state = links.get(item.link);
+    return state?.up === true && state.generation === item.generation;
+  }
+
+  /**
+   * The frames that collide with `item` on a shared segment: those reaching another port of its
+   * device at this same instant. They leave the queue, since none of them arrives.
+   */
+  function rivals(item: Arrival): Arrival[] {
+    const device = devices.get(item.to.device);
+    if (!collisions || !device || !stacks[device.kind].some((module) => module.sharedMedium)) {
+      return [];
+    }
+    const taken = queue.take(
+      ({ time, value }) =>
+        time === now &&
+        value.kind === 'arrival' &&
+        value.to.device === item.to.device &&
+        value.to.port !== item.to.port &&
+        deliverable(value),
+    );
+    return taken.map((entry) => entry.value as Arrival);
+  }
+
   function process(item: Scheduled) {
     switch (item.kind) {
       case 'arrival': {
-        const state = links.get(item.link);
-        const delivered = state?.up === true && state.generation === item.generation;
+        const delivered = deliverable(item);
+        const collided = delivered ? rivals(item) : [];
+        if (collided.length > 0) {
+          for (const { link, from, to, frame, sentAt } of [item, ...collided]) {
+            log.append({
+              kind: 'frame',
+              time: now,
+              sentAt,
+              link,
+              from,
+              to,
+              frame,
+              outcome: 'collision',
+            });
+          }
+          return;
+        }
         const { link, from, to, frame, sentAt } = item;
         // The device's sends fill in `sent` as it handles the frame, before the event leaves
         // the engine.
@@ -521,5 +569,8 @@ export function createEngine({
     snapshot,
     restore,
     linkStates,
+    detectCollisions: (on) => {
+      collisions = on;
+    },
   };
 }

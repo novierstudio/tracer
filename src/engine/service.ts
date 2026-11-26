@@ -315,10 +315,12 @@ export function createSimService({
         // Realtime carries on from the moment on screen. What was stepped back from never happens.
         run.history.dropFuture();
         run = { mode: 'realtime' };
+        engine.detectCollisions(false);
         play(1);
         return;
       }
       playback = { playing: false };
+      engine.detectCollisions(true);
       run = { mode: 'simulation', history: createHistory(engine) };
       requestFrame();
     },

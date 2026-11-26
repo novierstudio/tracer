@@ -71,6 +71,7 @@ const KIND_NAME: Record<DeviceKind, string> = {
   switch: 'switch',
   pc: 'PC',
   server: 'server',
+  hub: 'hub',
 };
 
 const CABLE_NAME: Record<Cable, string> = {

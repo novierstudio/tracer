@@ -23,19 +23,26 @@ export const TOPOLOGY_VERSION = 2;
 export const Point = z.object({ x: z.number(), y: z.number() });
 export type Point = z.infer<typeof Point>;
 
-const PORT_NAME_PREFIX = {
-  fastEthernet: 'FastEthernet',
-  gigabitEthernet: 'GigabitEthernet',
-  serial: 'Serial',
+/**
+ * How each kind of port may be named. IOS devices number theirs by slot, such as
+ * `FastEthernet0/1`. Packet Tracer names a hub's ports `Port 0` to `Port 5`; Tracer drops the
+ * space.
+ */
+const PORT_NAMES = {
+  fastEthernet: String.raw`FastEthernet\d+(?:/\d+)*|Port\d+`,
+  gigabitEthernet: String.raw`GigabitEthernet\d+(?:/\d+)*`,
+  serial: String.raw`Serial\d+(?:/\d+)*`,
 } as const;
+
+const PORT_NAME_PATTERNS = Object.fromEntries(
+  Object.entries(PORT_NAMES).map(([kind, names]) => [kind, new RegExp(`^(?:${names})$`)]),
+) as Record<keyof typeof PORT_NAMES, RegExp>;
 
 export const PortId = z
   .string()
   .regex(
     // `Console` and `RS232` are the management ports a console cable plugs into.
-    new RegExp(
-      `^(?:(?:${Object.values(PORT_NAME_PREFIX).join('|')})\\d+(?:/\\d+)*|Console|RS232)$`,
-    ),
+    new RegExp(`^(?:${Object.values(PORT_NAMES).join('|')}|Console|RS232)$`),
     'Invalid interface name',
   )
   .brand<'PortId'>();
@@ -93,7 +100,9 @@ export const INTERFACE_TYPES = [
   'Serial',
   'Vlan',
 ] as const satisfies readonly (
-  | (typeof PORT_NAME_PREFIX)[keyof typeof PORT_NAME_PREFIX]
+  | 'FastEthernet'
+  | 'GigabitEthernet'
+  | 'Serial'
   | keyof typeof VIRTUAL_INTERFACE_LIMIT
   | 'Port-channel'
 )[];
@@ -868,6 +877,10 @@ export type ServerServices = z.infer<typeof ServerServices>;
 export const ServerConfig = HostConfig.extend({ services: ServerServices.optional() });
 export type ServerConfig = z.infer<typeof ServerConfig>;
 
+/** A hub's settings. Packet Tracer's hub has a display name and nothing else to configure. */
+export const HubConfig = z.object({ hostname: Hostname });
+export type HubConfig = z.infer<typeof HubConfig>;
+
 const deviceFields = {
   id: DeviceId,
   model: z.string().min(1),
@@ -881,6 +894,7 @@ const DeviceShape = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('switch'), ...deviceFields, config: SwitchConfig }),
   z.object({ kind: z.literal('pc'), ...deviceFields, config: HostConfig }),
   z.object({ kind: z.literal('server'), ...deviceFields, config: ServerConfig }),
+  z.object({ kind: z.literal('hub'), ...deviceFields, config: HubConfig }),
 ]);
 export type Device = z.infer<typeof DeviceShape>;
 export type DeviceKind = Device['kind'];
@@ -1076,7 +1090,7 @@ export function findDeviceProblem(device: Device): TopologyError | undefined {
   for (const port of device.ports) {
     if (portIds.has(port.id)) return { kind: 'duplicate-port', device: device.id, port: port.id };
     portIds.add(port.id);
-    if (!port.id.startsWith(PORT_NAME_PREFIX[port.kind])) {
+    if (!PORT_NAME_PATTERNS[port.kind].test(port.id)) {
       return { kind: 'port-name-mismatch', device: device.id, port: port.id, portKind: port.kind };
     }
   }

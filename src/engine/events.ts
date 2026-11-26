@@ -7,7 +7,8 @@ declare const eventIdBrand: unique symbol;
 /** Position of an event in the run's log. Starts at 1 and grows by one per event. */
 export type EventId = number & { readonly [eventIdBrand]: true };
 
-export type FrameOutcome = 'delivered' | 'link-down';
+/** `collision`: it reached a shared segment, such as a hub, at the same instant as another frame. */
+export type FrameOutcome = 'delivered' | 'link-down' | 'collision';
 
 /** A frame a device sent out of one of its ports. */
 export type SentFrame = { readonly port: PortId; readonly frame: Frame };

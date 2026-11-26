@@ -19,6 +19,8 @@ export const INITIAL_TTL: Record<DeviceKind, number> = {
   switch: 255,
   pc: 128,
   server: 128,
+  // A hub runs no IP.
+  hub: 0,
 };
 
 /** Hands a packet to the next hop. A LAN resolves the neighbour's MAC first. */
