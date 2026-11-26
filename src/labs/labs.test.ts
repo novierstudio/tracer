@@ -19,6 +19,7 @@ const HEADLINE_PING: Record<string, string> = {
   'dhcp-router': '192.168.1.1',
   'ospf-three-routers': '192.168.3.10',
   'dns-web-server': '192.168.1.20',
+  'pat-acl': '203.0.113.10',
 };
 
 async function load(id: string): Promise<Topology> {
