@@ -86,6 +86,8 @@ export type DropReason =
   | { kind: 'ttl-expired' }
   | { kind: 'no-route'; dst: Ipv4Address }
   | { kind: 'no-route-back'; dst: Ipv4Address }
+  /** An access list on the device denied the packet. */
+  | { kind: 'acl-deny' }
   | { kind: 'tagged-on-access' }
   | { kind: 'vlan-not-allowed'; vlan: VlanId }
   | { kind: 'no-port'; vlan: VlanId }
@@ -474,7 +476,11 @@ function decideIp(
       return { kind: 'dropped', reason: { kind: 'ttl-expired' }, notified: port };
     }
     if (message?.type === 'destination-unreachable') {
-      return { kind: 'dropped', reason: { kind: 'no-route', dst: packet.dst }, notified: port };
+      const reason: DropReason =
+        message.code === 'admin-prohibited'
+          ? { kind: 'acl-deny' }
+          : { kind: 'no-route', dst: packet.dst };
+      return { kind: 'dropped', reason, notified: port };
     }
     const arp = arpOf(frame);
     if (arp?.op === 'request') {
@@ -549,6 +555,8 @@ export function dropLabel(decision: Decision | undefined): string | undefined {
       return 'No route';
     case 'no-route-back':
       return 'No route back';
+    case 'acl-deny':
+      return 'ACL deny';
     case 'tagged-on-access':
     case 'vlan-not-allowed':
       return 'VLAN mismatch';
@@ -601,6 +609,8 @@ function describeDrop(name: string, { reason, notified }: Extract<Decision, { ki
       return `${name} has no route to ${reason.dst}, so it dropped the packet${notice('Destination Unreachable')}.`;
     case 'no-route-back':
       return `${name} is the destination but has no route back to ${reason.dst}, so it could not reply.`;
+    case 'acl-deny':
+      return `An access list on ${name} denied the packet, so it dropped it${notice('Destination Unreachable (administratively prohibited)')}.`;
     case 'tagged-on-access':
       return `${name} dropped it: a tagged frame arrived on an access port.`;
     case 'vlan-not-allowed':

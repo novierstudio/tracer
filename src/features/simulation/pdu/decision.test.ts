@@ -142,6 +142,44 @@ describe('the decision sentence', () => {
     expect(told.at(-1)).toBe('PC1 heard from 192.168.1.1 that the destination cannot be reached.');
   });
 
+  it('says an access list denied a packet, and marks the drop for the canvas', () => {
+    const { lab, pc1, r1 } = routedLab();
+    lab.edit(r1, (device) => {
+      if (device.kind !== 'router') return device;
+      const inside = device.config.interfaces['GigabitEthernet0/0' as PortId]!;
+      const noPing = {
+        type: 'extended' as const,
+        entries: [
+          {
+            kind: 'rule' as const,
+            action: 'deny' as const,
+            protocol: 'icmp' as const,
+            source: { address: ip('0.0.0.0'), wildcard: ip('255.255.255.255') },
+            destination: { address: ip('0.0.0.0'), wildcard: ip('255.255.255.255') },
+          },
+        ],
+      };
+      return {
+        ...device,
+        config: {
+          ...device.config,
+          accessLists: { '101': noPing },
+          interfaces: {
+            ...device.config.interfaces,
+            ['GigabitEthernet0/0' as PortId]: { ...inside, accessGroupIn: '101' },
+          },
+        },
+      };
+    });
+    const frames = pingFrames(lab.topology, pc1, '192.168.2.10');
+
+    expect(sentences(lab.topology, frames)).toContain(
+      'An access list on R1 denied the packet, so it dropped it and sent Destination Unreachable (administratively prohibited) back out Gi0/0.',
+    );
+    const labels = frames.map((event) => dropLabel(decide(event, lab.device(event.to.device))));
+    expect(labels.filter(Boolean)).toEqual(['ACL deny']);
+  });
+
   it('flags drops for the canvas, and leaves forwarding and ignoring alone', () => {
     const { lab, pc1 } = routedLab();
     const frames = pingFrames(lab.topology, pc1, '10.9.9.9');
