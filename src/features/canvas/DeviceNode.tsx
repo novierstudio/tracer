@@ -1,6 +1,8 @@
 import { Handle, Position, useStore, type NodeProps } from '@xyflow/react';
 import { memo, useState, type KeyboardEvent } from 'react';
 import { DeviceIcon } from '@/devices/icons';
+import { addressOf } from '@/engine/l3/hostAddress';
+import { useHostAddressing } from '@/features/simulation/hostAddresses';
 import type { DeviceId } from '@/model';
 import { cableTool, useCableTool, type CableStep } from './cableTool';
 import { useCanvasUi } from './canvasUi';
@@ -64,6 +66,8 @@ export const DeviceNode = memo(function DeviceNode({
     (state) => state.edit?.kind === 'rename' && state.edit.device === id,
   );
   const connecting = useStore((state) => state.connection.inProgress);
+  const leased = useHostAddressing(id as DeviceId);
+  const address = data.dhcp ? leased && addressOf(leased)?.address : data.address;
   return (
     <div className="device-node relative size-12" data-powered={data.powered || undefined}>
       <Handle
@@ -124,9 +128,9 @@ export const DeviceNode = memo(function DeviceNode({
             {data.hostname}
           </span>
         )}
-        {data.address && (
+        {address && (
           <span className="device-address rounded-[3px] bg-surface-0/85 px-0.5 font-mono text-[10px] leading-[14px] text-fg-3">
-            {data.address}
+            {address}
           </span>
         )}
       </div>

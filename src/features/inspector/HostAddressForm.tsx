@@ -1,5 +1,7 @@
 import { useId, useState, type FormEvent } from 'react';
-import { formatSubnetMask, type Device, type HostIpv4 } from '@/model';
+import type { HostAddressing } from '@/engine/api';
+import { useHostAddressing } from '@/features/simulation/hostAddresses';
+import { formatSubnetMask, type Device, type DeviceId, type HostIpv4 } from '@/model';
 import { editorStore } from '@/model/store';
 import { Button } from '@/ui/button';
 import { Segmented } from '@/ui/segmented';
@@ -55,9 +57,61 @@ function parseForm(form: Form): { ok: true; value: HostIpv4 } | { ok: false; err
   return { ok: true, value };
 }
 
+/** What a DHCP host got, as Packet Tracer reports it under the DHCP switch. */
+function dhcpStatus(addressing: HostAddressing | undefined): {
+  message: string;
+  facts: [string, string][];
+} {
+  switch (addressing?.kind) {
+    case 'leased': {
+      const { address, gateway, dns } = addressing;
+      return {
+        message: 'DHCP request successful.',
+        facts: [
+          ['IP address', address.address],
+          ['Subnet mask', formatSubnetMask(address.prefixLength)],
+          ['Default gateway', gateway ?? 'None'],
+          ['DNS server', dns[0] ?? 'None'],
+        ],
+      };
+    }
+    case 'autoconfigured':
+      return {
+        message: 'DHCP failed. APIPA is being used.',
+        facts: [
+          ['IP address', addressing.address.address],
+          ['Subnet mask', formatSubnetMask(addressing.address.prefixLength)],
+        ],
+      };
+    default:
+      return { message: 'Requesting an address from a DHCP server…', facts: [] };
+  }
+}
+
+/** The lease a DHCP host holds now, from the simulation. */
+function DhcpStatus({ device }: { device: DeviceId }) {
+  const { message, facts } = dhcpStatus(useHostAddressing(device));
+  return (
+    <div role="status" aria-label="DHCP status" className="flex flex-col gap-2">
+      <p className="text-xs text-fg-2">{message}</p>
+      {facts.length > 0 && (
+        <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
+          {facts.map(([label, value]) => (
+            <div key={label} className="contents">
+              <dt className="text-fg-3">{label}</dt>
+              <dd className="font-mono text-fg-1 tabular-nums">{value}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
+    </div>
+  );
+}
+
 /**
  * The PC's "IP Configuration": static address, mask, gateway and DNS, or DHCP. Applies as one
- * undo step. Like the hostname, it shows the store until the user starts editing.
+ * undo step. Like the hostname, it shows the store until the user starts editing. With DHCP
+ * applied, it shows what the host got from the server.
  */
 export function HostAddressForm({
   device,
@@ -126,14 +180,13 @@ export function HostAddressForm({
         onValueChange={(mode) => edit({ mode })}
         options={[
           { value: 'static', label: 'Static' },
-          { value: 'dhcp', label: 'DHCP', disabled: config.ipv4.mode !== 'dhcp' },
+          { value: 'dhcp', label: 'DHCP' },
         ]}
         className="self-start"
       />
-      {config.ipv4.mode !== 'dhcp' && (
-        <p className="text-2xs text-fg-3">DHCP arrives with DHCP servers in a later update.</p>
-      )}
-      {dhcp ? (
+      {dhcp && config.ipv4.mode === 'dhcp' && !draft ? (
+        <DhcpStatus device={device.id} />
+      ) : dhcp ? (
         <p className="text-xs text-fg-2">
           The address, gateway and DNS server will come from a DHCP server on this network.
         </p>

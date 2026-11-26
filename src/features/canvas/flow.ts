@@ -27,7 +27,9 @@ import { TILE, type Size } from './geometry';
 export type DeviceNodeData = {
   hostname: string;
   icon: DeviceIconName;
+  /** The address the config gives. A DHCP host's comes from the simulation instead. */
   address: string | undefined;
+  dhcp: boolean;
   powered: boolean;
   freePorts: number;
   totalPorts: number;
@@ -127,6 +129,7 @@ function nodeData(device: Device, used: number): DeviceNodeData {
     hostname: device.config.hostname,
     icon: findDeviceModel(device.model)?.icon ?? KIND_ICON[device.kind],
     address: address(device),
+    dhcp: (device.kind === 'pc' || device.kind === 'server') && device.config.ipv4.mode === 'dhcp',
     powered: device.powered,
     freePorts: device.ports.length - used,
     totalPorts: device.ports.length,
@@ -134,9 +137,11 @@ function nodeData(device: Device, used: number): DeviceNodeData {
 }
 
 /** The hostname block under a tile. Estimated from text length so links can avoid it unmeasured. */
-export function hostnameLabelSize({ hostname, address }: DeviceNodeData): Size {
-  const width = Math.max(hostname.length * 7 + 10, address ? address.length * 6.2 + 6 : 0);
-  return { width, height: address ? 32 : 18 };
+export function hostnameLabelSize({ hostname, address, dhcp }: DeviceNodeData): Size {
+  // A DHCP host's address is not known here, so make room for a long one.
+  const shown = address ?? (dhcp ? '192.168.100.100' : undefined);
+  const width = Math.max(hostname.length * 7 + 10, shown ? shown.length * 6.2 + 6 : 0);
+  return { width, height: shown ? 32 : 18 };
 }
 
 export function usedPortCounts(links: Topology['links']): Map<DeviceId, number> {

@@ -7,8 +7,10 @@ import {
 } from 'lucide-react';
 import { useState } from 'react';
 import { formatShortcut } from '@/app/shell/shortcuts';
+import { addressOf, gatewayOf } from '@/engine/l3/hostAddress';
 import { HostAddressForm } from '@/features/inspector/HostAddressForm';
 import { formatCidr } from '@/features/inspector/ipv4';
+import { useHostAddressing } from '@/features/simulation/hostAddresses';
 import { linkAt, type DeviceId } from '@/model';
 import { useEditor } from '@/model/react';
 import { editorStore } from '@/model/store';
@@ -16,7 +18,7 @@ import { Button } from '@/ui/button';
 import { cn } from '@/ui/cn';
 import { EmptyState } from '@/ui/empty-state';
 import { Kbd } from '@/ui/kbd';
-import { addressPort, type HostDevice } from './format';
+import { addressPort, configAddressing, type HostDevice } from './format';
 import { HostPrompt } from './HostPrompt';
 
 type App = 'ip' | 'prompt';
@@ -148,8 +150,12 @@ function NetworkCard({ device }: { device: HostDevice }) {
     ({ topology }) => !!port && !!linkAt(topology, { device: device.id, port: port.id }),
   );
   const { ipv4 } = device.config;
-  const address = ipv4.mode === 'static' ? ipv4.address : undefined;
-  const gateway = ipv4.mode === 'static' ? ipv4.gateway : undefined;
+  const leased = useHostAddressing(device.id);
+  // A DHCP host's address is whatever the simulation says it got.
+  const live = ipv4.mode === 'dhcp' ? leased : configAddressing(device);
+  const address = live && addressOf(live);
+  const gateway = live && gatewayOf(live);
+  const placeholder = ipv4.mode === 'dhcp' ? 'Waiting for DHCP' : 'No IP address';
   return (
     <section
       aria-label="Network"
@@ -167,7 +173,12 @@ function NetworkCard({ device }: { device: HostDevice }) {
         {port && <span className="font-mono text-fg-3">{port.id}</span>}
       </p>
       <p className="font-mono text-sm text-fg-1 tabular-nums">
-        {ipv4.mode === 'dhcp' ? 'DHCP' : address ? formatCidr(address) : 'No IP address'}
+        {address ? formatCidr(address) : placeholder}
+        {ipv4.mode === 'dhcp' && address && (
+          <span className="ml-1.5 font-sans text-2xs text-fg-3">
+            {live?.kind === 'autoconfigured' ? 'APIPA' : 'DHCP'}
+          </span>
+        )}
       </p>
       <p className="text-2xs text-fg-3">
         {gateway ? (
