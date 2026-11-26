@@ -76,6 +76,7 @@ const KIND_NAME: Record<DeviceKind, string> = {
 const CABLE_NAME: Record<Cable, string> = {
   straight: 'straight-through',
   crossover: 'crossover',
+  fiber: 'fiber',
   serial: 'serial',
   console: 'console',
 };

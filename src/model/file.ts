@@ -1,13 +1,60 @@
 import { z } from 'zod';
+import { copperCable, copperWorks } from './cabling';
 import { err, ok, type Result } from './result';
-import { TOPOLOGY_VERSION, Topology } from './topology';
+import {
+  TOPOLOGY_VERSION,
+  Topology,
+  type DeviceKind,
+  type PortId,
+  type PortKind,
+} from './topology';
 
 export type TopologyFileError =
   | { kind: 'invalid-json'; message: string }
   | { kind: 'unsupported-version'; version: unknown; message: string }
   | { kind: 'invalid-topology'; message: string };
 
-const MIGRATIONS: Record<number, (document: unknown) => unknown> = {};
+type RawEnd = { device?: unknown; port?: unknown };
+type RawLink = { cable?: unknown; a?: RawEnd; b?: RawEnd };
+type RawDocument = {
+  devices?: Record<
+    string,
+    { kind?: unknown; ports?: { id?: unknown; kind?: unknown }[] } | undefined
+  >;
+  links?: Record<string, RawLink | undefined>;
+};
+
+/**
+ * Version 1 ran auto-MDIX on every port, so a copper link worked on either cable. One that would
+ * not work now moves to the right cable, so the lab runs as it did. Anything malformed is left
+ * for the schema to report.
+ */
+function endAutoMdix(document: unknown): unknown {
+  const { devices = {}, links = {} } = (document ?? {}) as RawDocument;
+  const end = (raw: RawEnd | undefined) => {
+    const device = typeof raw?.device === 'string' ? devices[raw.device] : undefined;
+    const portKind = device?.ports?.find((port) => port.id === raw?.port)?.kind;
+    return typeof device?.kind === 'string' && typeof portKind === 'string'
+      ? {
+          kind: device.kind as DeviceKind,
+          port: raw!.port as PortId,
+          portKind: portKind as PortKind,
+        }
+      : undefined;
+  };
+  const migrated = Object.fromEntries(
+    Object.entries(links).map(([id, link]) => {
+      if (link?.cable !== 'straight' && link?.cable !== 'crossover') return [id, link];
+      const a = end(link.a);
+      const b = end(link.b);
+      if (!a || !b || copperWorks(link.cable, a, b)) return [id, link];
+      return [id, { ...link, cable: copperCable(a, b) }];
+    }),
+  );
+  return { ...(document as object), version: 2, links: migrated };
+}
+
+const MIGRATIONS: Record<number, (document: unknown) => unknown> = { 1: endAutoMdix };
 
 export function parseTopology(input: unknown): Result<Topology, TopologyFileError> {
   const header = z.object({ version: z.int() }).safeParse(input);

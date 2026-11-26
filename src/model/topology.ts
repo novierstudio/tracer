@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { AnnotationId, DeviceId, LinkId } from './ids';
-import { consolePortOf, portOf, type ConsolePortKind } from './remote';
+import { CABLE_MEDIUM, portMedium, type JackKind } from './cabling';
+import { consolePortOf, portOf } from './remote';
 import {
   Hostname,
   Ipv4Address,
@@ -13,7 +14,11 @@ import {
   VlanId,
 } from './values';
 
-export const TOPOLOGY_VERSION = 1;
+/**
+ * Version 2 ended auto-MDIX: a copper link works only on the right cable for its ends. Version 1
+ * files load with each copper link on the cable that works, as it did then.
+ */
+export const TOPOLOGY_VERSION = 2;
 
 export const Point = z.object({ x: z.number(), y: z.number() });
 export type Point = z.infer<typeof Point>;
@@ -95,7 +100,13 @@ export const INTERFACE_TYPES = [
 export type InterfaceType = (typeof INTERFACE_TYPES)[number];
 
 export const Port = z.discriminatedUnion('kind', [
-  z.object({ kind: z.enum(['fastEthernet', 'gigabitEthernet']), id: PortId, mac: MacAddress }),
+  z.object({
+    kind: z.enum(['fastEthernet', 'gigabitEthernet']),
+    id: PortId,
+    mac: MacAddress,
+    /** A fiber port, which takes a fiber cable only. Absent means copper. */
+    fiber: z.literal(true).optional(),
+  }),
   z.object({ kind: z.literal('serial'), id: PortId }),
 ]);
 export type Port = z.infer<typeof Port>;
@@ -884,7 +895,12 @@ export const Endpoint = z.object({ device: DeviceId, port: PortId });
 export type Endpoint = z.infer<typeof Endpoint>;
 
 export const Link = z.discriminatedUnion('cable', [
-  z.object({ id: LinkId, cable: z.enum(['straight', 'crossover']), a: Endpoint, b: Endpoint }),
+  z.object({
+    id: LinkId,
+    cable: z.enum(['straight', 'crossover', 'fiber']),
+    a: Endpoint,
+    b: Endpoint,
+  }),
   z.object({
     id: LinkId,
     cable: z.literal('serial'),
@@ -1036,23 +1052,6 @@ export function emptyTopology({ name, now }: { name: string; now: Date }): Topol
   };
 }
 
-type Medium = 'copper' | 'serial' | 'console';
-
-const PORT_MEDIUM: Record<PortKind | ConsolePortKind, Medium> = {
-  fastEthernet: 'copper',
-  gigabitEthernet: 'copper',
-  serial: 'serial',
-  console: 'console',
-  rs232: 'console',
-};
-
-const CABLE_MEDIUM: Record<Cable, Medium> = {
-  straight: 'copper',
-  crossover: 'copper',
-  serial: 'serial',
-  console: 'console',
-};
-
 export type TopologyError =
   | { kind: 'duplicate-id'; id: DeviceId | LinkId | AnnotationId }
   | { kind: 'device-not-found'; device: DeviceId }
@@ -1068,7 +1067,7 @@ export type TopologyError =
       kind: 'cable-mismatch';
       endpoint: Endpoint;
       cable: Cable;
-      portKind: PortKind | ConsolePortKind;
+      portKind: JackKind;
     }
   | { kind: 'same-port'; endpoint: Endpoint };
 
@@ -1113,7 +1112,7 @@ export function findLinkProblem(topology: Topology, link: Link): TopologyError |
     const port = portOf(device, endpoint.port);
     if (!port) return { kind: 'port-not-found', endpoint };
 
-    if (PORT_MEDIUM[port.kind] !== CABLE_MEDIUM[link.cable]) {
+    if (portMedium(port) !== CABLE_MEDIUM[link.cable]) {
       return { kind: 'cable-mismatch', endpoint, cable: link.cable, portKind: port.kind };
     }
     // A console cable joins a PC's RS-232 port to a Console port, never two of a kind.

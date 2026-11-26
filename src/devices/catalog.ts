@@ -40,6 +40,8 @@ function ports(kind: PortKind, slot: string, first: number, count: number): Port
   }));
 }
 
+const fiber = (specs: PortSpec[]): PortSpec[] => specs.map((spec) => ({ ...spec, fiber: true }));
+
 const single = (kind: PortKind): PortSpec[] => [
   { kind, id: PortId.parse(`${PORT_PREFIX[kind]}0`) },
 ];
@@ -80,6 +82,16 @@ export const DEVICE_MODELS = [
     hostnamePrefix: 'Switch',
     icon: 'switch',
     ports: [...ports('fastEthernet', '0/', 1, 48), ...ports('gigabitEthernet', '0/', 1, 2)],
+  },
+  {
+    id: 'switch-24-fiber',
+    name: 'Access Switch 24 Fiber',
+    category: 'switches',
+    kind: 'switch',
+    hostnamePrefix: 'Switch',
+    icon: 'switch',
+    // Fiber uplinks, as a 2960 with SFP modules: they take a fiber cable only.
+    ports: [...ports('fastEthernet', '0/', 1, 24), ...fiber(ports('gigabitEthernet', '0/', 1, 2))],
   },
   {
     id: 'switch-l3-24',
@@ -142,9 +154,12 @@ const PORT_ABBREVIATION: Record<PortKind, string> = {
   serial: 'Serial',
 };
 
-/** "2× Gi, 2× Serial", in the order the kinds first appear. */
+/** "2× Gi, 2× Serial", in the order the kinds first appear. Fiber ports say so. */
 export function portSummary(model: DeviceModel): string {
-  const counts = new Map<PortKind, number>();
-  for (const port of model.ports) counts.set(port.kind, (counts.get(port.kind) ?? 0) + 1);
-  return [...counts].map(([kind, count]) => `${count}× ${PORT_ABBREVIATION[kind]}`).join(', ');
+  const counts = new Map<string, number>();
+  for (const port of model.ports) {
+    const name = `${PORT_ABBREVIATION[port.kind]}${port.fiber ? ' fiber' : ''}`;
+    counts.set(name, (counts.get(name) ?? 0) + 1);
+  }
+  return [...counts].map(([name, count]) => `${count}× ${name}`).join(', ');
 }

@@ -35,6 +35,10 @@ const CABLES: Record<Cable, { name: string; explain: string }> = {
     name: 'Copper crossover',
     explain: 'Joins like devices, such as two switches or a PC and a router.',
   },
+  fiber: {
+    name: 'Fiber',
+    explain: 'Joins two fiber ports, such as the fiber uplinks of two switches.',
+  },
   serial: {
     name: 'Serial',
     explain: 'A WAN link between two routers. The DCE end sets the clock rate.',

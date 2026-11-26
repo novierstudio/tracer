@@ -8,6 +8,8 @@ import type { DeviceModelId } from '@/devices/catalog';
 import { createDevice } from '@/devices/create';
 import {
   addAnnotation,
+  autoCable,
+  cableEnd,
   addDevice,
   addLink,
   AnnotationId,
@@ -40,7 +42,7 @@ const cidr = (text: string) => {
   return Ipv4Cidr.parse({ address, prefixLength: Number(prefixLength) });
 };
 
-type Cable = { cable: 'straight' | 'crossover' | 'console' } | { cable: 'serial'; dce: 'a' | 'b' };
+type Cable = { cable: 'console' } | { cable: 'serial'; dce: 'a' | 'b' };
 
 function labBuilder(id: string) {
   const sample = SAMPLE_LABS.find((lab) => lab.id === id)!;
@@ -121,18 +123,20 @@ function labBuilder(id: string) {
       });
     },
 
-    /** `suffix` tells apart two cables between the same devices, as an EtherChannel has. */
-    cable(
-      a: [string, string],
-      b: [string, string],
-      kind: Cable = { cable: 'straight' },
-      suffix = '',
-    ) {
-      const link = {
-        id: LinkId.parse(`lnk_${tag}${a[0]}${b[0]}${suffix}`),
+    /**
+     * A cable from port to port: by default the network cable Packet Tracer's automatic cable
+     * picks. `suffix` tells apart two cables between the same devices, as an EtherChannel has.
+     */
+    cable(a: [string, string], b: [string, string], kind?: Cable, suffix = '') {
+      const ends = {
         a: { device: deviceId(a[0]), port: PortId.parse(a[1]) },
         b: { device: deviceId(b[0]), port: PortId.parse(b[1]) },
-        ...kind,
+      };
+      const auto = autoCable(cableEnd(topology, ends.a)!, cableEnd(topology, ends.b)!);
+      const link = {
+        id: LinkId.parse(`lnk_${tag}${a[0]}${b[0]}${suffix}`),
+        ...ends,
+        ...(kind ?? { cable: auto }),
       } as Link;
       topology = unwrap(addLink(topology, link));
     },
@@ -217,9 +221,9 @@ function staticRoutesSerial() {
   ]);
   lab.pc('PC1', 40, 232, '192.168.1.10/24', '192.168.1.1');
   lab.pc('PC2', 808, 232, '192.168.2.10/24', '192.168.2.1');
-  lab.cable(['PC1', 'FastEthernet0'], ['R1', 'GigabitEthernet0/0'], { cable: 'crossover' });
+  lab.cable(['PC1', 'FastEthernet0'], ['R1', 'GigabitEthernet0/0']);
   lab.cable(['R1', 'Serial0/0/0'], ['R2', 'Serial0/0/0'], { cable: 'serial', dce: 'a' });
-  lab.cable(['R2', 'GigabitEthernet0/0'], ['PC2', 'FastEthernet0'], { cable: 'crossover' });
+  lab.cable(['R2', 'GigabitEthernet0/0'], ['PC2', 'FastEthernet0']);
   lab.note(
     'serial',
     328,
@@ -458,12 +462,12 @@ function ospfThreeRouters() {
   lab.pc('PC1', 40, 424, '192.168.1.10/24', '192.168.1.1');
   lab.pc('PC2', 424, 40, '192.168.2.10/24', '192.168.2.1');
   lab.pc('PC3', 808, 424, '192.168.3.10/24', '192.168.3.1');
-  lab.cable(['R1', 'GigabitEthernet0/1'], ['R2', 'GigabitEthernet0/1'], { cable: 'crossover' });
-  lab.cable(['R2', 'GigabitEthernet0/2'], ['R3', 'GigabitEthernet0/1'], { cable: 'crossover' });
+  lab.cable(['R1', 'GigabitEthernet0/1'], ['R2', 'GigabitEthernet0/1']);
+  lab.cable(['R2', 'GigabitEthernet0/2'], ['R3', 'GigabitEthernet0/1']);
   lab.cable(['R1', 'Serial0/0/0'], ['R3', 'Serial0/0/0'], { cable: 'serial', dce: 'a' });
-  lab.cable(['PC1', 'FastEthernet0'], ['R1', 'GigabitEthernet0/0'], { cable: 'crossover' });
-  lab.cable(['PC2', 'FastEthernet0'], ['R2', 'GigabitEthernet0/0'], { cable: 'crossover' });
-  lab.cable(['PC3', 'FastEthernet0'], ['R3', 'GigabitEthernet0/0'], { cable: 'crossover' });
+  lab.cable(['PC1', 'FastEthernet0'], ['R1', 'GigabitEthernet0/0']);
+  lab.cable(['PC2', 'FastEthernet0'], ['R2', 'GigabitEthernet0/0']);
+  lab.cable(['PC3', 'FastEthernet0'], ['R3', 'GigabitEthernet0/0']);
   lab.note(
     'area',
     600,
@@ -540,12 +544,12 @@ function eigrpFeasibleSuccessor() {
   lab.pc('PC1', 40, 424, '192.168.1.10/24', '192.168.1.1');
   lab.pc('PC2', 424, 40, '192.168.2.10/24', '192.168.2.1');
   lab.pc('PC3', 808, 424, '192.168.3.10/24', '192.168.3.1');
-  lab.cable(['R1', 'GigabitEthernet0/1'], ['R2', 'GigabitEthernet0/1'], { cable: 'crossover' });
-  lab.cable(['R2', 'GigabitEthernet0/2'], ['R3', 'GigabitEthernet0/1'], { cable: 'crossover' });
+  lab.cable(['R1', 'GigabitEthernet0/1'], ['R2', 'GigabitEthernet0/1']);
+  lab.cable(['R2', 'GigabitEthernet0/2'], ['R3', 'GigabitEthernet0/1']);
   lab.cable(['R1', 'Serial0/0/0'], ['R3', 'Serial0/0/0'], { cable: 'serial', dce: 'a' });
-  lab.cable(['PC1', 'FastEthernet0'], ['R1', 'GigabitEthernet0/0'], { cable: 'crossover' });
-  lab.cable(['PC2', 'FastEthernet0'], ['R2', 'GigabitEthernet0/0'], { cable: 'crossover' });
-  lab.cable(['PC3', 'FastEthernet0'], ['R3', 'GigabitEthernet0/0'], { cable: 'crossover' });
+  lab.cable(['PC1', 'FastEthernet0'], ['R1', 'GigabitEthernet0/0']);
+  lab.cable(['PC2', 'FastEthernet0'], ['R2', 'GigabitEthernet0/0']);
+  lab.cable(['PC3', 'FastEthernet0'], ['R3', 'GigabitEthernet0/0']);
   lab.note(
     'as',
     600,
@@ -645,7 +649,7 @@ function patAcl() {
   lab.cable(['PC2', 'FastEthernet0'], ['SW1', 'FastEthernet0/2']);
   lab.cable(['PC3', 'FastEthernet0'], ['SW1', 'FastEthernet0/3']);
   lab.cable(['SW1', 'GigabitEthernet0/1'], ['R1', 'GigabitEthernet0/0']);
-  lab.cable(['R1', 'GigabitEthernet0/1'], ['Server', 'GigabitEthernet0'], { cable: 'crossover' });
+  lab.cable(['R1', 'GigabitEthernet0/1'], ['Server', 'GigabitEthernet0']);
   lab.note(
     'pat',
     520,

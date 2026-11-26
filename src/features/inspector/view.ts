@@ -170,6 +170,7 @@ export function portRows(topology: Topology, device: Device): PortRow[] {
 export const CABLE_LABELS: Record<Link['cable'], string> = {
   straight: 'Copper straight-through',
   crossover: 'Copper crossover',
+  fiber: 'Fiber',
   serial: 'Serial DCE/DTE',
   console: 'Console',
 };

@@ -8,7 +8,7 @@ import { drawRandom } from './core/random';
 import { after, ms, START, type SimDuration, type SimTime } from './core/time';
 import type { EventId, SentFrame, SimEvent } from './events';
 import type { Frame } from './frame';
-import { endUp, linkSyslog } from './l1';
+import { linkSyslog, linkUp } from './l1';
 import type { DeviceUnavailable, ModuleContext, SimModule, Stacks } from './module';
 import type { TopologyPatch } from './patch';
 
@@ -256,10 +256,9 @@ export function createEngine({
     const transitions: [Link, boolean][] = [];
     for (const state of links.values()) {
       if (!chosen(state.link)) continue;
-      const { a, b, cable } = state.link;
+      const { a, b } = state.link;
       const up =
-        endUp(devices.get(a.device), a.port, cable) &&
-        endUp(devices.get(b.device), b.port, cable) &&
+        linkUp(state.link, devices.get(a.device), devices.get(b.device)) &&
         !disabled(a) &&
         !disabled(b);
       if (up === state.up) continue;

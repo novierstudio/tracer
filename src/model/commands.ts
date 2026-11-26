@@ -244,7 +244,8 @@ export function updateLabSettings(topology: Topology, update: Partial<LabSetting
   });
 }
 
-export type PortSpec = Pick<Port, 'kind' | 'id'>;
+/** A port as a model lists it: its kind and name, and whether an Ethernet port is fiber. */
+export type PortSpec = { kind: Port['kind']; id: PortId; fiber?: true };
 
 type ConfigOf<K extends DeviceKind> = Extract<Device, { kind: K }>['config'];
 
@@ -295,7 +296,7 @@ export function createDevice(
   const ports = spec.ports.map((port): Port =>
     port.kind === 'serial'
       ? { kind: 'serial', id: port.id }
-      : { kind: port.kind, id: port.id, mac: freshMac() },
+      : { kind: port.kind, id: port.id, mac: freshMac(), ...(port.fiber && { fiber: true }) },
   );
   const fields = { id, model: spec.model, position: spec.position, powered: true, ports };
   const { hostname } = spec;

@@ -1,16 +1,5 @@
-import type { Cable, Device, PortId, PortKind } from '@/model';
-
-/**
- * The ports each cable fits. Every Ethernet port runs auto-MDIX, so straight-through and
- * crossover both work between any two copper ports. Hubs are not a device kind yet.
- */
-const CABLE_FITS: Record<Cable, readonly PortKind[]> = {
-  straight: ['fastEthernet', 'gigabitEthernet'],
-  crossover: ['fastEthernet', 'gigabitEthernet'],
-  serial: ['serial'],
-  // It carries the CLI from a PC's Terminal app, never frames, so it never comes up.
-  console: [],
-};
+import type { Device, Link, PortId } from '@/model';
+import { CABLE_MEDIUM, copperWorks, portMedium } from '@/model/cabling';
 
 function adminUp(device: Device, port: PortId): boolean {
   switch (device.kind) {
@@ -28,10 +17,28 @@ function adminUp(device: Device, port: PortId): boolean {
 }
 
 /** One end of a link is up when its device is powered, its port is not shut down and the cable fits it. */
-export function endUp(device: Device | undefined, port: PortId, cable: Cable): boolean {
-  if (!device?.powered) return false;
-  const kind = device.ports.find((candidate) => candidate.id === port)?.kind;
-  return kind !== undefined && CABLE_FITS[cable].includes(kind) && adminUp(device, port);
+function endUp(device: Device | undefined, port: PortId, link: Link) {
+  if (!device?.powered) return undefined;
+  const found = device.ports.find((candidate) => candidate.id === port);
+  // A console cable carries the CLI from a PC's Terminal app, never frames, so it never comes up.
+  const fits =
+    found !== undefined &&
+    link.cable !== 'console' &&
+    portMedium(found) === CABLE_MEDIUM[link.cable] &&
+    adminUp(device, port);
+  return fits ? { kind: device.kind, port, portKind: found.kind } : undefined;
+}
+
+/**
+ * A link is up when both ends are and the cable works between them. A copper link between Fast
+ * Ethernet ports stays down on the wrong cable, as in Packet Tracer: see `copperWorks`.
+ */
+export function linkUp(link: Link, a: Device | undefined, b: Device | undefined): boolean {
+  const aEnd = endUp(a, link.a.port, link);
+  const bEnd = endUp(b, link.b.port, link);
+  if (!aEnd || !bEnd) return false;
+  if (link.cable !== 'straight' && link.cable !== 'crossover') return true;
+  return copperWorks(link.cable, aEnd, bEnd);
 }
 
 /**

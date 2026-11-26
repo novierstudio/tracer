@@ -57,6 +57,7 @@ export function LinkInspector({ link, topology }: { link: Link; topology: Topolo
 const CABLE_CHOICES: Record<Cable, string> = {
   straight: 'Straight-through',
   crossover: 'Crossover',
+  fiber: 'Fiber',
   serial: 'Serial',
   console: 'Console',
 };

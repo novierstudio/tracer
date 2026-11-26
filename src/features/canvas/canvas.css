@@ -4,6 +4,7 @@
   --cable-copper: color-mix(in oklab, var(--text-3) 85%, var(--text-1));
   --cable-serial: #c2410c;
   --cable-console: #0f766e;
+  --cable-fiber: #7c3aed;
   --light-unknown: var(--text-3);
   /* How strongly an annotation's colour shows in a fill and an edge. */
   --annotation-fill: 9%;
@@ -15,6 +16,7 @@
   --cable-copper: color-mix(in oklab, var(--text-3) 80%, var(--surface-0));
   --cable-serial: #fb923c;
   --cable-console: #2dd4bf;
+  --cable-fiber: #a78bfa;
   --annotation-fill: 10%;
   --annotation-edge: 28%;
   --area-fill: 7%;
@@ -145,6 +147,11 @@
   stroke: var(--cable-serial);
 }
 
+.tracer-canvas .react-flow__edge .cable[data-cable='fiber'] .cable-path {
+  stroke: var(--cable-fiber);
+  stroke-width: 2.25;
+}
+
 /* A console cable carries the CLI, not packets: dotted, with no link lights. */
 .tracer-canvas .react-flow__edge .cable[data-cable='console'] .cable-path {
   stroke: var(--cable-console);
@@ -240,6 +247,11 @@
 
 [data-cable='serial'] > .cable-swatch {
   stroke: var(--cable-serial);
+}
+
+[data-cable='fiber'] > .cable-swatch {
+  stroke: var(--cable-fiber);
+  stroke-width: 2;
 }
 
 [data-cable='console'] > .cable-swatch {
