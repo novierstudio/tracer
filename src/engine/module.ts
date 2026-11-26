@@ -56,6 +56,12 @@ export interface DeviceContext {
   learnFiles(service: FileService, files: readonly StoredFile[]): void;
   /** A module's `disablesPort` answer changed: bring the device's links in line with it. */
   relink(): void;
+  /**
+   * A module's `holdsVlan` answer changed, as when spanning tree moves a port to or from
+   * forwarding. The device's other modules re-derive what depends on `forwards`, such as which
+   * VLAN interfaces are up, as on a config change.
+   */
+  forwardingChanged(): void;
   /** The routes every module on the device offers now, for its routing table. See `routes`. */
   learnedRoutes(): readonly LearnedRoute[];
   /** The virtual addresses every module answers for now. See `virtualAddresses`. */
