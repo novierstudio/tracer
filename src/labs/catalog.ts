@@ -94,6 +94,21 @@ export const SAMPLE_LABS: readonly SampleLab[] = [
     ],
     load: () => import('./stp-triangle.tracer.json?raw').then(text),
   },
+  {
+    id: 'dhcp-router',
+    title: 'DHCP on a router',
+    description:
+      'R1 hands out addresses from a DHCP pool. Neither PC has an address typed in: each asks for one when its cable comes up, and gets a gateway and a DNS server with it.',
+    difficulty: 'beginner',
+    devices: { router: 1, switch: 1, pc: 2 },
+    tryThis: [
+      'Run `ipconfig /all` on PC1 to see its lease and the server that gave it',
+      'Run `show ip dhcp binding` on R1',
+      'Switch to Simulation mode, run `ipconfig /renew` on PC2, and step through the DHCP messages',
+      'Run `ipconfig /release` on PC2, then `show ip dhcp binding` on R1 again',
+    ],
+    load: () => import('./dhcp-router.tracer.json?raw').then(text),
+  },
 ];
 
 export const DIFFICULTY_LABELS: Record<Difficulty, string> = {
