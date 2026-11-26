@@ -10,15 +10,21 @@ import type {
   RipMessage,
   UdpDatagram,
 } from '@/engine/pdu';
+import type { TcpSegment } from '@/engine/tcp';
+import { describeDns, describeHttp, describeTcp } from './pdu/web';
 
 /** The protocol a frame shows as: the innermost one the engine models. */
-export type ProtocolId = 'arp' | 'icmp' | 'dhcp' | 'rip' | 'ospf' | 'stp' | 'hello';
+export type ProtocolId =
+  'arp' | 'icmp' | 'dhcp' | 'dns' | 'tcp' | 'http' | 'rip' | 'ospf' | 'stp' | 'hello';
 
 /** Each protocol's short label and colour token. The label means colour is never the only cue. */
 export const PROTOCOLS: Record<ProtocolId, { label: string; token: `--proto-${string}` }> = {
   arp: { label: 'ARP', token: '--proto-arp' },
   icmp: { label: 'ICMP', token: '--proto-icmp' },
   dhcp: { label: 'DHCP', token: '--proto-dhcp' },
+  dns: { label: 'DNS', token: '--proto-dns' },
+  tcp: { label: 'TCP', token: '--proto-tcp' },
+  http: { label: 'HTTP', token: '--proto-tcp' },
   rip: { label: 'RIP', token: '--proto-routing' },
   ospf: { label: 'OSPF', token: '--proto-routing' },
   stp: { label: 'STP', token: '--proto-stp' },
@@ -36,6 +42,9 @@ function ipProtocol(packet: Ipv4Packet): ProtocolId {
       return packet.payload.payload.kind;
     case 'ospf':
       return 'ospf';
+    case 'tcp':
+      // A segment that carries HTTP shows as HTTP; a bare SYN, ACK, FIN or RST as TCP.
+      return packet.payload.payload ? 'http' : 'tcp';
   }
 }
 
@@ -148,8 +157,13 @@ function describeUdp(packet: Ipv4Packet, datagram: UdpDatagram): string {
       return describeDhcp(datagram.payload);
     case 'rip':
       return describeRip(packet, datagram.payload);
+    case 'dns':
+      return `DNS ${describeDns(datagram.payload)}`;
   }
 }
+
+const describeSegment = (segment: TcpSegment) =>
+  segment.payload ? `HTTP ${describeHttp(segment.payload)}` : `TCP ${describeTcp(segment)}`;
 
 function describePacket(packet: Ipv4Packet): string {
   const { payload } = packet;
@@ -160,6 +174,8 @@ function describePacket(packet: Ipv4Packet): string {
       return describeUdp(packet, payload);
     case 'ospf':
       return describeOspf(payload);
+    case 'tcp':
+      return describeSegment(payload);
   }
 }
 

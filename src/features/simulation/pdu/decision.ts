@@ -1,5 +1,6 @@
 import type { FrameEvent, SentFrame } from '@/engine/events';
 import type { Frame } from '@/engine/frame';
+import type { DnsMessage } from '@/engine/dns';
 import { ingressVlan } from '@/engine/l2/switching';
 import { routesPackets } from '@/engine/l3/interfaces';
 import {
@@ -16,6 +17,7 @@ import {
   type RipMessage,
   type RipVersion,
 } from '@/engine/pdu';
+import type { TcpSegment } from '@/engine/tcp';
 import { shortPortName } from '@/features/canvas/cables';
 import type { Device, Ipv4Address, MacAddress, PortId, VlanId } from '@/model';
 
@@ -35,6 +37,8 @@ export type Decision =
   | { kind: 'learned'; ip: Ipv4Address; mac: MacAddress; released: readonly PortId[] }
   | { kind: 'received'; message: 'echo-reply' | 'time-exceeded' | 'unreachable'; from: Ipv4Address }
   | { kind: 'dhcp'; step: DhcpStep }
+  /** A host took a DNS message or TCP segment for it: a step of fetching a web page. */
+  | { kind: 'web'; step: WebStep }
   /** A router running RIP read a RIP message. `out` are the ports it sent RIP routes out of. */
   | { kind: 'rip'; command: RipMessage['command']; version: RipVersion; out: readonly PortId[] }
   /** A router running OSPF read an OSPF packet. `sent` is the OSPF it sent while it did. */
@@ -54,6 +58,20 @@ export type DhcpStep =
   | { kind: 'requested'; address: Ipv4Address; out: PortId }
   | { kind: 'bound'; address: Ipv4Address }
   | { kind: 'restarted'; out: PortId };
+
+/** What a host did with a DNS message or a TCP segment for it, read from what it sent back. */
+export type WebStep =
+  | { kind: 'dns-answered'; name: string; address: Ipv4Address | undefined; out: PortId }
+  /** `connecting` is the port a SYN to the address went out of. */
+  | { kind: 'dns-learned'; name: string; address: Ipv4Address | undefined; connecting?: PortId }
+  | { kind: 'accepted'; port: number; out: PortId }
+  | { kind: 'refused'; port: number; out: PortId }
+  /** A client finished the handshake. `path` is what it then sent a GET for. */
+  | { kind: 'connected'; path: string | undefined; out: PortId }
+  | { kind: 'served'; path: string; status: string; closing: boolean; out: PortId }
+  /** `response` is the status acknowledged, such as `200 OK`; without one, a FIN. */
+  | { kind: 'acked'; response: string | undefined; closing: boolean; out: PortId }
+  | { kind: 'took'; segment: 'ack' | 'rst' | 'other' };
 
 type OspfType = OspfPacket['type'];
 
@@ -354,6 +372,82 @@ function decideDhcp(
   }
 }
 
+const tcpOf = (frame: Frame): TcpSegment | undefined => {
+  const payload = ipv4Of(frame)?.payload;
+  return payload?.kind === 'tcp' ? payload : undefined;
+};
+
+const dnsOf = (frame: Frame): DnsMessage | undefined => {
+  const payload = ipv4Of(frame)?.payload;
+  return payload?.kind === 'udp' && payload.payload.kind === 'dns' ? payload.payload : undefined;
+};
+
+const statusOf = (segment: TcpSegment | undefined) =>
+  segment?.payload?.type === 'response'
+    ? `${segment.payload.status} ${segment.payload.reason}`
+    : undefined;
+
+function decideDns(message: DnsMessage, sent: readonly SentFrame[]): WebStep | undefined {
+  if (message.type === 'query') {
+    const reply = sent.flatMap(({ port, frame }) => {
+      const answer = dnsOf(frame);
+      return answer?.type === 'response' && answer.id === message.id ? [{ port, answer }] : [];
+    })[0];
+    if (!reply) return undefined;
+    const address = reply.answer.answers[0]?.address;
+    return { kind: 'dns-answered', name: message.name, address, out: reply.port };
+  }
+  const syn = sent.find(({ frame }) => {
+    const segment = tcpOf(frame);
+    return segment?.flags.syn && !segment.flags.ack;
+  });
+  return {
+    kind: 'dns-learned',
+    name: message.name,
+    address: message.answers[0]?.address,
+    ...(syn && { connecting: syn.port }),
+  };
+}
+
+/** Reads the segments the host sent back on the same connection. */
+function decideTcp(segment: TcpSegment, sent: readonly SentFrame[]): WebStep {
+  const replies = sent.flatMap(({ port, frame }) => {
+    const reply = tcpOf(frame);
+    return reply?.srcPort === segment.dstPort && reply.dstPort === segment.srcPort
+      ? [{ port, reply }]
+      : [];
+  });
+  const out = replies[0]?.port;
+  const { flags, payload } = segment;
+  if (out === undefined) {
+    const bareAck = flags.ack && !flags.syn && !flags.fin && !flags.rst && !payload;
+    return { kind: 'took', segment: flags.rst ? 'rst' : bareAck ? 'ack' : 'other' };
+  }
+  const sentFlag = (flag: keyof TcpSegment['flags']) =>
+    replies.some(({ reply }) => reply.flags[flag]);
+  const closing = sentFlag('fin');
+  if (sentFlag('rst')) return { kind: 'refused', port: segment.dstPort, out };
+  if (flags.syn && !flags.ack) return { kind: 'accepted', port: segment.dstPort, out };
+  if (flags.syn) {
+    const request = replies.find(({ reply }) => reply.payload?.type === 'request')?.reply.payload;
+    return { kind: 'connected', path: request?.type === 'request' ? request.path : undefined, out };
+  }
+  const status = replies.map(({ reply }) => statusOf(reply)).find(Boolean);
+  if (payload?.type === 'request' && status) {
+    return { kind: 'served', path: payload.path, status, closing, out };
+  }
+  return { kind: 'acked', response: statusOf(segment), closing, out };
+}
+
+function decideWeb(packet: Ipv4Packet, sent: readonly SentFrame[]): Decision | undefined {
+  const { payload } = packet;
+  const dns = dnsOf({ kind: 'hdlc', payload: packet });
+  const step =
+    payload.kind === 'tcp' ? decideTcp(payload, sent) : dns ? decideDns(dns, sent) : undefined;
+  if (step) return { kind: 'web', step };
+  return dns ? { kind: 'silent' } : undefined;
+}
+
 function decideIp(
   device: Device,
   packet: Ipv4Packet,
@@ -390,6 +484,8 @@ function decideIp(
   const message = dhcpOf({ kind: 'hdlc', payload: packet });
   const dhcp = message && decideDhcp(device, packet, message, sent);
   if (dhcp) return dhcp;
+  const web = mine ? decideWeb(packet, sent) : undefined;
+  if (web) return web;
   if (mine && packet.payload.kind === 'icmp') {
     const message = packet.payload;
     switch (message.type) {
@@ -548,6 +644,52 @@ function describeDhcp(name: string, step: DhcpStep): string {
   }
 }
 
+function describeWeb(name: string, step: WebStep): string {
+  switch (step.kind) {
+    case 'dns-answered':
+      return step.address
+        ? `${name} looked up ${step.name} and sent back its address, ${step.address}, out ${shortPortName(step.out)}.`
+        : `${name} knows no host named ${step.name}, so it answered that there is no such name out ${shortPortName(step.out)}.`;
+    case 'dns-learned':
+      if (!step.address)
+        return `${name} heard that no host is named ${step.name}, so it cannot connect.`;
+      return step.connecting
+        ? `${name} learned that ${step.name} is at ${step.address} and opened a TCP connection to it with a SYN out ${shortPortName(step.connecting)}.`
+        : `${name} learned that ${step.name} is at ${step.address}.`;
+    case 'accepted':
+      return `${name} is listening on port ${step.port}, so it answered the SYN with a SYN+ACK out ${shortPortName(step.out)}.`;
+    case 'refused':
+      return `${name} has nothing listening on port ${step.port}, so it refused the connection with a RST out ${shortPortName(step.out)}.`;
+    case 'connected':
+      return step.path === undefined
+        ? `${name} finished the handshake with an ACK out ${shortPortName(step.out)}.`
+        : `${name} finished the handshake with an ACK and sent GET ${step.path} out ${shortPortName(step.out)}.`;
+    case 'served': {
+      const close = step.closing ? ', then closed its side with a FIN' : '';
+      return `${name} answered GET ${step.path} with ${step.status} out ${shortPortName(step.out)}${close}.`;
+    }
+    case 'acked': {
+      const out = shortPortName(step.out);
+      if (step.response) {
+        const close = step.closing ? ' and closed its side with a FIN' : '';
+        return `${name} got ${step.response} and acknowledged it${close} out ${out}.`;
+      }
+      return step.closing
+        ? `${name} acknowledged the FIN and closed its side too with a FIN out ${out}.`
+        : `${name} acknowledged the FIN out ${out}: the connection is closed.`;
+    }
+    case 'took':
+      switch (step.segment) {
+        case 'ack':
+          return `${name} took the ACK. An ACK needs no answer.`;
+        case 'rst':
+          return `${name} took the RST: the other end refused or aborted the connection.`;
+        case 'other':
+          return `${name} took the segment and sent nothing back.`;
+      }
+  }
+}
+
 function describeIgnore(name: string, reason: IgnoreReason) {
   switch (reason.kind) {
     case 'other-mac':
@@ -646,6 +788,8 @@ export function describeDecision(decision: Decision, name: string): string {
       return describeReceived(name, decision);
     case 'dhcp':
       return describeDhcp(name, decision.step);
+    case 'web':
+      return describeWeb(name, decision.step);
     case 'rip':
       return describeRip(name, decision);
     case 'ospf':

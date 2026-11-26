@@ -47,6 +47,7 @@ const DECISION_LOOK: Record<Decision['kind'], { icon: LucideIcon; tone: Tone; la
     learned: { icon: BookmarkCheckIcon, tone: 'accent', layer: ['arp'] },
     received: { icon: CircleCheckIcon, tone: 'ok', layer: ['icmp'] },
     dhcp: { icon: ReplyIcon, tone: 'accent', layer: ['dhcp'] },
+    web: { icon: ReplyIcon, tone: 'accent', layer: ['http', 'dns', 'tcp'] },
     rip: { icon: RouteIcon, tone: 'accent', layer: ['rip'] },
     ospf: { icon: RouteIcon, tone: 'accent', layer: ['ospf'] },
     dropped: { icon: CircleXIcon, tone: 'err', layer: ['dhcp', 'ipv4', 'dot1q', 'ethernet'] },
