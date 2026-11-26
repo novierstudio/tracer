@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { beforeEach, expect, it } from 'vitest';
 import { commandRegistry } from '@/features/command/registry';
 import { emptyTopology, labSettings } from '@/model';
@@ -18,8 +18,9 @@ function openFromPalette() {
 
 it('opens from the command palette on fast timers, and switches the lab to the IOS timers', () => {
   const dialog = openFromPalette();
-  const fast = screen.getByRole('radio', { name: 'Fast (default)' });
-  const ios = screen.getByRole('radio', { name: 'Real IOS (30 s)' });
+  const group = within(screen.getByRole('radiogroup', { name: 'Spanning tree timers' }));
+  const fast = group.getByRole('radio', { name: 'Fast (default)' });
+  const ios = group.getByRole('radio', { name: 'Real IOS (30 s)' });
   expect(fast).toHaveAttribute('aria-checked', 'true');
   expect(dialog).toHaveTextContent('listen for 2 s and learn for 2 s');
 
@@ -30,4 +31,34 @@ it('opens from the command palette on fast timers, and switches the lab to the I
   expect(dialog).toHaveTextContent('a new port forwards after 30 s');
   act(() => editorStore.getState().undo());
   expect(fast).toHaveAttribute('aria-checked', 'true');
+});
+
+it('switches the routing protocol timers to the IOS ones, leaving spanning tree alone', () => {
+  const dialog = openFromPalette();
+  const group = within(screen.getByRole('radiogroup', { name: 'Routing protocol timers' }));
+  const fast = group.getByRole('radio', { name: 'Fast (default)' });
+  const ios = group.getByRole('radio', { name: 'Real IOS (30 s updates)' });
+  expect(fast).toHaveAttribute('aria-checked', 'true');
+  expect(dialog).toHaveTextContent(
+    'RIP sends updates every 5 s and drops a silent route after 15 s, so a lab converges in seconds.',
+  );
+
+  fireEvent.click(ios);
+
+  expect(labSettings(editorStore.getState().topology)).toEqual({
+    stpTimers: 'fast',
+    routingTimers: 'ios',
+  });
+  expect(ios).toHaveAttribute('aria-checked', 'true');
+  expect(dialog).toHaveTextContent(
+    'RIP sends updates every 30 s; a silent route is invalid after 180 s, held down 180 s and flushed after 240 s, as on a real router.',
+  );
+  act(() => editorStore.getState().undo());
+  expect(fast).toHaveAttribute('aria-checked', 'true');
+});
+
+it('is found in the palette by rip or routing', () => {
+  render(<LabSettingsDialog />);
+  const command = commandRegistry.getCommands().find(({ title }) => title === 'Lab settings…');
+  expect(command?.keywords).toEqual(expect.arrayContaining(['rip', 'routing']));
 });
