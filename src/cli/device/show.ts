@@ -29,6 +29,7 @@ import type { IosDevice } from './context';
 import type { PortStates } from './query';
 import { ipv6InterfaceLines, ipv6RouteLine } from './ipv6Config';
 import { sshLines, usernameLines } from './remote';
+import { eigrpLines } from './eigrpConfig';
 import { accessListLines, natLines } from './showAclNat';
 
 export const IOS_VERSION = '15.1';
@@ -135,7 +136,8 @@ function interfaceBlock(entry: InterfaceEntry): string[] {
       lines.push(` encapsulation dot1Q ${vlan}${native ? ' native' : ''}`);
     }
     const { ipv4, helperAddresses = [], ospfCost, ospfPriority } = entry.config;
-    const { accessGroupIn, accessGroupOut, nat } = entry.config;
+    const { accessGroupIn, accessGroupOut, nat, bandwidth, delay } = entry.config;
+    if (bandwidth !== undefined) lines.push(` bandwidth ${bandwidth}`);
     lines.push(
       ipv4
         ? ` ip address ${ipv4.address} ${formatSubnetMask(ipv4.prefixLength)}`
@@ -147,6 +149,7 @@ function interfaceBlock(entry: InterfaceEntry): string[] {
     if (nat !== undefined) lines.push(` ip nat ${nat}`);
     if (ospfCost !== undefined) lines.push(` ip ospf cost ${ospfCost}`);
     if (ospfPriority !== undefined) lines.push(` ip ospf priority ${ospfPriority}`);
+    if (delay !== undefined) lines.push(` delay ${delay}`);
   }
   if (entry.kind !== 'subinterface') {
     if (entry.config.duplex) lines.push(` duplex ${entry.config.duplex}`);
@@ -324,6 +327,9 @@ export function runningConfig(device: IosDevice): string[] {
   out.push('!');
   if (device.kind === 'switch') out.push(...spanningTreeLines(device.config), '!');
   for (const entry of interfaceEntries(device)) out.push(...interfaceBlock(entry), '!');
+  if (device.kind === 'router' && device.config.eigrp) {
+    out.push(...eigrpLines(device.config.eigrp), '!');
+  }
   if (device.kind === 'router' && device.config.ospf) {
     out.push(...ospfBlock(device.config.ospf), '!');
   }
@@ -488,7 +494,15 @@ function interfaceDetail(device: IosDevice, entry: InterfaceEntry, ports?: PortS
       : '';
   const ipv4 = entry.kind === 'switched' ? undefined : entry.config.ipv4;
   const speed = entry.kind === 'subinterface' ? undefined : entry.config.speed;
-  const bandwidth = speed ? speed * 1000 : hardware.bandwidth;
+  const configured = entry.kind === 'switched' ? undefined : entry.config;
+  // An Ethernet port's delay follows its speed: 10 µs at 1 Gbit/s, 100 at 100 Mbit/s.
+  const bandwidth = configured?.bandwidth ?? (speed ? speed * 1000 : hardware.bandwidth);
+  const delay =
+    configured?.delay !== undefined
+      ? configured.delay * 10
+      : speed
+        ? 10_000 / speed
+        : hardware.delay;
   const encapsulation =
     entry.kind === 'subinterface' && entry.config.encapsulation
       ? `802.1Q Virtual LAN, Vlan ID  ${entry.config.encapsulation.vlan}`
@@ -500,7 +514,7 @@ function interfaceDetail(device: IosDevice, entry: InterfaceEntry, ports?: PortS
       ? []
       : [`  Description: ${entry.config.description}`]),
     ...(ipv4 ? [`  Internet address is ${ipv4.address}/${ipv4.prefixLength}`] : []),
-    `  MTU 1500 bytes, BW ${bandwidth} Kbit, DLY ${hardware.delay} usec,`,
+    `  MTU 1500 bytes, BW ${bandwidth} Kbit, DLY ${delay} usec,`,
     `  Encapsulation ${encapsulation}, loopback not set`,
   ];
 }

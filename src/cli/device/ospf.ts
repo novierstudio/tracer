@@ -55,7 +55,7 @@ function networkNumber(address: Ipv4Address, wildcard: Ipv4Address): Ipv4Address
 }
 
 /** Applies `edit` to each routed interface or subinterface of the mode. */
-function eachInterface(
+export function eachInterface(
   ctx: RouterContext,
   mode: ModeOf<'interface-config' | 'subinterface-config'>,
   edit: (config: Draft<RoutedInterface> | Draft<Subinterface>) => void,

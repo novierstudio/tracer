@@ -31,7 +31,7 @@ const defaultInformation = keyword(
 );
 
 /** The class A, B or C network an address is in, or undefined for class D and E. */
-function classfulNetwork(address: Ipv4Address): Ipv4Address | undefined {
+export function classfulNetwork(address: Ipv4Address): Ipv4Address | undefined {
   const first = Number(address.split('.')[0]);
   if (first >= 224) return undefined;
   const length = (first < 128 ? 8 : first < 192 ? 16 : 24) as PrefixLength;

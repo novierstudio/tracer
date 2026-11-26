@@ -1,6 +1,7 @@
 import type { OspfStatus, RipStatus, RoutingProtocols } from '../../engine/api';
 import type { OspfConfig, RipConfig } from '../../model';
 import type { IosDevice } from './context';
+import { eigrpSection } from './showEigrp';
 import { NO_ENGINE, routeAge } from './showRouting';
 
 /** What RIP sends and accepts: v1 and either version without `version`, else only the one set. */
@@ -84,8 +85,9 @@ export function showIpProtocols(
 ): readonly string[] {
   if (!protocols) return NO_ENGINE;
   if (device.kind !== 'router') return [];
-  const { ospf, rip } = device.config;
+  const { eigrp, ospf, rip } = device.config;
   const sections = [
+    eigrp && protocols.eigrp ? eigrpSection(eigrp, protocols.eigrp) : undefined,
     ospf && protocols.ospf ? ospfSection(ospf, protocols.ospf) : undefined,
     rip && protocols.rip ? ripSection(rip, protocols.rip) : undefined,
   ].filter((section) => section !== undefined);

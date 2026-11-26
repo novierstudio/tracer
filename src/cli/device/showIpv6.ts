@@ -233,8 +233,11 @@ const NEIGHBOR_SHORT: Readonly<Record<InterfaceType, string>> = {
   Vlan: 'Vl',
 };
 
-/** An interface as `show ipv6 neighbors` abbreviates it: `Gig0/0`, `Fa0/1`, `Se0/0/0`. */
-function neighborInterface(id: InterfaceId): string {
+/**
+ * An interface as Packet Tracer abbreviates it in `show ipv6 neighbors` and `show ip eigrp`:
+ * `Gig0/0`, `Fa0/1`, `Se0/0/0`.
+ */
+export function neighborInterface(id: InterfaceId): string {
   const type = INTERFACE_TYPES.find((name) => id.startsWith(name));
   return type ? NEIGHBOR_SHORT[type] + id.slice(type.length) : id;
 }

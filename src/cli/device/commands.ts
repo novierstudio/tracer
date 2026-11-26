@@ -68,6 +68,7 @@ import { aclCommands } from './acl';
 import { execCommands } from './exec';
 import { dhcpCommands } from './dhcp';
 import { ipv6Commands } from './ipv6';
+import { eigrpCommands } from './eigrp';
 import { natCommands } from './nat';
 import { ospfCommands } from './ospf';
 import { remoteCommands } from './remote';
@@ -84,6 +85,7 @@ const CONFIG = [
   'rip-config',
   'dhcp-config',
   'ospf-config',
+  'eigrp-config',
   'std-acl-config',
   'ext-acl-config',
 ] as const;
@@ -563,7 +565,7 @@ export const commonCommands = [
       }
       // IOS drops the config that names a deleted interface.
       if (device.kind === 'router') {
-        for (const routing of [device.config.rip, device.config.ospf]) {
+        for (const routing of [device.config.rip, device.config.ospf, device.config.eigrp]) {
           if (routing)
             routing.passiveInterfaces = routing.passiveInterfaces.filter((id) => id !== name);
         }
@@ -822,6 +824,7 @@ export const routerCommands = [
   ...helperAddressCommands(),
   ...dhcpCommands,
   ...ospfCommands,
+  ...eigrpCommands,
   ...ripCommands,
   ...aclCommands,
   ...natCommands,
