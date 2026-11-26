@@ -76,6 +76,7 @@ const SWATCH: Record<Cable, string> = {
   straight: 'M1 5h18',
   crossover: 'M1 5h18',
   serial: 'M1 5h6l2-4 2 8 2-4h6',
+  console: 'M1 5h18',
 };
 
 /** A short sample of how each cable type is drawn on the canvas. */
@@ -100,6 +101,7 @@ const CABLE_TOOLBAR_LABELS: Record<CableChoice, string> = {
   straight: 'Straight',
   crossover: 'Crossover',
   serial: 'Serial',
+  console: 'Console',
 };
 
 const CABLE_OPTIONS = CABLE_CHOICES.map((cable) => ({

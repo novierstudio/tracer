@@ -39,6 +39,11 @@ const CABLES: Record<Cable, { name: string; explain: string }> = {
     name: 'Serial',
     explain: 'A WAN link between two routers. The DCE end sets the clock rate.',
   },
+  console: {
+    name: 'Console',
+    explain:
+      "Joins a PC's RS-232 port to a router or switch's Console port. It carries the CLI, not packets.",
+  },
 };
 
 function physicalLayer(

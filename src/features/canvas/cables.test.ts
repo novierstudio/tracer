@@ -49,6 +49,13 @@ describe('autoCable', () => {
     expect(autoCable(end('router', 'serial'), end('router', 'serial'))).toBe('serial');
     expect(autoCable(end('router', 'serial'), end('router', 'gigabitEthernet'))).toBeUndefined();
   });
+
+  it('uses a console cable from RS-232 to Console, and never between two of a kind', () => {
+    expect(autoCable(end('pc', 'rs232'), end('router', 'console'))).toBe('console');
+    expect(autoCable(end('switch', 'console'), end('pc', 'rs232'))).toBe('console');
+    expect(autoCable(end('router', 'console'), end('switch', 'console'))).toBeUndefined();
+    expect(autoCable(end('pc', 'rs232'), end('switch', 'fastEthernet'))).toBeUndefined();
+  });
 });
 
 describe('portOptions', () => {
@@ -67,6 +74,7 @@ describe('portOptions', () => {
       { id: 'GigabitEthernet0/1', kind: 'gigabitEthernet', short: 'Gi0/1', status: 'free' },
       { id: 'Serial0/0/0', kind: 'serial', short: 'Se0/0/0', status: 'free' },
       { id: 'Serial0/0/1', kind: 'serial', short: 'Se0/0/1', status: 'free' },
+      { id: 'Console', kind: 'console', short: 'Console', status: 'free' },
       {
         id: 'GigabitEthernet0/0',
         kind: 'gigabitEthernet',
@@ -87,6 +95,7 @@ describe('portOptions', () => {
       ['Se0/0/1', 'free'],
       ['Gi0/0', 'incompatible'],
       ['Gi0/1', 'incompatible'],
+      ['Console', 'incompatible'],
     ]);
   });
 
@@ -106,6 +115,44 @@ describe('portOptions', () => {
       }),
     );
     expect(onlyPort(topology(), pc, undefined)).toBeUndefined();
+  });
+});
+
+describe('console cables', () => {
+  it('picks the only port of each end for a console cable', () => {
+    const { ids, topology } = lab('pc', 'router-2g2s');
+    const [pc, router] = ids as [DeviceId, DeviceId];
+    expect(onlyPort(topology(), pc, 'console')).toBe('RS232');
+    expect(onlyPort(topology(), router, 'console')).toBe('Console');
+  });
+
+  it('plans a console link a store accepts, and refuses one between two Console ports', () => {
+    const { editor, ids, topology } = lab('pc', 'router-2g2s', 'switch-24');
+    const [pc, router, sw] = ids as [DeviceId, DeviceId, DeviceId];
+    const a = { device: pc, port: port('RS232') };
+    const b = { device: router, port: port('Console') };
+    const plan = planLink(topology(), 'console', a, b);
+    expect(plan).toEqual({ ok: true, value: { cable: 'console', a, b } });
+    expectOk(editor.getState().addLink(expectOk(plan)));
+    expect(portOptions(topology(), router, undefined).at(-1)).toMatchObject({
+      id: 'Console',
+      status: 'used',
+      peer: 'PC0 RS232',
+    });
+
+    const twoConsoles = editor.getState().addLink({
+      cable: 'console',
+      a: { device: sw, port: port('Console') },
+      b: { device: router, port: port('GigabitEthernet0/0') },
+    });
+    expect(twoConsoles).toMatchObject({ ok: false, error: { kind: 'cable-mismatch' } });
+    const auto = planLink(topology(), 'auto', { device: sw, port: port('Console') }, b);
+    expect(auto.ok).toBe(false);
+    if (!auto.ok) {
+      expect(describeCableError(topology(), auto.error)).toBe(
+        "A console cable joins a PC's RS232 port to a router or switch's Console port.",
+      );
+    }
   });
 });
 

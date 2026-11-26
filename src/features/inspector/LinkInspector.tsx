@@ -58,6 +58,7 @@ const CABLE_CHOICES: Record<Cable, string> = {
   straight: 'Straight-through',
   crossover: 'Crossover',
   serial: 'Serial',
+  console: 'Console',
 };
 
 /** The cables both ports take, as the model judges them, and the DCE end of a serial cable. */
