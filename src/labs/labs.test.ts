@@ -1,10 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import type { PingEvent } from '@/engine/api';
-import { ms } from '@/engine/core/time';
+import { ms, simTime } from '@/engine/core/time';
 import { createEngine } from '@/engine/engine';
 import { createSimService } from '@/engine/service';
 import { STACKS } from '@/engine/stacks';
-import { STP_CONVERGED } from '@/engine/testing';
 import { Ipv4Address, parseTopologyJson, serializeTopology, type Topology } from '@/model';
 import { BUILDERS } from './build';
 import { SAMPLE_LABS } from './catalog';
@@ -17,6 +16,7 @@ const HEADLINE_PING: Record<string, string> = {
   'router-on-a-stick': '192.168.20.10',
   'stp-triangle': '192.168.1.11',
   'dhcp-router': '192.168.1.1',
+  'ospf-three-routers': '192.168.3.10',
 };
 
 async function load(id: string): Promise<Topology> {
@@ -27,14 +27,20 @@ async function load(id: string): Promise<Topology> {
 }
 
 /**
- * Loads the lab into the engine, lets spanning tree settle and every DHCP host get its lease,
- * pings, and returns what came back.
+ * When every lab has settled: spanning tree forwards after 4 s, and OSPF elects its DRs after its
+ * 8 s wait and is FULL a moment later, on the default fast timers.
+ */
+const SETTLED = simTime(10_000);
+
+/**
+ * Loads the lab into the engine, lets it settle and every DHCP host get its lease, pings, and
+ * returns what came back.
  */
 function ping(topology: Topology, target: string) {
   const engine = createEngine({ seed: 1, stacks: STACKS, linkDelay: ms(1) });
   const sim = createSimService({ engine, frames: { now: () => 0, request: () => {} } });
   sim.load(topology);
-  engine.runUntil(STP_CONVERGED);
+  engine.runUntil(SETTLED);
   const dhcpHosts = Object.values(topology.devices).filter(
     (device) =>
       (device.kind === 'pc' || device.kind === 'server') && device.config.ipv4.mode === 'dhcp',

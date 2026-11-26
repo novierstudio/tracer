@@ -317,6 +317,100 @@ function dhcpRouter() {
   return lab.topology;
 }
 
+/**
+ * An OSPF router's lines: each interface with its address and an optional clock rate, then
+ * process 1 with a router ID, the LAN port passive, and a `network` line per link.
+ */
+function ospfRouter(
+  id: number,
+  interfaces: readonly [name: string, address: string, clock?: string][],
+  networks: readonly string[],
+) {
+  return [
+    ...interfaces.flatMap(([name, address, clock]) => [
+      `interface ${name}`,
+      ` ip address ${address}`,
+      ...(clock ? [` clock rate ${clock}`] : []),
+      ' no shutdown',
+    ]),
+    'router ospf 1',
+    ` router-id ${id}.${id}.${id}.${id}`,
+    ' passive-interface GigabitEthernet0/0',
+    ...networks.map((network) => ` network ${network} area 0`),
+  ];
+}
+
+function ospfThreeRouters() {
+  const lab = labBuilder('ospf-three-routers');
+  lab.ios(
+    'R1',
+    'router-2g2s',
+    232,
+    424,
+    ospfRouter(
+      1,
+      [
+        ['GigabitEthernet0/0', '192.168.1.1 255.255.255.0'],
+        ['GigabitEthernet0/1', '10.0.12.1 255.255.255.252'],
+        ['Serial0/0/0', '10.0.13.1 255.255.255.252', '64000'],
+      ],
+      ['192.168.1.0 0.0.0.255', '10.0.12.0 0.0.0.3', '10.0.13.0 0.0.0.3'],
+    ),
+  );
+  lab.ios(
+    'R2',
+    'router-4g',
+    424,
+    232,
+    ospfRouter(
+      2,
+      [
+        ['GigabitEthernet0/0', '192.168.2.1 255.255.255.0'],
+        ['GigabitEthernet0/1', '10.0.12.2 255.255.255.252'],
+        ['GigabitEthernet0/2', '10.0.23.1 255.255.255.252'],
+      ],
+      ['192.168.2.0 0.0.0.255', '10.0.12.0 0.0.0.3', '10.0.23.0 0.0.0.3'],
+    ),
+  );
+  lab.ios(
+    'R3',
+    'router-2g2s',
+    616,
+    424,
+    ospfRouter(
+      3,
+      [
+        ['GigabitEthernet0/0', '192.168.3.1 255.255.255.0'],
+        ['GigabitEthernet0/1', '10.0.23.2 255.255.255.252'],
+        ['Serial0/0/0', '10.0.13.2 255.255.255.252'],
+      ],
+      ['192.168.3.0 0.0.0.255', '10.0.23.0 0.0.0.3', '10.0.13.0 0.0.0.3'],
+    ),
+  );
+  lab.pc('PC1', 40, 424, '192.168.1.10/24', '192.168.1.1');
+  lab.pc('PC2', 424, 40, '192.168.2.10/24', '192.168.2.1');
+  lab.pc('PC3', 808, 424, '192.168.3.10/24', '192.168.3.1');
+  lab.cable(['R1', 'GigabitEthernet0/1'], ['R2', 'GigabitEthernet0/1'], { cable: 'crossover' });
+  lab.cable(['R2', 'GigabitEthernet0/2'], ['R3', 'GigabitEthernet0/1'], { cable: 'crossover' });
+  lab.cable(['R1', 'Serial0/0/0'], ['R3', 'Serial0/0/0'], { cable: 'serial', dce: 'a' });
+  lab.cable(['PC1', 'FastEthernet0'], ['R1', 'GigabitEthernet0/0'], { cable: 'crossover' });
+  lab.cable(['PC2', 'FastEthernet0'], ['R2', 'GigabitEthernet0/0'], { cable: 'crossover' });
+  lab.cable(['PC3', 'FastEthernet0'], ['R3', 'GigabitEthernet0/0'], { cable: 'crossover' });
+  lab.note(
+    'area',
+    600,
+    40,
+    'Every router runs OSPF process 1 in area 0, with router IDs 1.1.1.1, 2.2.2.2 and 3.3.3.3. The LAN ports are passive: no hellos go to the PCs.',
+  );
+  lab.note(
+    'cost',
+    328,
+    528,
+    'Each Gigabit link costs 1 and the serial link 64, so R1 reaches R3’s LAN through R2 at cost 3 rather than straight across at 65.',
+  );
+  return lab.topology;
+}
+
 export const BUILDERS: Record<string, () => Topology> = {
   'two-pcs-switch': twoPcsSwitch,
   'two-lans-router': twoLansRouter,
@@ -324,4 +418,5 @@ export const BUILDERS: Record<string, () => Topology> = {
   'router-on-a-stick': routerOnAStick,
   'stp-triangle': stpTriangle,
   'dhcp-router': dhcpRouter,
+  'ospf-three-routers': ospfThreeRouters,
 };

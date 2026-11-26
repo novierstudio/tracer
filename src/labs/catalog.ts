@@ -109,6 +109,22 @@ export const SAMPLE_LABS: readonly SampleLab[] = [
     ],
     load: () => import('./dhcp-router.tracer.json?raw').then(text),
   },
+  {
+    id: 'ospf-three-routers',
+    title: 'Three routers with OSPF',
+    description:
+      'Three routers in a triangle learn each other’s LANs with OSPF. Fast Gigabit links beat the slow serial one, until a link goes down and OSPF finds the way round.',
+    difficulty: 'intermediate',
+    devices: { router: 3, pc: 3 },
+    tryThis: [
+      'Run `show ip ospf neighbor` on R1: both neighbours are FULL',
+      'Run `show ip route` on R1 and find the O routes, with their cost after 110/',
+      'Ping PC3 (192.168.3.10) from PC1’s Command Prompt: the path crosses all three routers',
+      'Run `show ip ospf interface brief` on R2 to see each link’s cost and DR state',
+      'Shut down R2’s GigabitEthernet0/2, then run `show ip route` on R1 again: R3’s LAN is now over the serial link',
+    ],
+    load: () => import('./ospf-three-routers.tracer.json?raw').then(text),
+  },
 ];
 
 export const DIFFICULTY_LABELS: Record<Difficulty, string> = {
