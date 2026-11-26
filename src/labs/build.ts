@@ -508,6 +508,68 @@ function dnsWebServer() {
   return lab.topology;
 }
 
+const PAT_PAGE = `<!doctype html>
+<html>
+  <head><title>Outside</title></head>
+  <body>
+    <h1>You reached 203.0.113.10</h1>
+    <p>This server sees every PC as 203.0.113.1: R1's PAT tells them apart by port.</p>
+  </body>
+</html>
+`;
+
+function patAcl() {
+  const lab = labBuilder('pat-acl');
+  lab.ios('R1', 'router-2g2s', 424, 40, [
+    'interface GigabitEthernet0/0',
+    ' ip address 192.168.1.1 255.255.255.0',
+    ' ip access-group 110 in',
+    ' ip nat inside',
+    ' no shutdown',
+    'interface GigabitEthernet0/1',
+    ' ip address 203.0.113.1 255.255.255.0',
+    ' ip nat outside',
+    ' no shutdown',
+    'access-list 1 permit 192.168.1.0 0.0.0.255',
+    'access-list 110 remark PC3 may not browse the web',
+    'access-list 110 deny tcp host 192.168.1.12 any eq www',
+    'access-list 110 permit ip any any',
+    'ip nat inside source list 1 interface GigabitEthernet0/1 overload',
+  ]);
+  lab.ios('SW1', 'switch-24', 232, 232, []);
+  lab.pc('PC1', 40, 424, '192.168.1.10/24', '192.168.1.1');
+  lab.pc('PC2', 232, 424, '192.168.1.11/24', '192.168.1.1');
+  lab.pc('PC3', 424, 424, '192.168.1.12/24', '192.168.1.1');
+  lab.server('Server', 808, 40, '203.0.113.10/24', {
+    dns: { enabled: false, records: [] },
+    http: { enabled: true, indexHtml: PAT_PAGE },
+  });
+  lab.cable(['PC1', 'FastEthernet0'], ['SW1', 'FastEthernet0/1']);
+  lab.cable(['PC2', 'FastEthernet0'], ['SW1', 'FastEthernet0/2']);
+  lab.cable(['PC3', 'FastEthernet0'], ['SW1', 'FastEthernet0/3']);
+  lab.cable(['SW1', 'GigabitEthernet0/1'], ['R1', 'GigabitEthernet0/0']);
+  lab.cable(['R1', 'GigabitEthernet0/1'], ['Server', 'GigabitEthernet0'], { cable: 'crossover' });
+  lab.note(
+    'pat',
+    520,
+    168,
+    'R1 translates the inside LAN, 192.168.1.0/24, to its own outside address 203.0.113.1. PAT tells the PCs apart by port.',
+  );
+  lab.note(
+    'server',
+    760,
+    168,
+    'The server has no default gateway, so it can only answer 203.0.113.0/24: the PCs reach it through NAT or not at all.',
+  );
+  lab.note(
+    'acl',
+    520,
+    392,
+    'Access list 110, inbound on Gi0/0, denies web traffic (TCP port 80) from PC3 and permits everything else, ping included.',
+  );
+  return lab.topology;
+}
+
 export const BUILDERS: Record<string, () => Topology> = {
   'two-pcs-switch': twoPcsSwitch,
   'two-lans-router': twoLansRouter,
@@ -518,4 +580,5 @@ export const BUILDERS: Record<string, () => Topology> = {
   'dhcp-router': dhcpRouter,
   'ospf-three-routers': ospfThreeRouters,
   'dns-web-server': dnsWebServer,
+  'pat-acl': patAcl,
 };

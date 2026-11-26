@@ -155,6 +155,23 @@ export const SAMPLE_LABS: readonly SampleLab[] = [
     ],
     load: () => import('./dns-web-server.tracer.json?raw').then(text),
   },
+  {
+    id: 'pat-acl',
+    title: 'PAT and an access list',
+    description:
+      'Three PCs share one public address through PAT on R1, which tells their traffic apart by port. An access list on the LAN port keeps PC3 off the web, but lets its pings through.',
+    difficulty: 'intermediate',
+    devices: { router: 1, switch: 1, pc: 3, server: 1 },
+    tryThis: [
+      'Ping the server (203.0.113.10) from PC1’s Command Prompt, then from PC2’s',
+      'Run `show ip nat translations` on R1: both PCs share 203.0.113.1, each on its own port',
+      'Open PC1’s Web Browser and go to `http://203.0.113.10`, then run `show ip nat translations` again to find the tcp entry',
+      'Browse to the same page from PC3: access list 110 denies it, though PC3 can still ping the server',
+      'Run `show access-lists` on R1 to see how many packets each entry matched',
+      'Switch to Simulation mode and browse from PC3 again to watch R1 drop the packet: ACL deny',
+    ],
+    load: () => import('./pat-acl.tracer.json?raw').then(text),
+  },
 ];
 
 export const DIFFICULTY_LABELS: Record<Difficulty, string> = {
