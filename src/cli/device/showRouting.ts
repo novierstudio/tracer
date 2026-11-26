@@ -15,13 +15,18 @@ const LEGEND = [
   '       P - periodic downloaded static route',
 ];
 
-const CODE: Record<Route['source'], string> = { connected: 'C', local: 'L', static: 'S' };
+const CODE: Record<Route['source'], string> = {
+  connected: 'C',
+  local: 'L',
+  static: 'S',
+  rip: 'R',
+  ospf: 'O',
+};
 
 /** Where a route's text starts: after the code at the top level, further in under a header. */
 const TOP_COLUMN = 6;
 const CHILD_COLUMN = 9;
 
-const distanceOf = (route: Route) => (route.source === 'static' ? route.distance : 0);
 const prefixText = ({ prefix }: Route) => `${prefix.address}/${prefix.prefixLength}`;
 
 /** The class A, B or C mask length of an address: 8, 16 or 24. */
@@ -38,60 +43,85 @@ function majorNetwork(route: Route): string {
 
 const isDefault = (route: Route) => route.prefix.prefixLength === 0;
 
-/** The routes IOS installs: for each prefix, those with the lowest administrative distance. */
-function installed(routes: readonly Route[]): Route[][] {
-  const byPrefix = new Map<string, Route[]>();
+/** The installed routes by network, each network's equal paths together, in table order. */
+function byNetwork(routes: readonly Route[]): Route[][] {
+  const networks = new Map<string, Route[]>();
   for (const route of routes) {
-    // A local route never competes: it is the router's own address, not a way to reach one.
     const key = route.source === 'local' ? `local ${prefixText(route)}` : prefixText(route);
-    const same = byPrefix.get(key);
-    if (!same) byPrefix.set(key, [route]);
-    else if (distanceOf(route) < distanceOf(same[0]!)) byPrefix.set(key, [route]);
-    else if (distanceOf(route) === distanceOf(same[0]!)) same.push(route);
+    networks.set(key, [...(networks.get(key) ?? []), route]);
   }
-  return [...byPrefix.values()];
+  return [...networks.values()];
 }
 
-/** What follows the prefix: `is directly connected, Gi0/0` or `[1/0] via 10.0.0.2`. */
+const pad2 = (value: number) => String(value).padStart(2, '0');
+
+/** A route's age as IOS prints it: `00:00:12` within a day, then `1d02h`, then `1w2d`. */
+export function routeAge(ageMs: number): string {
+  const seconds = Math.floor(ageMs / 1000);
+  const hours = Math.floor(seconds / 3600);
+  if (hours < 24)
+    return `${pad2(hours)}:${pad2(Math.floor(seconds / 60) % 60)}:${pad2(seconds % 60)}`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days}d${pad2(hours % 24)}h`;
+  return `${Math.floor(days / 7)}w${days % 7}d`;
+}
+
+/**
+ * What follows the prefix: `is directly connected, Gi0/0`, `[1/0] via 10.0.0.2`, or for a learned
+ * route `[120/1] via 10.0.0.2, 00:00:12, Serial0/0/0`.
+ */
 function pathText(route: Route): string {
-  if (route.source !== 'static') return `is directly connected, ${route.interface}`;
-  const hop = route.nextHop;
-  return hop.kind === 'interface'
-    ? `is directly connected, ${hop.interface}`
-    : `[${route.distance}/0] via ${hop.address}`;
+  switch (route.source) {
+    case 'connected':
+    case 'local':
+      return `is directly connected, ${route.interface}`;
+    case 'static': {
+      const hop = route.nextHop;
+      return hop.kind === 'interface'
+        ? `is directly connected, ${hop.interface}`
+        : `[${route.distance}/0] via ${hop.address}`;
+    }
+    case 'rip':
+    case 'ospf':
+      return `[${route.distance}/${route.metric}] via ${route.via}, ${routeAge(route.ageMs)}, ${route.interface}`;
+  }
 }
 
 function routeLines(paths: readonly Route[], column: number): string[] {
   const [first] = paths as [Route, ...Route[]];
-  const code = CODE[first.source] + (isDefault(first) && first.source === 'static' ? '*' : '');
+  const code = CODE[first.source] + (isDefault(first) ? '*' : '');
   const head = `${code.padEnd(column)}${prefixText(first)} `;
   return paths.map((route, i) => (i === 0 ? head : ' '.repeat(head.length)) + pathText(route));
 }
 
-function gatewayLine(routes: readonly Route[][]): string {
-  const best = routes.find((paths) => isDefault(paths[0]!) && paths[0]!.source === 'static')?.[0];
-  if (best?.source !== 'static') return 'Gateway of last resort is not set';
-  const via = best.nextHop.kind === 'address' ? best.nextHop.address : '0.0.0.0';
+function gatewayLine(routes: readonly Route[]): string {
+  const best = routes.find(isDefault);
+  if (!best) return 'Gateway of last resort is not set';
+  const via =
+    'via' in best
+      ? best.via
+      : best.source === 'static' && best.nextHop.kind === 'address'
+        ? best.nextHop.address
+        : '0.0.0.0';
   return `Gateway of last resort is ${via} to network 0.0.0.0`;
 }
 
 /**
- * IOS 15's routing table: the codes legend, the gateway of last resort, then routes by network.
- * Subnets of a classful network sit under a header that counts them; a classful network or a
- * supernet with nothing beside it stands alone.
+ * IOS 15's routing table, from the routes the simulation installed: the codes legend, the gateway
+ * of last resort, then routes by network. Subnets of a classful network sit under a header that
+ * counts them; a classful network or a supernet with nothing beside it stands alone.
  */
 export function showIpRoute(routes: readonly Route[] | undefined): readonly string[] {
   if (!routes) return NO_ENGINE;
-  const table = installed(routes);
   const groups = new Map<string, Route[][]>();
-  for (const paths of table) {
+  for (const paths of byNetwork(routes)) {
     const route = paths[0]!;
     const subnet = route.prefix.prefixLength >= classfulLength(route.prefix.address);
     const key = subnet ? majorNetwork(route) : prefixText(route);
     groups.set(key, [...(groups.get(key) ?? []), paths]);
   }
 
-  const out = [...LEGEND, '', gatewayLine(table), ''];
+  const out = [...LEGEND, '', gatewayLine(routes), ''];
   for (const [major, members] of groups) {
     const only = members.length === 1 ? members[0]![0]! : undefined;
     if (only && prefixText(only) === major) {

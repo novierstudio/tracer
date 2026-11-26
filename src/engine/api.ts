@@ -9,7 +9,7 @@ import type { DhcpListener, DhcpOutcome, Lease } from './l3/dhcpClient';
 import type { DhcpBindingEntry } from './l3/dhcpServer';
 import type { HostAddressing } from './l3/hostAddress';
 import type { PingEvent, PingListener, PingOptions, PingReply, PingSummary } from './l3/ping';
-import type { Route } from './l3/routes';
+import type { LearnedRoute, Route } from './l3/routes';
 import type { TraceEvent, TraceListener, TraceOptions, TraceProbe } from './l3/traceroute';
 import type { DeviceUnavailable } from './module';
 import type { TopologyPatch } from './patch';
@@ -21,6 +21,7 @@ export type {
   DhcpListener,
   DhcpOutcome,
   HostAddressing,
+  LearnedRoute,
   Lease,
   LinkEnd,
   LinkStatus,

@@ -201,6 +201,8 @@ export function createEngine({
         random,
         note: (text) =>
           log.append({ kind: 'note', time: now, device: id, module: module.id, text }),
+        learnedRoutes: () =>
+          (running.get(id) ?? []).flatMap((other) => other.module.routes?.(other.ctx) ?? []),
       },
     };
     return slot;
