@@ -48,6 +48,9 @@ export type SimQueries = {
       | 'spanningTree'
       | 'dhcpBindings'
       | 'routingProtocols'
+      | 'aclHits'
+      | 'natTranslations'
+      | 'clearNatTranslations'
   ]: Remote<SimAPI[K]>;
 };
 
@@ -79,6 +82,9 @@ export function engineSource(sim: SimLink, device: DeviceId): EngineSource {
     spanningTree: () => sim.spanningTree(device).then(valueOf),
     dhcpBindings: () => sim.dhcpBindings(device).then(valueOf),
     protocols: () => sim.routingProtocols(device).then(valueOf),
+    aclHits: () => sim.aclHits(device).then(valueOf),
+    natTranslations: () => sim.natTranslations(device).then(valueOf),
+    natCleared: () => sim.clearNatTranslations(device).then(valueOf),
   };
 }
 

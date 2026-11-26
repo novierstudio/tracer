@@ -4,12 +4,14 @@ import type { LinkEnd, LinkStatus } from './engine';
 import type { EventId, SimEvent } from './events';
 import type { MacTableEntry, SpanningTreeVlan } from './l2/switching';
 import type { PortRole, PortState, SpanningTreePort, StpTimes } from './l2/stp';
+import type { AclHits } from './l3/acl';
 import type { ArpTableEntry } from './l3/arp';
 import type { DhcpListener, DhcpOutcome, Lease } from './l3/dhcpClient';
 import type { DhcpBindingEntry } from './l3/dhcpServer';
 import type { DnsListener, DnsLookup } from './l3/dnsResolver';
 import type { BrowseTarget, FetchEvent, FetchFailure, FetchListener } from './l3/httpClient';
 import type { HostAddressing } from './l3/hostAddress';
+import type { NatEndpoint, NatTranslationEntry } from './l3/nat';
 import type { PingEvent, PingListener, PingOptions, PingReply, PingSummary } from './l3/ping';
 import type { LearnedRoute, Route } from './l3/routes';
 import type { TraceEvent, TraceListener, TraceOptions, TraceProbe } from './l3/traceroute';
@@ -29,6 +31,7 @@ import type { TopologyPatch } from './patch';
 import type { HttpResponse } from './http';
 
 export type {
+  AclHits,
   ArpTableEntry,
   BrowseTarget,
   DeviceUnavailable,
@@ -47,6 +50,8 @@ export type {
   LinkEnd,
   LinkStatus,
   MacTableEntry,
+  NatEndpoint,
+  NatTranslationEntry,
   OspfDesignated,
   OspfInterfaceState,
   OspfInterfaceStatus,
@@ -218,6 +223,12 @@ export interface SimAPI {
     target: BrowseTarget,
     listener: FetchListener,
   ): Result<void, DeviceUnavailable>;
+  /** How many packets each entry of each of a router or switch's access lists has matched. */
+  aclHits(device: DeviceId): Result<AclHits, DeviceUnavailable>;
+  /** A router's NAT translations in force, for `show ip nat translations`. */
+  natTranslations(device: DeviceId): Result<NatTranslationEntry[], DeviceUnavailable>;
+  /** `clear ip nat translation *`: a router forgets its dynamic translations. Returns how many went. */
+  clearNatTranslations(device: DeviceId): Result<number, DeviceUnavailable>;
   /** Sets the one batch listener. Calling it again replaces the previous listener. */
   subscribe(listener: (batch: SimEventBatch) => void): void;
 }
