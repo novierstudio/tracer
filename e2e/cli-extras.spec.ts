@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { openLab, select, terminalIn } from './lab';
+import { fastForward, openLab, select, terminalIn } from './lab';
 
 test.use({ viewport: { width: 1440, height: 900 } });
 
@@ -54,6 +54,8 @@ test('filters show output with a pipe and pings a neighbour from the R1 CLI', as
     `R1#showrunning-config|includeinterface${interfaces.join('').replace(/\s+/g, '')}R1#`,
   );
 
+  // SW1's VLAN 1 interface answers only once spanning tree forwards the port R1 just brought up.
+  await fastForward(page);
   await page.keyboard.type('ping 192.168.1.2');
   await page.keyboard.press('Enter');
   await expect
