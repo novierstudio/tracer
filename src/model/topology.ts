@@ -559,6 +559,10 @@ const iosFields = {
   rsaModulus: RsaModulus.optional(),
   /** `ip ssh version`. Absent means 1.99: the server takes version 1 and version 2 clients. */
   sshVersion: z.union([z.literal(1), z.literal(2)]).optional(),
+  /** `ip ssh time-out`, in seconds. Absent means 120. */
+  sshTimeout: z.int().min(1).max(120).optional(),
+  /** `ip ssh authentication-retries`. Absent means 3. */
+  sshRetries: z.int().min(0).max(5).optional(),
   /** Absent until the first access list, and again once the last one goes. */
   accessLists: z.record(AclName, AccessList).optional(),
   /** The saved config in NVRAM, as running-config lines. Absent until the first save. */

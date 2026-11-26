@@ -28,6 +28,7 @@ import { encodeType7 } from '../passwords';
 import type { IosDevice } from './context';
 import type { PortStates } from './query';
 import { ipv6InterfaceLines, ipv6RouteLine } from './ipv6Config';
+import { sshLines, usernameLines } from './remote';
 import { accessListLines, natLines } from './showAclNat';
 
 export const IOS_VERSION = '15.1';
@@ -310,12 +311,16 @@ export function runningConfig(device: IosDevice): string[] {
   if (config.enableSecret) out.push(`enable secret 5 ${config.enableSecret}`);
   if (config.enablePassword)
     out.push(`enable password ${passwordText(device, config.enablePassword)}`);
+  const users = usernameLines(config);
+  if (users.length > 0) out.push('!', ...users, '!');
   if (device.kind === 'router' && device.config.dhcp) out.push(...dhcpLines(device.config.dhcp));
   if (device.kind === 'switch' && device.config.ipRouting) out.push('ip routing');
   if (device.kind === 'router' && device.config.ipv6UnicastRouting) {
     out.push('ipv6 unicast-routing');
   }
+  out.push(...sshLines(config));
   if (!config.domainLookup) out.push('no ip domain-lookup');
+  if (config.domainName !== undefined) out.push(`ip domain-name ${config.domainName}`);
   out.push('!');
   if (device.kind === 'switch') out.push(...spanningTreeLines(device.config), '!');
   for (const entry of interfaceEntries(device)) out.push(...interfaceBlock(entry), '!');

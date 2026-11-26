@@ -87,6 +87,7 @@ export function engineSource(sim: SimLink, device: DeviceId): EngineSource {
     natTranslations: () => sim.natTranslations(device).then(valueOf),
     natCleared: () => sim.clearNatTranslations(device).then(valueOf),
     ipv6: () => sim.ipv6Status(device).then(valueOf),
+    sessions: async () => undefined,
   };
 }
 
