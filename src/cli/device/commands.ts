@@ -65,6 +65,7 @@ import {
   showVlanBrief,
 } from './showSwitching';
 import { execCommands } from './exec';
+import { dhcpCommands } from './dhcp';
 
 const EXEC = ['user-exec', 'priv-exec'] as const;
 const PRIV = ['priv-exec'] as const;
@@ -75,6 +76,7 @@ const CONFIG = [
   'line-config',
   'vlan-config',
   'router-config',
+  'dhcp-config',
 ] as const;
 const GLOBAL = ['global-config'] as const;
 const IF = ['interface-config'] as const;
@@ -786,7 +788,37 @@ export const routerCommands = [
   }),
   ...routeCommands(),
   ...encapsulationCommands(),
+  ...helperAddressCommands(),
+  ...dhcpCommands,
 ];
+
+/** `ip helper-address`: relay the DHCP broadcasts heard on an interface to a server elsewhere. */
+function helperAddressCommands() {
+  const helper = keyword('helper-address', 'Specify a destination address for UDP broadcasts');
+  const address = ipv4('address', 'IP destination address');
+  const edit =
+    (change: (current: readonly Ipv4Address[], address?: Ipv4Address) => readonly Ipv4Address[]) =>
+    (args: { address?: Ipv4Address }, ctx: RouterContext, mode: InterfaceMode) =>
+      eachInterface(ctx, mode, (target) => {
+        if (target.kind === 'switched') return INVALID_INPUT;
+        const next = change(target.config.helperAddresses ?? [], args.address);
+        if (next.length > 0) target.config.helperAddresses = [...next];
+        else delete target.config.helperAddresses;
+        return undefined;
+      });
+  return [
+    routerCommand({
+      modes: ANY_IF,
+      path: [interfaceIp, helper, address],
+      run: edit((current, added) =>
+        added === undefined || current.includes(added) ? current : [...current, added],
+      ),
+      no: edit((current, removed) =>
+        removed === undefined ? [] : current.filter((kept) => kept !== removed),
+      ),
+    }),
+  ];
+}
 
 /**
  * `encapsulation dot1Q <vlan> [native]` on a subinterface. IOS refuses a VLAN that another
