@@ -1,11 +1,21 @@
 import { describe, expect, it } from 'vitest';
-import type { RouterConfig } from '../../model';
+import type {
+  OspfInterfaceState,
+  OspfInterfaceStatus,
+  OspfNeighborStatus,
+  OspfStatus,
+  RipStatus,
+  RoutingProtocols,
+} from '../../engine/api';
+import { OSPF_TIMERS, RIP_TIMERS } from '../../engine/routing/timers';
+import type { InterfaceId, Ipv4Address, RouterConfig } from '../../model';
 import { INVALID_INPUT } from './context';
 import { applyLines, withBlankConfig } from './session';
 import { runningConfig } from './show';
 import { consoleOn, router } from './testing';
 
 const ENTER = ['enable', 'configure terminal'];
+const NO_ENGINE = ['% The simulation is not running, so there is no live state to show.'];
 
 /** Runs `lines` from global config on a new router and returns its console. */
 function configured(lines: readonly string[]) {
@@ -322,5 +332,359 @@ describe('OSPF in the running-config', () => {
 
     expect(errors).toEqual([]);
     expect(config).toEqual(device.config);
+  });
+});
+
+describe('OSPF show commands', () => {
+  const lo0 = 'Loopback0' as InterfaceId;
+  const g00 = 'GigabitEthernet0/0' as InterfaceId;
+  const g01 = 'GigabitEthernet0/1' as InterfaceId;
+  const s000 = 'Serial0/0/0' as InterfaceId;
+  const ip = (address: string) => address as Ipv4Address;
+  const cidr = (address: string, prefixLength: number) =>
+    ({ address, prefixLength }) as OspfInterfaceStatus['cidr'];
+
+  const BASE = {
+    area: 0,
+    cost: 1,
+    priority: 1,
+    passive: false,
+    dr: undefined,
+    bdr: undefined,
+    helloDueMs: undefined,
+    neighbors: [],
+  } as const;
+
+  const LOOPBACK: OspfInterfaceStatus = {
+    ...BASE,
+    name: lo0,
+    cidr: cidr('1.1.1.1', 32),
+    networkType: 'loopback',
+    state: 'loopback',
+  };
+  const LAN: OspfInterfaceStatus = {
+    ...BASE,
+    name: g00,
+    cidr: cidr('192.168.1.1', 24),
+    networkType: 'broadcast',
+    state: 'dr',
+    passive: true,
+    dr: { routerId: ip('1.1.1.1'), address: ip('192.168.1.1') },
+  };
+  const TRANSIT: OspfInterfaceStatus = {
+    ...BASE,
+    name: g01,
+    cidr: cidr('10.0.12.1', 24),
+    networkType: 'broadcast',
+    state: 'dr',
+    dr: { routerId: ip('1.1.1.1'), address: ip('10.0.12.1') },
+    bdr: { routerId: ip('2.2.2.2'), address: ip('10.0.12.2') },
+    helloDueMs: 3_400,
+    neighbors: [
+      {
+        routerId: ip('2.2.2.2'),
+        priority: 1,
+        state: 'full',
+        role: 'bdr',
+        deadMs: 33_900,
+        address: ip('10.0.12.2'),
+        interface: g01,
+      },
+      {
+        routerId: ip('4.4.4.4'),
+        priority: 0,
+        state: 'exstart',
+        role: 'drother',
+        deadMs: 38_000,
+        address: ip('10.0.12.4'),
+        interface: g01,
+      },
+    ],
+  };
+  const SERIAL: OspfInterfaceStatus = {
+    ...BASE,
+    name: s000,
+    cidr: cidr('10.0.13.1', 30),
+    cost: 64,
+    networkType: 'point-to-point',
+    state: 'point-to-point',
+    helloDueMs: 400,
+    neighbors: [
+      {
+        routerId: ip('3.3.3.3'),
+        // Its hellos say 1; IOS shows 0 on a point-to-point link.
+        priority: 1,
+        state: 'full',
+        role: undefined,
+        deadMs: 37_200,
+        address: ip('10.0.13.3'),
+        interface: s000,
+      },
+    ],
+  };
+
+  const STATUS: OspfStatus = {
+    processId: 1,
+    routerId: ip('1.1.1.1'),
+    timers: OSPF_TIMERS.ios,
+    interfaces: [LOOPBACK, LAN, TRANSIT, SERIAL],
+    sources: [
+      { routerId: ip('2.2.2.2'), lastUpdateMs: 72_000 },
+      { routerId: ip('3.3.3.3'), lastUpdateMs: 5_000 },
+    ],
+  };
+
+  const OSPF_LINES = [
+    'interface loopback 0',
+    'ip address 1.1.1.1 255.255.255.255',
+    'interface g0/0',
+    'ip address 192.168.1.1 255.255.255.0',
+    'router ospf 1',
+    'router-id 1.1.1.1',
+    'network 192.168.1.0 0.0.0.255 area 0',
+    'network 10.0.0.0 0.255.255.255 area 0',
+    'passive-interface g0/0',
+  ];
+
+  /** Runs `command` after `lines` and answers its query, as a terminal does. */
+  function showWith(lines: readonly string[], command: string, answer: RoutingProtocols) {
+    const { c } = configured([...lines, 'end']);
+    const { output, query } = c.session.run(c.device, command);
+    if (query?.kind !== 'protocols') throw new Error(`asked for ${query?.kind}`);
+    return { live: query.render(answer), output };
+  }
+
+  const both = { rip: undefined, ospf: STATUS };
+
+  describe('show ip protocols', () => {
+    it('describes the OSPF process from its config and the simulation', () => {
+      expect(showWith(OSPF_LINES, 'show ip protocols', both).live).toEqual([
+        'Routing Protocol is "ospf 1"',
+        '  Outgoing update filter list for all interfaces is not set',
+        '  Incoming update filter list for all interfaces is not set',
+        '  Router ID 1.1.1.1',
+        '  Number of areas in this router is 1. 1 normal 0 stub 0 nssa',
+        '  Maximum path: 4',
+        '  Routing for Networks:',
+        '    192.168.1.0 0.0.0.255 area 0',
+        '    10.0.0.0 0.255.255.255 area 0',
+        '  Passive Interface(s):',
+        '    GigabitEthernet0/0',
+        '  Routing Information Sources:',
+        '    Gateway         Distance      Last Update',
+        '    2.2.2.2              110      00:01:12',
+        '    3.3.3.3              110      00:00:05',
+        '  Distance: (default is 110)',
+      ]);
+    });
+
+    it('counts the distinct areas of the OSPF interfaces', () => {
+      const status = { ...STATUS, interfaces: [LOOPBACK, { ...SERIAL, area: 1 }] };
+      const live = showWith(OSPF_LINES, 'show ip protocols', { rip: undefined, ospf: status }).live;
+
+      expect(live[4]).toBe('  Number of areas in this router is 2. 2 normal 0 stub 0 nssa');
+    });
+
+    it('puts OSPF before RIP with a blank line between', () => {
+      const rip: RipStatus = {
+        timers: RIP_TIMERS.ios,
+        nextUpdateMs: 1_000,
+        interfaces: [],
+        sources: [],
+      };
+      const lines = [...OSPF_LINES, 'router rip', 'network 10.0.0.0'];
+      const live = showWith(lines, 'show ip protocols', { rip, ospf: STATUS }).live;
+      const blank = live.indexOf('');
+
+      expect(live[0]).toBe('Routing Protocol is "ospf 1"');
+      expect(live.slice(blank - 1, blank + 2)).toEqual([
+        '  Distance: (default is 110)',
+        '',
+        'Routing Protocol is "rip"',
+      ]);
+    });
+  });
+
+  it('lists every neighbour with its state, role and dead time', () => {
+    expect(showWith(OSPF_LINES, 'show ip ospf neighbor', both).live).toEqual([
+      '',
+      'Neighbor ID     Pri   State           Dead Time   Address         Interface',
+      '2.2.2.2           1   FULL/BDR        00:00:33    10.0.12.2       GigabitEthernet0/1',
+      '4.4.4.4           0   EXSTART/DROTHER 00:00:38    10.0.12.4       GigabitEthernet0/1',
+      '3.3.3.3           0   FULL/  -        00:00:37    10.0.13.3       Serial0/0/0',
+    ]);
+  });
+
+  it.each<[OspfNeighborStatus['state'], OspfNeighborStatus['role'], string]>([
+    ['2way', 'drother', '2WAY/DROTHER'],
+    ['init', 'dr', 'INIT/DR'],
+    ['exchange', 'bdr', 'EXCHANGE/BDR'],
+    ['loading', undefined, 'LOADING/  -'],
+  ])('shows a %s neighbour as %s', (state, role, text) => {
+    const neighbor = { ...SERIAL.neighbors[0]!, state, role };
+    const status = { ...STATUS, interfaces: [{ ...SERIAL, neighbors: [neighbor] }] };
+    const live = showWith(OSPF_LINES, 'show ip ospf neighbor', { rip: undefined, ospf: status });
+
+    expect(live.live[2]!.slice(22, 38).trimEnd()).toBe(text);
+  });
+
+  it('summarises each interface in a row', () => {
+    expect(showWith(OSPF_LINES, 'show ip ospf interface brief', both).live).toEqual([
+      'Interface    PID   Area            IP Address/Mask    Cost  State Nbrs F/C',
+      'Lo0          1     0               1.1.1.1/32         1     LOOP  0/0',
+      'Gi0/0        1     0               192.168.1.1/24     1     DR    0/0',
+      'Gi0/1        1     0               10.0.12.1/24       1     DR    1/2',
+      'Se0/0/0      1     0               10.0.13.1/30       64    P2P   1/1',
+    ]);
+  });
+
+  it.each<[OspfInterfaceState, string]>([
+    ['backup', 'BDR'],
+    ['drother', 'DROTH'],
+    ['waiting', 'WAIT'],
+  ])('shows a %s interface as %s in the brief', (state, text) => {
+    const status = { ...STATUS, interfaces: [{ ...TRANSIT, state }] };
+    const live = showWith(OSPF_LINES, 'show ip ospf interface brief', {
+      rip: undefined,
+      ospf: status,
+    }).live;
+
+    expect(live[1]!.slice(60, 66).trimEnd()).toBe(text);
+  });
+
+  describe('show ip ospf interface', () => {
+    it('describes a DR with its BDR, timers and adjacencies', () => {
+      expect(showWith(OSPF_LINES, 'show ip ospf interface g0/1', both).live).toEqual([
+        'GigabitEthernet0/1 is up, line protocol is up',
+        '  Internet Address 10.0.12.1/24, Area 0',
+        '  Process ID 1, Router ID 1.1.1.1, Network Type BROADCAST, Cost: 1',
+        '  Transmit Delay is 1 sec, State DR, Priority 1',
+        '  Designated Router (ID) 1.1.1.1, Interface address 10.0.12.1',
+        '  Backup Designated router (ID) 2.2.2.2, Interface address 10.0.12.2',
+        '  Timer intervals configured, Hello 10, Dead 40, Wait 40, Retransmit 5',
+        '    Hello due in 00:00:03',
+        '  Neighbor Count is 2, Adjacent neighbor count is 1',
+        '    Adjacent with neighbor 2.2.2.2  (Backup Designated Router)',
+        '  Suppress hello for 0 neighbor(s)',
+      ]);
+    });
+
+    it('says a passive interface sends no hellos and has no BDR', () => {
+      expect(showWith(OSPF_LINES, 'show ip ospf interface g0/0', both).live).toEqual([
+        'GigabitEthernet0/0 is up, line protocol is up',
+        '  Internet Address 192.168.1.1/24, Area 0',
+        '  Process ID 1, Router ID 1.1.1.1, Network Type BROADCAST, Cost: 1',
+        '  Transmit Delay is 1 sec, State DR, Priority 1',
+        '  Designated Router (ID) 1.1.1.1, Interface address 192.168.1.1',
+        '  No backup designated router on this network',
+        '  Timer intervals configured, Hello 10, Dead 40, Wait 40, Retransmit 5',
+        '    No Hellos (Passive interface)',
+        '  Neighbor Count is 0, Adjacent neighbor count is 0',
+        '  Suppress hello for 0 neighbor(s)',
+      ]);
+    });
+
+    it('describes a point-to-point link with the timers in use and no DR', () => {
+      const timers = { hello: 3, dead: 12, wait: 12, retransmit: 2, spfDelay: 0 };
+      const status = { ...STATUS, timers };
+      expect(
+        showWith(OSPF_LINES, 'show ip ospf interface s0/0/0', { rip: undefined, ospf: status })
+          .live,
+      ).toEqual([
+        'Serial0/0/0 is up, line protocol is up',
+        '  Internet Address 10.0.13.1/30, Area 0',
+        '  Process ID 1, Router ID 1.1.1.1, Network Type POINT_TO_POINT, Cost: 64',
+        '  Transmit Delay is 1 sec, State POINT_TO_POINT',
+        '  Timer intervals configured, Hello 3, Dead 12, Wait 12, Retransmit 2',
+        '    Hello due in 00:00:00',
+        '  Neighbor Count is 1, Adjacent neighbor count is 1',
+        '    Adjacent with neighbor 3.3.3.3',
+        '  Suppress hello for 0 neighbor(s)',
+      ]);
+    });
+
+    it('treats a loopback as a stub host', () => {
+      expect(showWith(OSPF_LINES, 'show ip ospf interface lo0', both).live).toEqual([
+        'Loopback0 is up, line protocol is up',
+        '  Internet Address 1.1.1.1/32, Area 0',
+        '  Process ID 1, Router ID 1.1.1.1, Network Type LOOPBACK, Cost: 1',
+        '  Loopback interface is treated as a stub Host',
+      ]);
+    });
+
+    it('says when a waiting interface has elected no DR yet', () => {
+      const waiting = { ...TRANSIT, state: 'waiting', dr: undefined, bdr: undefined } as const;
+      const status = { ...STATUS, interfaces: [waiting] };
+      const live = showWith(OSPF_LINES, 'show ip ospf interface', {
+        rip: undefined,
+        ospf: status,
+      }).live;
+
+      expect(live.slice(3, 6)).toEqual([
+        '  Transmit Delay is 1 sec, State WAITING, Priority 1',
+        '  No designated router on this network',
+        '  No backup designated router on this network',
+      ]);
+    });
+
+    it('lists every OSPF interface without a name', () => {
+      const live = showWith(OSPF_LINES, 'show ip ospf interface', both).live;
+
+      expect(live.filter((line) => line.includes('line protocol'))).toEqual([
+        'Loopback0 is up, line protocol is up',
+        'GigabitEthernet0/0 is up, line protocol is up',
+        'GigabitEthernet0/1 is up, line protocol is up',
+        'Serial0/0/0 is up, line protocol is up',
+      ]);
+    });
+
+    it('says when the named interface does not run OSPF', () => {
+      expect(showWith(OSPF_LINES, 'show ip ospf interface s0/0/1', both).live).toEqual([
+        '%OSPF: OSPF not enabled on Serial0/0/1',
+      ]);
+    });
+
+    it('refuses an interface the router lacks', () => {
+      const { c } = configured(['end']);
+
+      expect(c.run('show ip ospf interface g0/9')).toEqual([INVALID_INPUT]);
+    });
+  });
+
+  it.each(['show ip ospf neighbor', 'show ip ospf interface', 'show ip ospf interface brief'])(
+    '%s says the process is not running without a router ID',
+    (command) => {
+      const status = { ...STATUS, routerId: undefined, interfaces: [] };
+
+      expect(showWith(['router ospf 9'], command, { rip: undefined, ospf: status }).live).toEqual([
+        '%OSPF: Router process 1 is not running, please configure a router-id',
+      ]);
+    },
+  );
+
+  it.each([
+    'show ip protocols',
+    'show ip ospf neighbor',
+    'show ip ospf interface',
+    'show ip ospf interface brief',
+  ])('%s prints nothing without OSPF and NO_ENGINE without a simulation', (command) => {
+    expect(showWith([], command, { rip: undefined, ospf: undefined }).live).toEqual([]);
+    expect(showWith(OSPF_LINES, command, both).output).toEqual(NO_ENGINE);
+  });
+
+  it('lists the OSPF show commands with ?', () => {
+    const { c } = configured(['end']);
+
+    expect(c.session.help(c.device, 'show ip ospf ')).toEqual([
+      '  interface  Interface information',
+      '  neighbor   Neighbor list',
+    ]);
+    expect(c.session.help(c.device, 'show ip ospf interface ')).toEqual(
+      expect.arrayContaining([
+        '  brief            Brief summary of OSPF interface information',
+        '  GigabitEthernet  GigabitEthernet IEEE 802.3z',
+      ]),
+    );
+    expect(c.session.help(c.device, 'show ip ')).toContain('  ospf       OSPF information');
   });
 });

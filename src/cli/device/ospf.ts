@@ -12,9 +12,11 @@ import { iface, ipv4, keyword, num } from '../params';
 import { defineCommand } from '../tree';
 import { INVALID_INPUT, type RouterContext } from './context';
 import { findInterface, interfaceEntries } from './show';
+import { showIpOspfInterface, showIpOspfInterfaceBrief, showIpOspfNeighbor } from './showOspf';
 
 const routerCommand = defineCommand<RouterContext>();
 
+const EXEC = ['user-exec', 'priv-exec'] as const;
 const GLOBAL = ['global-config'] as const;
 const OSPF = ['ospf-config'] as const;
 const ANY_IF = ['interface-config', 'subinterface-config'] as const;
@@ -22,6 +24,10 @@ const ANY_IF = ['interface-config', 'subinterface-config'] as const;
 const NOTHING: readonly string[] = [];
 const INCOMPLETE = '% Incomplete command.';
 
+const show = keyword('show', 'Show running system information');
+const showIp = keyword('ip', 'IP information');
+const showOspf = keyword('ospf', 'OSPF information');
+const showInterface = keyword('interface', 'Interface information');
 const interfaceIp = keyword('ip', 'Interface Internet Protocol config commands');
 const interfaceOspf = keyword('ospf', 'OSPF interface commands');
 const routerId = keyword('router-id', 'router-id for this OSPF process');
@@ -64,6 +70,35 @@ function eachInterface(
 }
 
 export const ospfCommands = [
+  routerCommand({
+    modes: EXEC,
+    path: [show, showIp, showOspf, keyword('neighbor', 'Neighbor list')],
+    run: (_a, ctx) => ctx.query('protocols', showIpOspfNeighbor),
+  }),
+  routerCommand({
+    modes: EXEC,
+    path: [show, showIp, showOspf, showInterface],
+    run: (_a, ctx) => ctx.query('protocols', showIpOspfInterface),
+  }),
+  routerCommand({
+    modes: EXEC,
+    path: [show, showIp, showOspf, showInterface, iface('name', 'Interface name')],
+    run: ({ name }, ctx) => {
+      if (!findInterface(ctx.device, name)) return ctx.reject(INVALID_INPUT);
+      return ctx.query('protocols', (answer, device) => showIpOspfInterface(answer, device, name));
+    },
+  }),
+  routerCommand({
+    modes: EXEC,
+    path: [
+      show,
+      showIp,
+      showOspf,
+      showInterface,
+      keyword('brief', 'Brief summary of OSPF interface information'),
+    ],
+    run: (_a, ctx) => ctx.query('protocols', showIpOspfInterfaceBrief),
+  }),
   routerCommand({
     modes: GLOBAL,
     path: [
