@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="color-scheme" content="light dark" />
+    <link rel="icon" type="image/svg+xml" href="/tracer/assets/icon-ZQaBDoBB.svg" />
+    <link rel="apple-touch-icon" href="/tracer/apple-touch-icon-180x180.png" />
+    <meta
+      name="description"
+      content="Build, configure and simulate computer networks in the browser."
+    />
+    <title>Tracer</title>
+    <script>
+      // Mirrors resolveTheme in src/app/theme.ts so the first paint has the right theme.
+      (function () {
+        var pref = 'system';
+        try {
+          pref = localStorage.getItem('tracer.theme') || 'system';
+        } catch (e) {}
+        var dark =
+          pref === 'dark' ||
+          (pref !== 'light' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+        document.documentElement.classList.add(dark ? 'dark' : 'light');
+      })();
+    </script>
+    <script type="module" crossorigin src="/tracer/assets/index-DEWd7b7W.js"></script>
+    <link rel="modulepreload" crossorigin href="/tracer/assets/rolldown-runtime-COiEfhsA.js">
+    <link rel="modulepreload" crossorigin href="/tracer/assets/jsx-runtime-CldxteV5.js">
+    <link rel="modulepreload" crossorigin href="/tracer/assets/button-BxmX_mJ7.js">
+    <link rel="modulepreload" crossorigin href="/tracer/assets/dist-D9X3mUoG.js">
+    <link rel="modulepreload" crossorigin href="/tracer/assets/segmented-C8vaWHcF.js">
+    <link rel="modulepreload" crossorigin href="/tracer/assets/defaults-upMPN9D3.js">
+    <link rel="modulepreload" crossorigin href="/tracer/assets/commands-C-gzLXSw.js">
+    <link rel="modulepreload" crossorigin href="/tracer/assets/model-hLh-61lA.js">
+    <link rel="modulepreload" crossorigin href="/tracer/assets/icons-Bp5egF-W.js">
+    <link rel="modulepreload" crossorigin href="/tracer/assets/vlans-YTWMwNx7.js">
+    <link rel="stylesheet" crossorigin href="/tracer/assets/index-DZzEcT7g.css">
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff">
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#141417">
+  <link rel="manifest" href="/tracer/manifest.webmanifest"></head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>
