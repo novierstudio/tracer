@@ -15,6 +15,7 @@ export type Mode =
   | { readonly kind: 'line-config'; readonly line: LineRef }
   | { readonly kind: 'vlan-config'; readonly vlan: VlanId }
   | { readonly kind: 'rip-config' }
+  | { readonly kind: 'ospf-config'; readonly processId: number }
   /** `ip dhcp pool NAME`. */
   | { readonly kind: 'dhcp-config'; readonly pool: string };
 
@@ -47,6 +48,7 @@ const MODES: { readonly [K in ModeKind]: ModeSpec<K> } = {
   'line-config': { suffix: () => '(config-line)#', exit: GLOBAL_CONFIG, config: true },
   'vlan-config': { suffix: () => '(config-vlan)#', exit: GLOBAL_CONFIG, config: true },
   'rip-config': { suffix: () => '(config-router)#', exit: GLOBAL_CONFIG, config: true },
+  'ospf-config': { suffix: () => '(config-router)#', exit: GLOBAL_CONFIG, config: true },
   'dhcp-config': { suffix: () => '(dhcp-config)#', exit: GLOBAL_CONFIG, config: true },
 };
 
