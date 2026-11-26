@@ -2,6 +2,9 @@ import type {
   DeviceUnavailable,
   DhcpOutcome,
   DnsLookup,
+  FtpEvent,
+  FtpReply,
+  MailOutcome,
   PingEvent,
   PingSummary,
   ProbeHandle,
@@ -9,7 +12,7 @@ import type {
 } from '@/engine/api';
 import type { SimClient, TopologySource } from '@/engine/client';
 import type { Result } from '@/model';
-import type { HostBackend } from './backend';
+import type { FtpOpening, FtpOutcome, FtpSession, HostBackend } from './backend';
 
 const UNAVAILABLE: Record<DeviceUnavailable, string> = {
   'unknown-device': 'this device is not in the simulation yet.',
@@ -43,6 +46,77 @@ async function follow<E, Last extends E>(
   if (signal.aborted) stop();
   else signal.addEventListener('abort', stop, { once: true });
   await finished;
+}
+
+/**
+ * Opens an FTP session through `client`. `now` reads the simulated clock, which times each
+ * request from when it is sent to when its result comes back.
+ */
+async function openFtp(
+  client: SimClient,
+  device: Parameters<HostBackend['ftp']>[0],
+  server: Parameters<HostBackend['ftp']>[1],
+  now: () => number,
+): Promise<FtpOpening> {
+  type Opened = { kind: 'open'; greeting: FtpReply } | Extract<FtpOpening, { kind: 'failed' }>;
+  let settle!: (opened: Opened) => void;
+  const opened = new Promise<Opened>((resolve) => (settle = resolve));
+  let end!: () => void;
+  const closed = new Promise<void>((resolve) => (end = resolve));
+  let ended = false;
+  /** The request on the wire, waiting for its result. The engine runs one at a time. */
+  let waiting: ((outcome: FtpOutcome | undefined) => void) | undefined;
+  let sentAt = 0;
+  const finish = (outcome: FtpOutcome | undefined) => {
+    const resolve = waiting;
+    waiting = undefined;
+    resolve?.(outcome);
+  };
+  const onEnd = () => {
+    ended = true;
+    finish(undefined);
+    end();
+  };
+  const started = await client.ftpOpen(device, server, (event: FtpEvent) => {
+    switch (event.kind) {
+      case 'open':
+        return settle({ kind: 'open', greeting: event.greeting });
+      case 'failed':
+        return settle({ kind: 'failed', why: event.why });
+      case 'result':
+        return finish({ result: event.result, elapsedMs: now() - sentAt });
+      case 'closed':
+        return onEnd();
+    }
+  });
+  if (!started.ok)
+    throw new Error(`%Error opening ftp://${server}/ (${UNAVAILABLE[started.error]})`);
+  const handle = started.value;
+  const first = await opened;
+  if (first.kind === 'failed') return first;
+  let queue: Promise<unknown> = Promise.resolve();
+  const session: FtpSession = {
+    greeting: first.greeting,
+    closed,
+    send(request) {
+      const turn = queue.then(() =>
+        ended
+          ? undefined
+          : new Promise<FtpOutcome | undefined>((resolve) => {
+              waiting = resolve;
+              sentAt = now();
+              void client.sim.ftpSend(handle, request);
+            }),
+      );
+      queue = turn;
+      return turn;
+    },
+    close() {
+      if (!ended) void client.sim.ftpClose(handle);
+      onEnd();
+    },
+  };
+  return { kind: 'open', session };
 }
 
 /**
@@ -135,6 +209,17 @@ export function engineBackend(source: TopologySource): HostBackend {
       if (signal.aborted) finish();
       else signal.addEventListener('abort', finish, { once: true });
       await finished;
+    },
+    async ftp(device, server) {
+      return openFtp(await engine(), device, server, () => now);
+    },
+    async mail(device, request) {
+      const client = await engine();
+      let settle!: (outcome: MailOutcome) => void;
+      const outcome = new Promise<MailOutcome>((resolve) => (settle = resolve));
+      const started = await client.mail(device, request, (heard) => settle(heard));
+      if (!started.ok) throw new Error(`Mail: ${UNAVAILABLE[started.error]}`);
+      return outcome;
     },
   };
 }
