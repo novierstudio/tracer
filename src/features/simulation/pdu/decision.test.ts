@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { EventId, FrameEvent } from '@/engine/events';
 import {
+  ALL_D_ROUTERS,
+  ALL_SPF_ROUTERS,
   BROADCAST_MAC,
   multicastMac,
   RIP_GROUP,
@@ -20,7 +22,19 @@ import {
   type MacAddress,
   type Topology,
 } from '@/model';
-import { pingFrames, ripPacket, ripRequest, ripV1Response, ripV2Response } from '../testing';
+import {
+  ospfAck,
+  ospfDbd,
+  ospfHello,
+  ospfLsr,
+  ospfLsu,
+  ospfPacket,
+  pingFrames,
+  ripPacket,
+  ripRequest,
+  ripV1Response,
+  ripV2Response,
+} from '../testing';
 import { decide, describeDecision, dropLabel } from './decision';
 
 const isBpdu = ({ frame }: FrameEvent) =>
@@ -363,6 +377,87 @@ describe('a RIP message', () => {
 
   it('sent to another MAC is still ignored as another device’s frame', () => {
     expect(told(withRip(2), 'R2', { ...v2Update, dst: mac(9) }, [])).toBe(
+      "R2 ignored it: it is addressed to 02:00:00:00:00:09, not to R2's MAC.",
+    );
+  });
+});
+
+describe('an OSPF packet', () => {
+  const { lab, pc2, r1 } = routedLab();
+  const plain = lab.device(r1);
+  if (plain.kind !== 'router') throw new Error('R1 is not a router');
+  const withOspf: Device = {
+    ...plain,
+    config: { ...plain.config, ospf: { processId: 1, networks: [], passiveInterfaces: [] } },
+  };
+  const toGroup = (packet: Parameters<typeof ospfPacket>[0], group = ALL_SPF_ROUTERS) =>
+    ({
+      kind: 'ethernet',
+      src: mac(1),
+      dst: multicastMac(group),
+      payload: ospfPacket(packet, group),
+    }) satisfies EthernetFrame;
+  const hello = toGroup(ospfHello);
+  const told = (device: Device, name: string, frame: EthernetFrame, sent: FrameEvent['sent']) => {
+    const port = device.kind === 'pc' ? 'FastEthernet0' : 'GigabitEthernet0/1';
+    const decision = decide(arrival(device.id, port, frame, sent), device)!;
+    return describeDecision(decision, name);
+  };
+  const out = (port: string, frame: EthernetFrame) => ({ port: PortId.parse(port), frame });
+
+  it('is read by a router running OSPF, sent to either group', () => {
+    expect(told(withOspf, 'R2', hello, [])).toBe('R2 read the OSPF hello from 1.1.1.1.');
+    expect(told(withOspf, 'R2', toGroup(ospfLsu, ALL_D_ROUTERS), [])).toBe(
+      'R2 read the OSPF LS update from 1.1.1.1.',
+    );
+    expect(told(withOspf, 'R2', toGroup(ospfAck), [])).toBe(
+      'R2 read the OSPF LS ack from 2.2.2.2.',
+    );
+  });
+
+  it('is read when it is sent to the router’s own address and MAC', () => {
+    const own = plain.ports.find((port) => port.id === 'GigabitEthernet0/1')!;
+    const address = plain.config.interfaces[own.id]!.ipv4!.address;
+    const frame: EthernetFrame = {
+      kind: 'ethernet',
+      src: mac(1),
+      dst: own.kind === 'serial' ? mac(9) : own.mac,
+      payload: ospfPacket(ospfDbd, address),
+    };
+    expect(told(withOspf, 'R2', frame, [])).toBe('R2 read the OSPF DBD from 2.2.2.2.');
+  });
+
+  it('says what OSPF the router sent back, and out of which ports', () => {
+    expect(told(withOspf, 'R2', hello, [out('GigabitEthernet0/1', toGroup(ospfDbd))])).toBe(
+      'R2 read the OSPF hello from 1.1.1.1 and sent a DBD out Gi0/1.',
+    );
+    expect(
+      told(withOspf, 'R2', toGroup(ospfLsu), [
+        out('GigabitEthernet0/1', toGroup(ospfAck)),
+        out('GigabitEthernet0/0', toGroup(ospfLsu)),
+        out('Serial0/0/0', toGroup(ospfLsu)),
+      ]),
+    ).toBe(
+      'R2 read the OSPF LS update from 1.1.1.1 and sent an ack out Gi0/1 and an update out Gi0/0 and Se0/0/0.',
+    );
+    expect(
+      told(withOspf, 'R2', toGroup(ospfDbd), [out('GigabitEthernet0/1', toGroup(ospfLsr))]),
+    ).toBe('R2 read the OSPF DBD from 2.2.2.2 and sent a request out Gi0/1.');
+  });
+
+  it('is ignored by a PC or a router without OSPF, which say they do not run OSPF', () => {
+    expect(told(lab.device(pc2), 'PC2', hello, [])).toBe(
+      'PC2 ignored it: it is an OSPF packet, and PC2 does not run OSPF.',
+    );
+    const decision = decide(arrival(r1, 'GigabitEthernet0/1', hello, []), plain)!;
+    expect(describeDecision(decision, 'R1')).toBe(
+      'R1 ignored it: it is an OSPF packet, and R1 does not run OSPF.',
+    );
+    expect(dropLabel(decision)).toBeUndefined();
+  });
+
+  it('sent to another MAC is still ignored as another device’s frame', () => {
+    expect(told(withOspf, 'R2', { ...hello, dst: mac(9) }, [])).toBe(
       "R2 ignored it: it is addressed to 02:00:00:00:00:09, not to R2's MAC.",
     );
   });

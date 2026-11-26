@@ -3,13 +3,26 @@ import { ms, type SimTime } from '@/engine/core/time';
 import { createEngine } from '@/engine/engine';
 import type { EventId, FrameEvent } from '@/engine/events';
 import {
+  ALL_SPF_ROUTERS,
+  INITIAL_SEQUENCE,
   LIMITED_BROADCAST,
+  MAX_AGE,
   RIP_GROUP,
   UDP_PORT,
   type ArpPacket,
   type EthernetFrame,
   type Ipv4Packet,
+  type Lsa,
+  type LsaHeader,
+  type NetworkLsa,
+  type OspfDatabaseDescription,
+  type OspfHello,
+  type OspfLinkStateAck,
+  type OspfLinkStateRequest,
+  type OspfLinkStateUpdate,
+  type OspfPacket,
   type RipMessage,
+  type RouterLsa,
 } from '@/engine/pdu';
 import { createSimService } from '@/engine/service';
 import { STACKS } from '@/engine/stacks';
@@ -83,6 +96,102 @@ export const ripRequest = (version: 1 | 2): RipMessage => ({
   command: 'request',
   version,
 });
+
+/** An OSPF packet from 10.0.12.1, to AllSPFRouters unless `dst` says otherwise. TTL 1, as OSPF sends. */
+export function ospfPacket(payload: OspfPacket, dst: Ipv4Address = ALL_SPF_ROUTERS): Ipv4Packet {
+  return { kind: 'ipv4', src: ip('10.0.12.1'), dst, ttl: 1, id: 5, payload };
+}
+
+const R1 = ip('1.1.1.1');
+const R2 = ip('2.2.2.2');
+
+/** R1's hello on a LAN where it is DR and 10.0.12.2 is BDR, having heard 2.2.2.2 and 3.3.3.3. */
+export const ospfHello: OspfHello = {
+  kind: 'ospf',
+  type: 'hello',
+  routerId: R1,
+  area: 0,
+  networkMask: prefix(24),
+  helloInterval: 10,
+  deadInterval: 40,
+  priority: 1,
+  dr: ip('10.0.12.1'),
+  bdr: ip('10.0.12.2'),
+  neighbors: [R2, ip('3.3.3.3')],
+};
+
+/** R1's links: the LAN where it is DR, a serial link to 3.3.3.3, and that link's subnet. */
+export const routerLsa: RouterLsa = {
+  type: 'router',
+  id: R1,
+  advertisingRouter: R1,
+  age: 1,
+  sequence: INITIAL_SEQUENCE,
+  links: [
+    { type: 'transit', dr: ip('10.0.12.1'), address: ip('10.0.12.1'), metric: 1 },
+    { type: 'point-to-point', neighbor: ip('3.3.3.3'), address: ip('10.0.13.1'), metric: 64 },
+    { type: 'stub', network: ip('10.0.13.0'), prefixLength: prefix(30), metric: 64 },
+  ],
+};
+
+/** The LAN's network LSA, from its DR R1, being flushed at MaxAge. */
+export const networkLsa: NetworkLsa = {
+  type: 'network',
+  id: ip('10.0.12.1'),
+  advertisingRouter: R1,
+  age: MAX_AGE,
+  sequence: INITIAL_SEQUENCE + 1,
+  prefixLength: prefix(24),
+  attached: [R1, R2],
+};
+
+const headerOf = ({ type, id, advertisingRouter, age, sequence }: Lsa): LsaHeader => ({
+  type,
+  id,
+  advertisingRouter,
+  age,
+  sequence,
+});
+
+export const ospfDbd: OspfDatabaseDescription = {
+  kind: 'ospf',
+  type: 'dbd',
+  routerId: R2,
+  area: 0,
+  mtu: 1500,
+  init: false,
+  more: true,
+  master: true,
+  sequence: 4242,
+  headers: [headerOf(routerLsa), headerOf(networkLsa)],
+};
+
+export const ospfLsr: OspfLinkStateRequest = {
+  kind: 'ospf',
+  type: 'lsr',
+  routerId: R1,
+  area: 0,
+  requests: [
+    { type: 'router', id: R2, advertisingRouter: R2 },
+    { type: 'network', id: ip('10.0.12.2'), advertisingRouter: R2 },
+  ],
+};
+
+export const ospfLsu: OspfLinkStateUpdate = {
+  kind: 'ospf',
+  type: 'lsu',
+  routerId: R1,
+  area: 0,
+  lsas: [routerLsa, networkLsa],
+};
+
+export const ospfAck: OspfLinkStateAck = {
+  kind: 'ospf',
+  type: 'lsack',
+  routerId: R2,
+  area: 0,
+  headers: [headerOf(routerLsa)],
+};
 
 type Hop = {
   id: number;

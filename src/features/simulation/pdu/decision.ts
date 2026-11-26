@@ -2,6 +2,8 @@ import type { FrameEvent, SentFrame } from '@/engine/events';
 import type { Frame } from '@/engine/frame';
 import { ingressVlan } from '@/engine/l2/switching';
 import {
+  ALL_D_ROUTERS,
+  ALL_SPF_ROUTERS,
   BROADCAST_MAC,
   LIMITED_BROADCAST,
   multicastMac,
@@ -9,6 +11,7 @@ import {
   type ArpPacket,
   type DhcpMessage,
   type Ipv4Packet,
+  type OspfPacket,
   type RipMessage,
   type RipVersion,
 } from '@/engine/pdu';
@@ -33,6 +36,8 @@ export type Decision =
   | { kind: 'dhcp'; step: DhcpStep }
   /** A router running RIP read a RIP message. `out` are the ports it sent RIP routes out of. */
   | { kind: 'rip'; command: RipMessage['command']; version: RipVersion; out: readonly PortId[] }
+  /** A router running OSPF read an OSPF packet. `sent` is the OSPF it sent while it did. */
+  | { kind: 'ospf'; type: OspfType; from: Ipv4Address; sent: readonly OspfSent[] }
   | { kind: 'dropped'; reason: DropReason; notified?: PortId }
   | { kind: 'ignored'; reason: IgnoreReason }
   | { kind: 'silent' };
@@ -48,6 +53,11 @@ export type DhcpStep =
   | { kind: 'requested'; address: Ipv4Address; out: PortId }
   | { kind: 'bound'; address: Ipv4Address }
   | { kind: 'restarted'; out: PortId };
+
+type OspfType = OspfPacket['type'];
+
+/** An OSPF packet a router sent while it handled another, and the port it went out of. */
+export type OspfSent = { readonly type: OspfType; readonly port: PortId };
 
 /** How a switch changed a frame's 802.1Q tag on its way out. */
 export type Retag =
@@ -71,6 +81,7 @@ export type IgnoreReason =
   | { kind: 'dhcp-for-other'; client: MacAddress }
   | { kind: 'dhcp-not-server'; message: DhcpMessage['type'] }
   | { kind: 'no-rip' }
+  | { kind: 'no-ospf' }
   | { kind: 'rip-version'; version: RipVersion; accepts: RipVersion };
 
 const ipv4Of = (frame: Frame): Ipv4Packet | undefined =>
@@ -124,6 +135,42 @@ function decideRip(device: Device, message: RipMessage, sent: readonly SentFrame
     command: message.command,
     version: message.version,
     out: sent.filter((s) => sendsRip(s.frame)).map((s) => s.port),
+  };
+}
+
+const ospfOf = (frame: Frame): OspfPacket | undefined => {
+  const payload = ipv4Of(frame)?.payload;
+  return payload?.kind === 'ospf' ? payload : undefined;
+};
+
+/** The OSPF packet in a frame, when it is for this device: to either OSPF group or one of its addresses. */
+function ospfFor(device: Device, frame: Frame): OspfPacket | undefined {
+  const packet = ipv4Of(frame);
+  if (packet?.payload.kind !== 'ospf') return undefined;
+  const local =
+    packet.dst === ALL_SPF_ROUTERS ||
+    packet.dst === ALL_D_ROUTERS ||
+    ownAddresses(device).includes(packet.dst);
+  return local ? packet.payload : undefined;
+}
+
+const OSPF_MACS: readonly MacAddress[] = [
+  multicastMac(ALL_SPF_ROUTERS),
+  multicastMac(ALL_D_ROUTERS),
+];
+
+function decideOspf(device: Device, packet: OspfPacket, sent: readonly SentFrame[]): Decision {
+  if (device.kind !== 'router' || !device.config.ospf) {
+    return { kind: 'ignored', reason: { kind: 'no-ospf' } };
+  }
+  return {
+    kind: 'ospf',
+    type: packet.type,
+    from: packet.routerId,
+    sent: sent.flatMap((s) => {
+      const out = ospfOf(s.frame);
+      return out ? [{ type: out.type, port: s.port }] : [];
+    }),
   };
 }
 
@@ -362,13 +409,15 @@ export function decide(event: FrameEvent, device: Device | undefined): Decision 
     return { kind: 'ignored', reason: { kind: 'bpdu' } };
   }
   const rip = ripFor(device, frame);
+  const ospf = ospfFor(device, frame);
   const local =
     frame.kind !== 'ethernet' || frame.dst === BROADCAST_MAC || ownMac(device, frame.dst);
-  // Every device sees the RIPv2 group's frames, so it can say whether it runs RIP.
-  if (!local && !(rip && frame.dst === RIP_MAC)) {
+  // Every device sees the RIPv2 and OSPF groups' frames, so it can say whether it runs them.
+  if (!local && !(rip && frame.dst === RIP_MAC) && !(ospf && OSPF_MACS.includes(frame.dst))) {
     return { kind: 'ignored', reason: { kind: 'other-mac', dst: frame.dst } };
   }
   if (rip) return decideRip(device, rip, sent);
+  if (ospf) return decideOspf(device, ospf, sent);
   const arp = arpOf(frame);
   if (arp) return decideArp(device, arp, sent);
   const packet = ipv4Of(frame);
@@ -500,6 +549,8 @@ function describeIgnore(name: string, reason: IgnoreReason) {
       return `${name} ignored it: only a DHCP server answers ${DHCP_NAMES[reason.message]}.`;
     case 'no-rip':
       return `${name} ignored it: it is a RIP message, and ${name} does not run RIP.`;
+    case 'no-ospf':
+      return `${name} ignored it: it is an OSPF packet, and ${name} does not run OSPF.`;
     case 'rip-version':
       return `${name} ignored it: it is RIPv${reason.version}, and ${name} is set to RIP version ${reason.accepts} only.`;
   }
@@ -515,6 +566,31 @@ function describeRip(name: string, { command, version, out }: Extract<Decision, 
   return out.length > 0
     ? `${name} read the RIPv${version} update and sent a triggered update out ${ports}.`
     : `${name} read the RIPv${version} update.`;
+}
+
+/** What a router read, as in "read the OSPF hello", and what it sent, as in "sent a DBD". */
+const OSPF_READ: Record<OspfType, string> = {
+  hello: 'hello',
+  dbd: 'DBD',
+  lsr: 'LS request',
+  lsu: 'LS update',
+  lsack: 'LS ack',
+};
+const OSPF_SENT: Record<OspfType, string> = {
+  hello: 'a hello',
+  dbd: 'a DBD',
+  lsr: 'a request',
+  lsu: 'an update',
+  lsack: 'an ack',
+};
+
+function describeOspf(name: string, { type, from, sent }: Extract<Decision, { kind: 'ospf' }>) {
+  const read = `${name} read the OSPF ${OSPF_READ[type]} from ${from}`;
+  if (sent.length === 0) return `${read}.`;
+  const byType = new Map<OspfType, PortId[]>();
+  for (const s of sent) byType.set(s.type, [...(byType.get(s.type) ?? []), s.port]);
+  const what = [...byType].map(([sentType, ports]) => `${OSPF_SENT[sentType]} out ${list(ports)}`);
+  return `${read} and sent ${what.join(' and ')}.`;
 }
 
 /** The decision as one sentence a student can read, with `name` the device's hostname. */
@@ -557,6 +633,8 @@ export function describeDecision(decision: Decision, name: string): string {
       return describeDhcp(name, decision.step);
     case 'rip':
       return describeRip(name, decision);
+    case 'ospf':
+      return describeOspf(name, decision);
     case 'dropped':
       return describeDrop(name, decision);
     case 'ignored':

@@ -1,5 +1,7 @@
 import type { Frame } from '@/engine/frame';
 import {
+  ALL_D_ROUTERS,
+  ALL_SPF_ROUTERS,
   BROADCAST_MAC,
   DHCP_MESSAGE_TYPE,
   DOT1Q_TPID,
@@ -7,6 +9,10 @@ import {
   ICMP_TYPE,
   IP_PROTOCOL,
   LIMITED_BROADCAST,
+  LSA_TYPE,
+  MAX_AGE,
+  OSPF_PACKET_TYPE,
+  OSPF_VERSION,
   PVST_MAC,
   RIP_GROUP,
   RIP_INFINITY,
@@ -25,6 +31,12 @@ import {
   type Ipv4Packet,
   type Ipv4Payload,
   type LeaseTime,
+  type Lsa,
+  type LsaHeader,
+  type LsaType,
+  type OspfDatabaseDescription,
+  type OspfPacket,
+  type RouterLink,
   type RipEntry,
   type RipMessage,
   type RipVersion,
@@ -33,7 +45,14 @@ import {
   isMulticast,
   multicastMac,
 } from '@/engine/pdu';
-import { formatSubnetMask, prefixMask, type Ipv4Address, type MacAddress } from '@/model';
+import {
+  formatSubnetMask,
+  prefixMask,
+  uint32ToIpv4,
+  type Ipv4Address,
+  type MacAddress,
+  type PrefixLength,
+} from '@/model';
 
 /**
  * A frame taken apart for the PDU inspector: its layers, outermost first, each a list of labelled
@@ -55,6 +74,7 @@ export type LayerId =
   | 'udp'
   | 'dhcp'
   | 'rip'
+  | 'ospf'
   | 'bpdu'
   | 'hello';
 
@@ -93,7 +113,7 @@ class Wire {
 const u16 = (value: number) => [(value >> 8) & 0xff, value & 0xff];
 const u32 = (value: number) => [...u16(Math.floor(value / 0x10000)), ...u16(value & 0xffff)];
 const macBytes = (mac: MacAddress) => mac.split(':').map((part) => parseInt(part, 16));
-const ipBytes = (address: Ipv4Address) => address.split('.').map(Number);
+const ipBytes = (address: string) => address.split('.').map(Number);
 const hex = (value: number, digits: number) =>
   `0x${value.toString(16).toUpperCase().padStart(digits, '0')}`;
 
@@ -177,7 +197,7 @@ function payloadBytes(packet: Ipv4Packet): number[] {
     case 'udp':
       return udpParts(packet, payload).flatMap((part) => part.bytes);
     case 'ospf':
-      return [];
+      return ospfBytes(payload);
   }
 }
 
@@ -307,7 +327,7 @@ function icmpLayers(wire: Wire, message: IcmpMessage): Layer[] {
 
 function describeIcmpStart(payload: Ipv4Payload) {
   if (payload.kind === 'udp') return `UDP ${payload.srcPort} → ${payload.dstPort}`;
-  if (payload.kind === 'ospf') return 'OSPF';
+  if (payload.kind === 'ospf') return `OSPFv2 ${OSPF_NAMES[payload.type]} from ${payload.routerId}`;
   return isEcho(payload)
     ? `ICMP ${ICMP_NAMES[payload.type]}, id ${payload.id}, seq ${payload.seq}`
     : `ICMP ${ICMP_NAMES[payload.type]}`;
@@ -771,7 +791,7 @@ function routeParts(version: RipVersion, entry: RipEntry, index: number): Part[]
       v2
         ? 'The network’s mask. RIPv2 sends it, so subnets of one classful network can each have a route.'
         : 'RIPv1 has no room for a mask, so the receiver assumes one: its own interface’s mask inside that classful network, else the class A, B or C mask.',
-      mask === undefined ? ZEROS : ipBytes(formatSubnetMask(mask) as Ipv4Address),
+      mask === undefined ? ZEROS : ipBytes(formatSubnetMask(mask)),
     ],
     nextHop: [
       '0.0.0.0',
@@ -855,8 +875,15 @@ function describeIpAddress(address: Ipv4Address, role: 'src' | 'dst') {
   if (address === LIMITED_BROADCAST) {
     return 'All ones: every host on this network. Routers never pass it on to another network.';
   }
-  if (address === RIP_GROUP)
+  if (address === RIP_GROUP) {
     return 'The group every RIPv2 router listens to. It never leaves the link.';
+  }
+  if (address === ALL_SPF_ROUTERS) {
+    return 'AllSPFRouters, the group every OSPF router listens on. Hellos go here, and routers keep it on this network.';
+  }
+  if (address === ALL_D_ROUTERS) {
+    return 'AllDRouters, the group only the DR and BDR listen on. A router that is neither sends its updates and acks here, so the two routers that keep the network in sync hear them and the others are not disturbed.';
+  }
   if (isMulticast(address)) {
     return 'A multicast group: only the devices that joined it take the packet, and routers keep it on its link.';
   }
@@ -958,7 +985,490 @@ function payloadLayers(wire: Wire, packet: Ipv4Packet): Layer[] {
     case 'udp':
       return udpLayers(wire, packet, payload);
     case 'ospf':
-      return [];
+      return ospfLayers(wire, payload);
+  }
+}
+
+// OSPF
+
+const OSPF_NAMES: Record<OspfPacket['type'], string> = {
+  hello: 'Hello',
+  dbd: 'Database Description',
+  lsr: 'Link State Request',
+  lsu: 'Link State Update',
+  lsack: 'Link State Acknowledgment',
+};
+
+const OSPF_TYPE_EXPLAIN: Record<OspfPacket['type'], string> = {
+  hello:
+    'A hello finds neighbours and keeps them. Routers that hear each other’s hellos, with matching settings, become neighbours.',
+  dbd: 'A database description lists the LSAs the sender has, by header only, so the neighbour can tell which ones it is missing.',
+  lsr: 'A link state request asks a neighbour for whole LSAs this router lacks, or holds only older copies of.',
+  lsu: 'A link state update carries whole LSAs: the answer to a request, or news flooded on after a change.',
+  lsack:
+    'A link state acknowledgment confirms LSAs arrived, so the router that sent them stops sending them again.',
+};
+
+/** The options byte of every packet and LSA Tracer sends: only the E bit, as a normal area sets. */
+const OSPF_OPTIONS = 0x02;
+
+const OPTIONS_EXPLAIN =
+  'The E bit: the sender’s area is a normal one that takes routes from outside OSPF. Neighbours must agree on the options.';
+
+const LSA_NAMES: Record<LsaType, string> = { router: 'Router LSA', network: 'Network LSA' };
+
+const LINK_TYPE: Record<RouterLink['type'], number> = { 'point-to-point': 1, transit: 2, stub: 3 };
+
+const DBD_FLAGS = [
+  ['init', 0x04, 'Init'],
+  ['more', 0x02, 'More'],
+  ['master', 0x01, 'Master'],
+] as const;
+
+const maskText = (prefixLength: PrefixLength) =>
+  `${formatSubnetMask(prefixLength)} (/${prefixLength})`;
+
+/** A link's ID and data, as RFC 2328 defines them for its type. */
+function linkIdAndData(link: RouterLink): [id: string, data: string] {
+  switch (link.type) {
+    case 'point-to-point':
+      return [link.neighbor, link.address];
+    case 'transit':
+      return [link.dr, link.address];
+    case 'stub':
+      return [link.network, formatSubnetMask(link.prefixLength)];
+  }
+}
+
+function linkBytes(link: RouterLink): number[] {
+  const [id, data] = linkIdAndData(link);
+  return [...ipBytes(id), ...ipBytes(data), LINK_TYPE[link.type], 0, ...u16(link.metric)];
+}
+
+function lsaBodyBytes(lsa: Lsa): number[] {
+  switch (lsa.type) {
+    case 'router':
+      return [0, 0, ...u16(lsa.links.length), ...lsa.links.flatMap(linkBytes)];
+    case 'network':
+      return [...ipBytes(formatSubnetMask(lsa.prefixLength)), ...lsa.attached.flatMap(ipBytes)];
+  }
+}
+
+function lsaHeaderBytes(header: LsaHeader, checksum: number, length: number): number[] {
+  return [
+    ...u16(header.age),
+    OSPF_OPTIONS,
+    LSA_TYPE[header.type],
+    ...ipBytes(header.id),
+    ...ipBytes(header.advertisingRouter),
+    ...u32(header.sequence >>> 0),
+    ...u16(checksum),
+    ...u16(length),
+  ];
+}
+
+/**
+ * The two check bytes, placed at `offset`, that make the Fletcher checksum (ISO 8473) of `data`
+ * come out to zero. `data` holds zeros where they go.
+ */
+function fletcherCheck(data: readonly number[], offset: number): [number, number] {
+  let c0 = 0;
+  let c1 = 0;
+  for (const byte of data) {
+    c0 = (c0 + byte) % 255;
+    c1 = (c1 + c0) % 255;
+  }
+  let x = ((data.length - offset - 1) * c0 - c1) % 255;
+  if (x <= 0) x += 255;
+  let y = 510 - c0 - x;
+  if (y > 255) y -= 255;
+  return [x, y];
+}
+
+/** A whole LSA's bytes, with its checksum over everything but the age, which changes in transit. */
+function lsaBytes(lsa: Lsa): number[] {
+  const body = lsaBodyBytes(lsa);
+  const bytes = [...lsaHeaderBytes(lsa, 0, 20 + body.length), ...body];
+  const [x, y] = fletcherCheck(bytes.slice(2), 14);
+  bytes[16] = x;
+  bytes[17] = y;
+  return bytes;
+}
+
+/** A header on its own, in a DBD or an ack. Tracer keeps no checksum or length without the body. */
+const bareHeaderBytes = (header: LsaHeader) => lsaHeaderBytes(header, 0, 0);
+
+const dbdFlags = (packet: OspfDatabaseDescription) =>
+  DBD_FLAGS.reduce((flags, [key, bit]) => (packet[key] ? flags | bit : flags), 0);
+
+function ospfBodyBytes(packet: OspfPacket): number[] {
+  switch (packet.type) {
+    case 'hello':
+      return [
+        ...ipBytes(formatSubnetMask(packet.networkMask)),
+        ...u16(packet.helloInterval),
+        OSPF_OPTIONS,
+        packet.priority,
+        ...u32(packet.deadInterval),
+        ...ipBytes(packet.dr),
+        ...ipBytes(packet.bdr),
+        ...packet.neighbors.flatMap(ipBytes),
+      ];
+    case 'dbd':
+      return [
+        ...u16(packet.mtu),
+        OSPF_OPTIONS,
+        dbdFlags(packet),
+        ...u32(packet.sequence >>> 0),
+        ...packet.headers.flatMap(bareHeaderBytes),
+      ];
+    case 'lsr':
+      return packet.requests.flatMap((key) => [
+        ...u32(LSA_TYPE[key.type]),
+        ...ipBytes(key.id),
+        ...ipBytes(key.advertisingRouter),
+      ]);
+    case 'lsu':
+      return [...u32(packet.lsas.length), ...packet.lsas.flatMap(lsaBytes)];
+    case 'lsack':
+      return packet.headers.flatMap(bareHeaderBytes);
+  }
+}
+
+/** An OSPF packet's bytes, with its checksum over the whole packet filled in. */
+function ospfBytes(packet: OspfPacket): number[] {
+  const body = ospfBodyBytes(packet);
+  const bytes = [
+    OSPF_VERSION,
+    OSPF_PACKET_TYPE[packet.type],
+    ...u16(24 + body.length),
+    ...ipBytes(packet.routerId),
+    ...ipBytes(uint32ToIpv4(packet.area)),
+    0,
+    0,
+    ...u16(0),
+    ...new Array<number>(8).fill(0),
+    ...body,
+  ];
+  const checksum = internetChecksum(bytes);
+  bytes[12] = checksum >> 8;
+  bytes[13] = checksum & 0xff;
+  return bytes;
+}
+
+const sequenceText = (sequence: number) => hex(sequence >>> 0, 8);
+
+const headerText = (header: LsaHeader) =>
+  `${LSA_NAMES[header.type]} ${header.id} from ${header.advertisingRouter}, seq ${sequenceText(header.sequence)}, age ${header.age} s`;
+
+const LSA_EXPLAIN: Record<LsaType, string> = {
+  router:
+    'A router LSA: every router originates one that lists its links in the area and what each costs. Its link state ID is the router’s own ID.',
+  network:
+    'A network LSA: the DR of a multi-access network originates one that lists every router on the network. Its link state ID is the DR’s address there.',
+};
+
+const SEQUENCE_EXPLAIN =
+  'The sequence number starts at 0x80000001 and rises each time the originator reissues the LSA, so every router can tell which copy is newer.';
+
+function ageExplain(age: number) {
+  return age >= MAX_AGE
+    ? `Its age is MaxAge, ${MAX_AGE} s: the originator is withdrawing it, and every router deletes it.`
+    : `Its age counts up from 0 in seconds. At MaxAge, ${MAX_AGE} s, every router deletes it.`;
+}
+
+function linkText(link: RouterLink): string {
+  switch (link.type) {
+    case 'point-to-point':
+      return `Point-to-point to ${link.neighbor} via ${link.address}, cost ${link.metric}`;
+    case 'transit':
+      return `Transit network with DR ${link.dr}, via ${link.address}, cost ${link.metric}`;
+    case 'stub':
+      return `Stub ${link.network}/${link.prefixLength}, cost ${link.metric}`;
+  }
+}
+
+const LINK_EXPLAIN: Record<RouterLink['type'], string> = {
+  'point-to-point':
+    'Type 1, point-to-point: a neighbour across a serial link. The link ID is the neighbour’s router ID and the link data this router’s address on the link.',
+  transit:
+    'Type 2, transit: a multi-access network with a DR and other routers on it. The link ID is the DR’s address there and the link data this router’s own. SPF reaches the network through the DR’s network LSA.',
+  stub: 'Type 3, stub: a network no OSPF neighbour is on, such as a LAN of PCs, a passive interface, a loopback or a serial link’s subnet. The link ID is the network number and the link data its mask.',
+};
+
+const METRIC_EXPLAIN =
+  ' The TOS count is 0, and the metric is the cost to send out of the interface: 100 Mbit/s divided by its bandwidth, unless ip ospf cost sets it.';
+
+function ospfLayers(wire: Wire, packet: OspfPacket): Layer[] {
+  const bytes = ospfBytes(packet);
+  let at = 0;
+  const field = (id: string, label: string, value: string, explain: string, length: number) =>
+    wire.field(id, label, value, explain, bytes.slice(at, (at += length)));
+  const optionsField = () => field('ospf.options', 'Options', '0x02 (E)', OPTIONS_EXPLAIN, 1);
+
+  const fields: Field[] = [
+    field('ospf.version', 'Version', String(OSPF_VERSION), 'OSPF version 2, the one for IPv4.', 1),
+    field(
+      'ospf.type',
+      'Type',
+      `${OSPF_PACKET_TYPE[packet.type]} (${OSPF_NAMES[packet.type]})`,
+      OSPF_TYPE_EXPLAIN[packet.type],
+      1,
+    ),
+    field(
+      'ospf.length',
+      'Packet length',
+      `${bytes.length} bytes`,
+      'The OSPF packet’s size, its 24-byte header included.',
+      2,
+    ),
+    field(
+      'ospf.routerId',
+      'Router ID',
+      packet.routerId,
+      'Who sent it: a 32-bit name written like an address. It comes from router-id, else the highest loopback address, else the highest interface address.',
+      4,
+    ),
+    field(
+      'ospf.area',
+      'Area ID',
+      `${uint32ToIpv4(packet.area)} (area ${packet.area})`,
+      'The area of the interface it was sent from. Neighbours must be in the same area, and area 0 is the backbone.',
+      4,
+    ),
+    field(
+      'ospf.checksum',
+      'Checksum',
+      hex((bytes[12]! << 8) | bytes[13]!, 4),
+      'Covers the whole OSPF packet, so the receiver can spot one damaged on the way.',
+      2,
+    ),
+    field(
+      'ospf.authType',
+      'Auth type',
+      '0 (none)',
+      'No authentication: the neighbour takes the packet without a password.',
+      2,
+    ),
+    field(
+      'ospf.auth',
+      'Authentication',
+      '8 zero bytes',
+      'Room for a password or key, empty without authentication.',
+      8,
+    ),
+  ];
+
+  const lsaHeaderField = (id: string, label: string, header: LsaHeader, explain: string) =>
+    field(
+      id,
+      label,
+      headerText(header),
+      `${explain} ${SEQUENCE_EXPLAIN} ${ageExplain(header.age)} Tracer leaves the checksum and length at zero here: it keeps them only with the whole LSA.`,
+      20,
+    );
+
+  switch (packet.type) {
+    case 'hello': {
+      const none = (address: Ipv4Address) => (address === '0.0.0.0' ? '0.0.0.0 (none)' : address);
+      fields.push(
+        field(
+          'ospf.mask',
+          'Network mask',
+          maskText(packet.networkMask),
+          'The sending interface’s mask. On a multi-access network such as Ethernet, neighbours must agree on it.',
+          4,
+        ),
+        field(
+          'ospf.helloInterval',
+          'Hello interval',
+          `${packet.helloInterval} s`,
+          'How often the sender says hello. Neighbours must agree on it, or they never become neighbours.',
+          2,
+        ),
+        optionsField(),
+        field(
+          'ospf.priority',
+          'Router priority',
+          String(packet.priority),
+          'The sender’s say in the DR election on this network: the highest priority wins, then the highest router ID. 0 means it never becomes DR or BDR.',
+          1,
+        ),
+        field(
+          'ospf.deadInterval',
+          'Dead interval',
+          `${packet.deadInterval} s`,
+          'How long a neighbour waits without a hello before it declares the sender down: four hellos by default. Neighbours must agree on it.',
+          4,
+        ),
+        field(
+          'ospf.dr',
+          'Designated router',
+          none(packet.dr),
+          'The DR the sender knows of, by its address on this network. Every router on a multi-access network becomes fully adjacent to the DR, which keeps them all in sync, so not every pair of routers has to swap LSAs. 0.0.0.0: none yet, or a point-to-point link, which needs none.',
+          4,
+        ),
+        field(
+          'ospf.bdr',
+          'Backup designated router',
+          none(packet.bdr),
+          'The BDR listens to everything the DR does and takes over at once if the DR fails. 0.0.0.0: none.',
+          4,
+        ),
+        ...packet.neighbors.map((neighbor, index) =>
+          field(
+            `ospf.neighbor.${index + 1}`,
+            `Neighbor ${index + 1}`,
+            neighbor,
+            'A router the sender heard a hello from on this link within the dead interval. Finding its own router ID here tells a router that hellos go both ways, so the two reach 2-way.',
+            4,
+          ),
+        ),
+      );
+      break;
+    }
+    case 'dbd': {
+      const flags = dbdFlags(packet);
+      const names = DBD_FLAGS.filter(([key]) => packet[key]).map(([, , name]) => name);
+      fields.push(
+        field(
+          'ospf.mtu',
+          'Interface MTU',
+          `${packet.mtu} bytes`,
+          'The largest IP packet the sending interface takes. Neighbours whose MTUs differ get stuck in EXSTART.',
+          2,
+        ),
+        optionsField(),
+        field(
+          'ospf.flags',
+          'Flags',
+          `${hex(flags, 2)} (${names.length > 0 ? names.join(', ') : 'none'})`,
+          `I (init) marks the first DBD of an exchange, M (more) says more follow, and MS (master) says the sender leads the exchange: the router with the higher router ID is master. ${packet.master ? 'The sender is the master.' : 'The sender is the slave, which echoes the master’s sequence numbers.'}`,
+          1,
+        ),
+        field(
+          'ospf.sequence',
+          'DD sequence',
+          String(packet.sequence >>> 0),
+          'Numbers the DBDs of one exchange. The master raises it with each DBD, and the slave answers with the same number to acknowledge it.',
+          4,
+        ),
+        ...packet.headers.map((header, index) =>
+          lsaHeaderField(
+            `ospf.lsa.${index + 1}`,
+            `LSA header ${index + 1}`,
+            header,
+            'One LSA the sender has, by header only. The receiver compares it with its own copy and requests the LSA if it lacks it or holds an older one.',
+          ),
+        ),
+      );
+      break;
+    }
+    case 'lsr':
+      fields.push(
+        ...packet.requests.map((key, index) =>
+          field(
+            `ospf.request.${index + 1}`,
+            `Request ${index + 1}`,
+            `${LSA_NAMES[key.type]} ${key.id} from ${key.advertisingRouter}`,
+            'One LSA the sender wants whole, named by its type, link state ID and advertising router: together they pick out exactly one LSA.',
+            12,
+          ),
+        ),
+      );
+      break;
+    case 'lsu':
+      fields.push(
+        field(
+          'ospf.count',
+          'Number of LSAs',
+          plural(packet.lsas.length, 'LSA'),
+          'How many LSAs this update carries.',
+          4,
+        ),
+      );
+      packet.lsas.forEach((lsa, index) => {
+        const n = index + 1;
+        const length = (bytes[at + 18]! << 8) | bytes[at + 19]!;
+        const checksum = (bytes[at + 16]! << 8) | bytes[at + 17]!;
+        fields.push(
+          field(
+            `ospf.lsa.${n}.header`,
+            `LSA ${n} header`,
+            `${headerText(lsa)}, checksum ${hex(checksum, 4)}, ${length} bytes`,
+            `${LSA_EXPLAIN[lsa.type]} ${SEQUENCE_EXPLAIN} ${ageExplain(lsa.age)} The checksum covers the whole LSA but its age, so a damaged copy is never installed.`,
+            20,
+          ),
+        );
+        if (lsa.type === 'router') {
+          fields.push(
+            field(
+              `ospf.lsa.${n}.links`,
+              `LSA ${n} flags, links`,
+              plural(lsa.links.length, 'link'),
+              'Flags V, E and B would mark the end of a virtual link, a boundary to routes from outside OSPF, and an area border router. Tracer runs one area, so they are 0. Then the number of links that follow.',
+              4,
+            ),
+            ...lsa.links.map((link, linkIndex) =>
+              field(
+                `ospf.lsa.${n}.link.${linkIndex + 1}`,
+                `LSA ${n} link ${linkIndex + 1}`,
+                linkText(link),
+                LINK_EXPLAIN[link.type] + METRIC_EXPLAIN,
+                12,
+              ),
+            ),
+          );
+        } else {
+          fields.push(
+            field(
+              `ospf.lsa.${n}.mask`,
+              `LSA ${n} mask`,
+              maskText(lsa.prefixLength),
+              'The network’s mask. With the link state ID, the DR’s address, it gives the network number.',
+              4,
+            ),
+            ...lsa.attached.map((router, routerIndex) =>
+              field(
+                `ospf.lsa.${n}.router.${routerIndex + 1}`,
+                `LSA ${n} router ${routerIndex + 1}`,
+                router,
+                'A router on this network by router ID: the DR itself, or a router fully adjacent to it.',
+                4,
+              ),
+            ),
+          );
+        }
+      });
+      break;
+    case 'lsack':
+      fields.push(
+        ...packet.headers.map((header, index) =>
+          lsaHeaderField(
+            `ospf.lsa.${index + 1}`,
+            `Acknowledged LSA ${index + 1}`,
+            header,
+            'One LSA the sender received, named by its header. The router that sent it stops retransmitting it.',
+          ),
+        ),
+      );
+      break;
+  }
+  return [{ id: 'ospf', osi: 3, name: 'OSPFv2', summary: ospfSummary(packet), fields }];
+}
+
+function ospfSummary(packet: OspfPacket): string {
+  switch (packet.type) {
+    case 'hello':
+      return `Hello from ${packet.routerId}`;
+    case 'dbd':
+      return `Database description, ${plural(packet.headers.length, 'LSA header')}`;
+    case 'lsr':
+      return `Link state request, ${plural(packet.requests.length, 'LSA')}`;
+    case 'lsu':
+      return `Link state update, ${plural(packet.lsas.length, 'LSA')}`;
+    case 'lsack':
+      return `Link state acknowledgment, ${plural(packet.headers.length, 'LSA')}`;
   }
 }
 
@@ -1170,6 +1680,13 @@ function describeMac(mac: MacAddress, role: 'dst' | 'src') {
   if (mac === multicastMac(RIP_GROUP)) {
     return 'The MAC of the IPv4 group 224.0.0.9: only routers running RIPv2 take it.';
   }
+  if (mac === multicastMac(ALL_SPF_ROUTERS)) {
+    return 'The multicast MAC of 224.0.0.5, all OSPF routers: every router running OSPF takes it, and other devices ignore it.';
+  }
+  if (mac === multicastMac(ALL_D_ROUTERS)) {
+    return 'The multicast MAC of 224.0.0.6, the DR and BDR only: the designated routers of an OSPF network take it.';
+  }
+
   if (mac.startsWith('01:00:5e')) {
     return 'An IPv4 multicast MAC: 01:00:5e and the group’s last 23 bits. Only devices in the group take it.';
   }

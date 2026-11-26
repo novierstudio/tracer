@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { Frame } from '@/engine/frame';
 import {
+  ALL_D_ROUTERS,
+  ALL_SPF_ROUTERS,
   BROADCAST_MAC,
   LIMITED_BROADCAST,
   multicastMac,
@@ -10,9 +12,21 @@ import {
   UNSPECIFIED_ADDRESS,
   type DhcpMessage,
   type Ipv4Packet,
+  type OspfPacket,
 } from '@/engine/pdu';
 import type { Ipv4Address, MacAddress, PrefixLength, VlanId } from '@/model';
-import { ripPacket, ripRequest, ripV1Response, ripV2Response } from '../testing';
+import {
+  ospfAck,
+  ospfDbd,
+  ospfHello,
+  ospfLsr,
+  ospfLsu,
+  ospfPacket,
+  ripPacket,
+  ripRequest,
+  ripV1Response,
+  ripV2Response,
+} from '../testing';
 import { crc32, dissect, formatLeaseTime, internetChecksum, type Dissection } from './layers';
 
 const mac = (n: number) => `02:00:00:00:00:0${n}` as MacAddress;
@@ -143,6 +157,14 @@ const ripV2Request: Frame = {
   payload: ripPacket(ripRequest(2)),
 };
 
+/** An OSPF packet in an untagged Ethernet frame to its group's MAC. */
+const ospfFrame = (packet: OspfPacket, dst: Ipv4Address = ALL_SPF_ROUTERS): Frame => ({
+  kind: 'ethernet',
+  dst: multicastMac(dst),
+  src: mac(1),
+  payload: ospfPacket(packet, dst),
+});
+
 /** Every PDU kind the engine sends, by name. */
 const FRAMES: Record<string, Frame> = {
   'ARP request': arpRequest,
@@ -191,6 +213,11 @@ const FRAMES: Record<string, Frame> = {
     { ...dhcpHeader, type: 'release', ciaddr: ip('192.168.1.11'), serverId: ip('192.168.1.1') },
     true,
   ),
+  'OSPF hello': ospfFrame(ospfHello),
+  'OSPF DBD': { kind: 'hdlc', payload: ospfPacket(ospfDbd, '10.0.13.3' as Ipv4Address) },
+  'OSPF LS request': ospfFrame(ospfLsr, '10.0.12.2' as Ipv4Address),
+  'OSPF LS update': ospfFrame(ospfLsu, ALL_D_ROUTERS),
+  'OSPF LS ack': ospfFrame(ospfAck),
 };
 
 const fieldsOf = (dissection: Dissection) => dissection.layers.flatMap((layer) => layer.fields);
@@ -450,7 +477,7 @@ describe('dissect a RIP message', () => {
   it('explains the multicast MAC of RIPv2’s group', () => {
     const explain = field(dissect(ripV2), 'ethernet.dst')!.explain;
     expect(explain).toMatch(/224\.0\.0\.9/);
-    const other = { ...ripV2, dst: multicastMac('224.0.0.5' as Ipv4Address) };
+    const other = { ...ripV2, dst: multicastMac('224.0.0.18' as Ipv4Address) };
     expect(field(dissect(other), 'ethernet.dst')!.explain).toMatch(/multicast/);
     expect(field(dissect(other), 'ethernet.dst')!.explain).not.toMatch(/RIP/);
   });
@@ -479,5 +506,180 @@ describe('dissect a RIP message', () => {
     ]);
     expect(field(dissection, 'rip.command')!.value).toBe('1 (request)');
     expect(field(dissection, 'rip.1.family')!.value).toBe('0 (whole table)');
+  });
+});
+
+/** Where OSPF starts in an untagged Ethernet frame: after 14 bytes of Ethernet and 20 of IPv4. */
+const OSPF_START = 34;
+
+/** The OSPF packet's bytes, by the length its header gives. */
+function ospfBytesOf({ bytes }: Dissection) {
+  const length = (bytes[OSPF_START + 2]! << 8) | bytes[OSPF_START + 3]!;
+  return [...bytes.slice(OSPF_START, OSPF_START + length)];
+}
+
+/** The common header: version 2, the type, the length, router ID and area, then no auth. */
+const header = (type: number, length: number, routerId: number[]) => [
+  2,
+  type,
+  length >> 8,
+  length & 0xff,
+  ...routerId,
+  ...[0, 0, 0, 0],
+];
+const NO_AUTH = new Array<number>(10).fill(0);
+
+/** True when the Fletcher checksum (ISO 8473) of an LSA, all but its age, comes out to zero. */
+function fletcherValid(lsa: readonly number[]) {
+  let c0 = 0;
+  let c1 = 0;
+  for (const byte of lsa.slice(2)) {
+    c0 = (c0 + byte) % 255;
+    c1 = (c1 + c0) % 255;
+  }
+  return c0 === 0 && c1 === 0;
+}
+
+describe('dissect an OSPF packet', () => {
+  const hello = dissect(FRAMES['OSPF hello']!);
+
+  it('stacks OSPFv2 at layer 3 over IPv4 protocol 89', () => {
+    expect(hello.layers.map((layer) => [layer.name, layer.osi])).toEqual([
+      ['Ethernet II', 2],
+      ['IPv4', 3],
+      ['OSPFv2', 3],
+    ]);
+    expect(field(hello, 'ipv4.protocol')!.value).toBe('89 (OSPF)');
+    expect(bytesOf(hello, 'ipv4.protocol')).toEqual([89]);
+    expect(hello.layers.at(-1)!.summary).toBe('Hello from 1.1.1.1');
+  });
+
+  it('writes a checksum over the whole OSPF packet', () => {
+    for (const name of ['OSPF hello', 'OSPF LS request', 'OSPF LS update', 'OSPF LS ack']) {
+      const ospf = ospfBytesOf(dissect(FRAMES[name]!));
+      expect(ospf.slice(12, 14)).not.toEqual([0, 0]);
+      expect(internetChecksum(ospf)).toBe(0);
+    }
+  });
+
+  it('lays out a hello: mask, intervals, options, priority, DR, BDR and each neighbour', () => {
+    const ospf = ospfBytesOf(hello);
+    expect(ospf.slice(0, 12)).toEqual(header(1, 52, [1, 1, 1, 1]));
+    expect(ospf.slice(14, 24)).toEqual(NO_AUTH);
+    expect(ospf.slice(24)).toEqual([
+      ...[255, 255, 255, 0],
+      ...[0, 10],
+      0x02,
+      1,
+      ...[0, 0, 0, 40],
+      ...[10, 0, 12, 1],
+      ...[10, 0, 12, 2],
+      ...[2, 2, 2, 2],
+      ...[3, 3, 3, 3],
+    ]);
+    expect(field(hello, 'ospf.type')!.value).toBe('1 (Hello)');
+    expect(field(hello, 'ospf.area')!.value).toBe('0.0.0.0 (area 0)');
+    expect(field(hello, 'ospf.mask')!.value).toBe('255.255.255.0 (/24)');
+    expect(field(hello, 'ospf.deadInterval')!.value).toBe('40 s');
+    expect(field(hello, 'ospf.neighbor.2')!.value).toBe('3.3.3.3');
+    expect(field(hello, 'ospf.dr')!.explain).toMatch(/DR/);
+  });
+
+  it('lays out a DBD: MTU, flags, sequence and each LSA header', () => {
+    const dbd = dissect(FRAMES['OSPF DBD']!);
+    // A flag byte and HDLC's 4-byte header, then 20 bytes of IPv4.
+    const ospf = [...dbd.bytes.slice(25, 25 + 72)];
+    expect(ospf.slice(0, 12)).toEqual(header(2, 72, [2, 2, 2, 2]));
+    expect(internetChecksum(ospf)).toBe(0);
+    expect(ospf.slice(24, 32)).toEqual([0x05, 0xdc, 0x02, 0x03, 0, 0, 0x10, 0x92]);
+    expect(ospf.slice(32, 52)).toEqual([
+      ...[0, 1, 0x02, 1],
+      ...[1, 1, 1, 1],
+      ...[1, 1, 1, 1],
+      ...[0x80, 0, 0, 1],
+      ...[0, 0, 0, 0],
+    ]);
+    expect(ospf.slice(52, 56)).toEqual([0x0e, 0x10, 0x02, 2]);
+    expect(field(dbd, 'ospf.flags')!.value).toBe('0x03 (More, Master)');
+    expect(field(dbd, 'ospf.lsa.1')!.value).toBe(
+      'Router LSA 1.1.1.1 from 1.1.1.1, seq 0x80000001, age 1 s',
+    );
+    expect(field(dbd, 'ospf.lsa.2')!.explain).toMatch(/MaxAge/);
+  });
+
+  it('lays out a request as type, link state ID and advertising router', () => {
+    const lsr = dissect(FRAMES['OSPF LS request']!);
+    const ospf = ospfBytesOf(lsr);
+    expect(ospf.slice(0, 12)).toEqual(header(3, 48, [1, 1, 1, 1]));
+    expect(ospf.slice(24)).toEqual([
+      ...[0, 0, 0, 1, 2, 2, 2, 2, 2, 2, 2, 2],
+      ...[0, 0, 0, 2, 10, 0, 12, 2, 2, 2, 2, 2],
+    ]);
+    expect(field(lsr, 'ospf.request.2')!.value).toBe('Network LSA 10.0.12.2 from 2.2.2.2');
+  });
+
+  it('lays out an update with a router LSA and a network LSA, each with its checksum', () => {
+    const lsu = dissect(FRAMES['OSPF LS update']!);
+    const ospf = ospfBytesOf(lsu);
+    expect(ospf.slice(0, 12)).toEqual(header(4, 120, [1, 1, 1, 1]));
+    expect(ospf.slice(24, 28)).toEqual([0, 0, 0, 2]);
+    const router = ospf.slice(28, 88);
+    const network = ospf.slice(88, 120);
+
+    expect(router.slice(0, 16)).toEqual([0, 1, 0x02, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0x80, 0, 0, 1]);
+    expect(router.slice(18, 20)).toEqual([0, 60]);
+    expect(router.slice(20)).toEqual([
+      ...[0, 0, 0, 3],
+      ...[10, 0, 12, 1, 10, 0, 12, 1, 2, 0, 0, 1],
+      ...[3, 3, 3, 3, 10, 0, 13, 1, 1, 0, 0, 64],
+      ...[10, 0, 13, 0, 255, 255, 255, 252, 3, 0, 0, 64],
+    ]);
+    expect(network.slice(0, 16)).toEqual([
+      ...[0x0e, 0x10, 0x02, 2],
+      ...[10, 0, 12, 1],
+      ...[1, 1, 1, 1],
+      ...[0x80, 0, 0, 2],
+    ]);
+    expect(network.slice(18)).toEqual([0, 32, 255, 255, 255, 0, 1, 1, 1, 1, 2, 2, 2, 2]);
+    for (const lsa of [router, network]) {
+      expect(lsa.slice(16, 18)).not.toEqual([0, 0]);
+      expect(fletcherValid(lsa)).toBe(true);
+    }
+    expect(internetChecksum(ospf)).toBe(0);
+
+    const checksum = (lsa: number[]) =>
+      `0x${((lsa[16]! << 8) | lsa[17]!).toString(16).toUpperCase().padStart(4, '0')}`;
+    expect(field(lsu, 'ospf.lsa.1.header')!.value).toBe(
+      `Router LSA 1.1.1.1 from 1.1.1.1, seq 0x80000001, age 1 s, checksum ${checksum(router)}, 60 bytes`,
+    );
+    expect(field(lsu, 'ospf.lsa.1.links')!.value).toBe('3 links');
+    expect(field(lsu, 'ospf.lsa.1.link.1')!.value).toBe(
+      'Transit network with DR 10.0.12.1, via 10.0.12.1, cost 1',
+    );
+    expect(field(lsu, 'ospf.lsa.1.link.2')!.value).toBe(
+      'Point-to-point to 3.3.3.3 via 10.0.13.1, cost 64',
+    );
+    expect(field(lsu, 'ospf.lsa.1.link.3')!.value).toBe('Stub 10.0.13.0/30, cost 64');
+    expect(field(lsu, 'ospf.lsa.2.mask')!.value).toBe('255.255.255.0 (/24)');
+    expect(field(lsu, 'ospf.lsa.2.router.2')!.value).toBe('2.2.2.2');
+    expect(field(lsu, 'ospf.lsa.2.header')!.explain).toMatch(/MaxAge/);
+    expect(lsu.layers.at(-1)!.summary).toBe('Link state update, 2 LSAs');
+  });
+
+  it('lays out an ack as the headers of the LSAs it acknowledges', () => {
+    const ack = dissect(FRAMES['OSPF LS ack']!);
+    const ospf = ospfBytesOf(ack);
+    expect(ospf.slice(0, 12)).toEqual(header(5, 44, [2, 2, 2, 2]));
+    expect(ospf.slice(24, 40)).toEqual([0, 1, 0x02, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0x80, 0, 0, 1]);
+    expect(field(ack, 'ospf.type')!.value).toBe('5 (Link State Acknowledgment)');
+  });
+
+  it('names the OSPF groups in the MAC and IPv4 destinations', () => {
+    expect(field(hello, 'ethernet.dst')!.explain).toMatch(/224\.0\.0\.5, all OSPF routers/);
+    expect(field(hello, 'ipv4.dst')!.explain).toMatch(/every OSPF router/);
+    const update = dissect(FRAMES['OSPF LS update']!);
+    expect(field(update, 'ethernet.dst')!.value).toBe('01:00:5e:00:00:06');
+    expect(field(update, 'ethernet.dst')!.explain).toMatch(/DR and BDR only/);
+    expect(field(update, 'ipv4.dst')!.explain).toMatch(/only the DR and BDR/);
   });
 });

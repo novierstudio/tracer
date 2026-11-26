@@ -7,6 +7,12 @@ import {
   batch,
   echoRequest,
   hop,
+  ospfAck,
+  ospfDbd,
+  ospfHello,
+  ospfLsr,
+  ospfLsu,
+  ospfPacket,
   ripPacket,
   ripRequest,
   ripV1Response,
@@ -82,5 +88,22 @@ describe('protocol filters', () => {
       'RIPv1 response, 1 route 10.0.12.1 → 255.255.255.255',
     );
     expect(describeFrame(rip(ripRequest(1)))).toBe('RIPv1 request for the whole table');
+  });
+
+  it('classifies OSPF and says what each OSPF packet carries', () => {
+    const ospf = (payload: Parameters<typeof ospfPacket>[0]) =>
+      hop({ id: 1, from: 'R1', to: 'R2', sentAt: 1, payload: ospfPacket(payload) });
+    expect(protocolOf(ospf(ospfHello).frame)).toBe('ospf');
+    expect(describeFrame(ospf(ospfHello))).toBe('OSPF hello from 1.1.1.1, DR 10.0.12.1');
+    expect(describeFrame(ospf({ ...ospfHello, dr: '0.0.0.0' as never }))).toBe(
+      'OSPF hello from 1.1.1.1',
+    );
+    expect(describeFrame(ospf(ospfDbd))).toBe('OSPF DBD from 2.2.2.2, 2 LSA headers (master)');
+    expect(describeFrame(ospf({ ...ospfDbd, init: true, master: false, headers: [] }))).toBe(
+      'OSPF DBD from 2.2.2.2, 0 LSA headers (init, slave)',
+    );
+    expect(describeFrame(ospf(ospfLsr))).toBe('OSPF LS request, 2 LSAs');
+    expect(describeFrame(ospf(ospfLsu))).toBe('OSPF LS update from 1.1.1.1, 2 LSAs');
+    expect(describeFrame(ospf(ospfAck))).toBe('OSPF LS ack, 1 LSA');
   });
 });

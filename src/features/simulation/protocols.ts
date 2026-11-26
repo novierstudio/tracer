@@ -6,6 +6,7 @@ import type {
   DhcpMessage,
   IcmpMessage,
   Ipv4Packet,
+  OspfPacket,
   RipMessage,
   UdpDatagram,
 } from '@/engine/pdu';
@@ -120,6 +121,27 @@ function describeRip(packet: Ipv4Packet, message: RipMessage): string {
   return `RIPv${message.version} response, ${routes} route${routes === 1 ? '' : 's'} ${packet.src} → ${packet.dst}`;
 }
 
+const count = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
+
+function describeOspf(packet: OspfPacket): string {
+  switch (packet.type) {
+    case 'hello':
+      return packet.dr === '0.0.0.0'
+        ? `OSPF hello from ${packet.routerId}`
+        : `OSPF hello from ${packet.routerId}, DR ${packet.dr}`;
+    case 'dbd': {
+      const roles = [...(packet.init ? ['init'] : []), packet.master ? 'master' : 'slave'];
+      return `OSPF DBD from ${packet.routerId}, ${count(packet.headers.length, 'LSA header')} (${roles.join(', ')})`;
+    }
+    case 'lsr':
+      return `OSPF LS request, ${count(packet.requests.length, 'LSA')}`;
+    case 'lsu':
+      return `OSPF LS update from ${packet.routerId}, ${count(packet.lsas.length, 'LSA')}`;
+    case 'lsack':
+      return `OSPF LS ack, ${count(packet.headers.length, 'LSA')}`;
+  }
+}
+
 function describeUdp(packet: Ipv4Packet, datagram: UdpDatagram): string {
   switch (datagram.payload.kind) {
     case 'dhcp':
@@ -137,7 +159,7 @@ function describePacket(packet: Ipv4Packet): string {
     case 'udp':
       return describeUdp(packet, payload);
     case 'ospf':
-      return `OSPF ${payload.type}`;
+      return describeOspf(payload);
   }
 }
 

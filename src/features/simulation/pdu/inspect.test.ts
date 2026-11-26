@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { SimTime } from '@/engine/core/time';
 import type { EventId, FrameEvent } from '@/engine/events';
-import { multicastMac, RIP_GROUP, type EthernetFrame } from '@/engine/pdu';
+import { ALL_SPF_ROUTERS, multicastMac, RIP_GROUP, type EthernetFrame } from '@/engine/pdu';
 import { routedLab } from '@/engine/testing';
 import { PortId, type LinkId, type MacAddress } from '@/model';
-import { pingFrames, ripPacket, ripV2Response } from '../testing';
+import { ospfDbd, ospfHello, ospfPacket, pingFrames, ripPacket, ripV2Response } from '../testing';
 import { inspect, type PduView } from './inspect';
 
 const value = (view: PduView, id: string) =>
@@ -100,5 +100,55 @@ describe('inspect a RIP update', () => {
       'RIPv2',
     ]);
     expect(value(inspection.views[0]!, 'rip.3.metric')).toBe('16 (unreachable)');
+  });
+});
+
+describe('inspect an OSPF hello', () => {
+  const { lab, r1, sw2 } = routedLab();
+  const router = lab.device(r1);
+  if (router.kind !== 'router') throw new Error('R1 is not a router');
+  const ospf = { processId: 1, networks: [], passiveInterfaces: [] };
+  const topology = {
+    ...lab.topology,
+    devices: { ...lab.topology.devices, [r1]: { ...router, config: { ...router.config, ospf } } },
+  };
+  const frame = (src: string, payload: EthernetFrame['payload']): EthernetFrame => ({
+    kind: 'ethernet',
+    src: src as MacAddress,
+    dst: multicastMac(ALL_SPF_ROUTERS),
+    payload,
+  });
+  const event: FrameEvent = {
+    kind: 'frame',
+    id: 1 as EventId,
+    time: 1 as SimTime,
+    sentAt: 0 as SimTime,
+    link: 'lnk' as LinkId,
+    from: { device: sw2, port: PortId.parse('GigabitEthernet0/1') },
+    to: { device: r1, port: PortId.parse('GigabitEthernet0/1') },
+    frame: frame('02:00:00:00:00:21', ospfPacket(ospfHello)),
+    outcome: 'delivered',
+    sent: [
+      {
+        port: PortId.parse('GigabitEthernet0/1'),
+        frame: frame('02:00:00:00:00:31', ospfPacket(ospfDbd)),
+      },
+    ],
+  };
+
+  it('shows the hello down to OSPF, and the DBD R1 sent back', () => {
+    const inspection = inspect(event, topology);
+    expect(inspection.sentence).toBe(
+      'R1 read the OSPF hello from 1.1.1.1 and sent a DBD out Gi0/1.',
+    );
+    expect(inspection.views.map((view) => view.label)).toEqual(['At R1', 'Out Gi0/1']);
+    expect(inspection.views[0]!.layers.map((layer) => layer.name)).toEqual([
+      'Physical',
+      'Ethernet II',
+      'IPv4',
+      'OSPFv2',
+    ]);
+    expect(value(inspection.views[0]!, 'ospf.dr')).toBe('10.0.12.1');
+    expect(value(inspection.views[1]!, 'ospf.flags')).toBe('0x03 (More, Master)');
   });
 });
