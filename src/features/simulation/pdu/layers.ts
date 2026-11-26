@@ -1,22 +1,31 @@
 import type { Frame } from '@/engine/frame';
 import {
   BROADCAST_MAC,
+  DHCP_MESSAGE_TYPE,
   DOT1Q_TPID,
   ETHER_TYPE,
   ICMP_TYPE,
   IP_PROTOCOL,
+  LIMITED_BROADCAST,
   PVST_MAC,
+  UDP_PORT,
   UNKNOWN_MAC,
   UNREACHABLE_CODE,
+  UNSPECIFIED_ADDRESS,
   type ArpPacket,
   type Bpdu,
   type BridgeId,
+  type DhcpMessage,
+  type DhcpMessageType,
   type EthernetFrame,
   type IcmpEcho,
   type IcmpMessage,
   type Ipv4Packet,
+  type Ipv4Payload,
+  type LeaseTime,
+  type UdpDatagram,
 } from '@/engine/pdu';
-import type { Ipv4Address, MacAddress } from '@/model';
+import { formatSubnetMask, prefixMask, type Ipv4Address, type MacAddress } from '@/model';
 
 /**
  * A frame taken apart for the PDU inspector: its layers, outermost first, each a list of labelled
@@ -35,10 +44,12 @@ export type LayerId =
   | 'ipv4'
   | 'icmp'
   | 'quoted'
+  | 'udp'
+  | 'dhcp'
   | 'bpdu'
   | 'hello';
 
-export type OsiLayer = 1 | 2 | 3;
+export type OsiLayer = 1 | 2 | 3 | 4 | 7;
 
 export type Layer = {
   readonly id: LayerId;
@@ -144,9 +155,16 @@ function icmpBytes(message: IcmpMessage): number[] {
 const quotedBytes = (packet: Ipv4Packet) => ipv4Bytes(packet).slice(0, 28);
 
 function ipv4Bytes(packet: Ipv4Packet): number[] {
-  const payload = icmpBytes(packet.payload);
+  const payload = payloadBytes(packet);
   const header = ipv4Header(packet, payload.length);
   return [...header, ...payload];
+}
+
+function payloadBytes(packet: Ipv4Packet): number[] {
+  const { payload } = packet;
+  return payload.kind === 'icmp'
+    ? icmpBytes(payload)
+    : udpParts(packet, payload).flatMap((part) => part.bytes);
 }
 
 function ipv4Header(packet: Ipv4Packet, payloadLength: number): number[] {
@@ -273,16 +291,382 @@ function icmpLayers(wire: Wire, message: IcmpMessage): Layer[] {
   ];
 }
 
-function describeIcmpStart(message: IcmpMessage) {
-  return isEcho(message)
-    ? `ICMP ${ICMP_NAMES[message.type]}, id ${message.id}, seq ${message.seq}`
-    : `ICMP ${ICMP_NAMES[message.type]}`;
+function describeIcmpStart(payload: Ipv4Payload) {
+  if (payload.kind === 'udp') return `UDP ${payload.srcPort} → ${payload.dstPort}`;
+  return isEcho(payload)
+    ? `ICMP ${ICMP_NAMES[payload.type]}, id ${payload.id}, seq ${payload.seq}`
+    : `ICMP ${ICMP_NAMES[payload.type]}`;
+}
+
+// UDP
+
+/** A field before it is placed on the wire: its bytes, in wire order with the others. */
+type Part = Omit<Field, 'bytes'> & { readonly bytes: readonly number[] };
+
+const PORT_NAMES: Record<number, string> = {
+  [UDP_PORT.dhcpServer]: 'DHCP server',
+  [UDP_PORT.dhcpClient]: 'DHCP client',
+};
+
+const portName = (port: number) => {
+  const name = PORT_NAMES[port];
+  return name ? `${port} (${name})` : String(port);
+};
+
+/** The UDP header's fields and then its payload's, with the checksum over the IPv4 pseudo-header. */
+function udpParts(packet: Ipv4Packet, datagram: UdpDatagram): Part[] {
+  const data = dhcpParts(datagram.payload);
+  const dataBytes = data.flatMap((part) => part.bytes);
+  const length = 8 + dataBytes.length;
+  const header = [...u16(datagram.srcPort), ...u16(datagram.dstPort), ...u16(length)];
+  const pseudo = [
+    ...ipBytes(packet.src),
+    ...ipBytes(packet.dst),
+    0,
+    IP_PROTOCOL.udp,
+    ...u16(length),
+  ];
+  // A sum of zero goes on the wire as all ones, since zero means no checksum.
+  const checksum = internetChecksum([...pseudo, ...header, 0, 0, ...dataBytes]) || 0xffff;
+  return [
+    {
+      id: 'udp.srcPort',
+      label: 'Source port',
+      value: portName(datagram.srcPort),
+      explain: 'The port the sender listens on, so the answer can come back to the same program.',
+      bytes: u16(datagram.srcPort),
+    },
+    {
+      id: 'udp.dstPort',
+      label: 'Destination port',
+      value: portName(datagram.dstPort),
+      explain:
+        'Names the program the datagram is for. DHCP servers listen on 67 and clients on 68.',
+      bytes: u16(datagram.dstPort),
+    },
+    {
+      id: 'udp.length',
+      label: 'Length',
+      value: `${length} bytes`,
+      explain: 'The datagram’s size, its 8-byte header and the data together.',
+      bytes: u16(length),
+    },
+    {
+      id: 'udp.checksum',
+      label: 'Checksum',
+      value: hex(checksum, 4),
+      explain:
+        'Covers the data and the IP addresses, so a datagram delivered to the wrong host is noticed.',
+      bytes: u16(checksum),
+    },
+    ...data,
+  ];
+}
+
+function udpLayers(wire: Wire, packet: Ipv4Packet, datagram: UdpDatagram): Layer[] {
+  const parts = udpParts(packet, datagram);
+  const fields = parts.map(({ id, label, value, explain, bytes }) =>
+    wire.field(id, label, value, explain, bytes),
+  );
+  const udp: Layer = {
+    id: 'udp',
+    osi: 4,
+    name: 'UDP',
+    summary: `${portName(datagram.srcPort)} → ${portName(datagram.dstPort)}`,
+    fields: fields.slice(0, 4),
+  };
+  return [udp, dhcpLayer(datagram.payload, fields.slice(4))];
+}
+
+// DHCP
+
+const DHCP_NAMES: Record<DhcpMessageType, string> = {
+  discover: 'Discover',
+  offer: 'Offer',
+  request: 'Request',
+  ack: 'Ack',
+  nak: 'Nak',
+  release: 'Release',
+};
+
+const DHCP_EXPLAIN: Record<DhcpMessageType, string> = {
+  discover: 'A client with no address asks every DHCP server on the network for one.',
+  offer: 'A server offers the client an address, with the mask, gateway and DNS that go with it.',
+  request: 'The client asks for the address it was offered, or to keep the one it has.',
+  ack: 'The server confirms: the address is the client’s until the lease runs out.',
+  nak: 'The server refuses the request. The client starts over with a Discover.',
+  release: 'The client gives its address back before the lease runs out.',
+};
+
+const FROM_CLIENT: Record<DhcpMessageType, boolean> = {
+  discover: true,
+  offer: false,
+  request: true,
+  ack: false,
+  nak: false,
+  release: true,
+};
+
+const UNITS = [
+  [86400, 'day'],
+  [3600, 'hour'],
+  [60, 'minute'],
+  [1, 'second'],
+] as const;
+
+/** `86400` as `86400 s (1 day)`, `5400` as `5400 s (1 hour 30 minutes)`. */
+export function formatLeaseTime(lease: LeaseTime): string {
+  if (lease === 'infinite') return 'Infinite';
+  const words: string[] = [];
+  let rest = lease;
+  for (const [size, unit] of UNITS) {
+    const count = Math.floor(rest / size);
+    rest -= count * size;
+    if (count > 0) words.push(`${count} ${unit}${count === 1 ? '' : 's'}`);
+  }
+  return words.length > 0 ? `${lease} s (${words.join(' ')})` : '0 s';
+}
+
+/** A DHCP option: its code, its length, then its value. */
+const option = (code: number, value: readonly number[]) => [code, value.length, ...value];
+
+const addressList = (addresses: readonly Ipv4Address[]) => addresses.flatMap(ipBytes);
+
+const describeAddress = (address: Ipv4Address, none: string) =>
+  address === UNSPECIFIED_ADDRESS ? `${address} (${none})` : address;
+
+/** The options a message carries, in the order a Cisco server or a Windows client sends them. */
+function dhcpOptions(message: DhcpMessage): Part[] {
+  const parts: Part[] = [
+    {
+      id: 'dhcp.option.53',
+      label: 'Message type',
+      value: `${DHCP_MESSAGE_TYPE[message.type]} (${DHCP_NAMES[message.type]})`,
+      explain: `Option 53. ${DHCP_EXPLAIN[message.type]}`,
+      bytes: option(53, [DHCP_MESSAGE_TYPE[message.type]]),
+    },
+  ];
+  const requested = (address: Ipv4Address) =>
+    parts.push({
+      id: 'dhcp.option.50',
+      label: 'Requested address',
+      value: address,
+      explain: 'Option 50. The address the client asks for.',
+      bytes: option(50, ipBytes(address)),
+    });
+  const server = (address: Ipv4Address) =>
+    parts.push({
+      id: 'dhcp.option.54',
+      label: 'Server identifier',
+      value: address,
+      explain:
+        'Option 54. The server this is about, so every other server that made an offer knows it lost.',
+      bytes: option(54, ipBytes(address)),
+    });
+  switch (message.type) {
+    case 'discover':
+      if (message.requestedIp) requested(message.requestedIp);
+      break;
+    case 'request':
+      if (message.requestedIp) requested(message.requestedIp);
+      if (message.serverId) server(message.serverId);
+      break;
+    case 'nak':
+    case 'release':
+      server(message.serverId);
+      break;
+    case 'offer':
+    case 'ack': {
+      server(message.serverId);
+      const seconds = message.leaseTime === 'infinite' ? 0xffffffff : message.leaseTime;
+      parts.push(
+        {
+          id: 'dhcp.option.51',
+          label: 'Lease time',
+          value: formatLeaseTime(message.leaseTime),
+          explain:
+            'Option 51. How long the client may keep the address. It renews halfway through.',
+          bytes: option(51, u32(seconds)),
+        },
+        {
+          id: 'dhcp.option.1',
+          label: 'Subnet mask',
+          value: formatSubnetMask(message.subnetMask),
+          explain: 'Option 1. The mask of the client’s network.',
+          bytes: option(1, u32(prefixMask(message.subnetMask))),
+        },
+      );
+      if (message.routers.length > 0) {
+        parts.push({
+          id: 'dhcp.option.3',
+          label: 'Router',
+          value: message.routers.join(', '),
+          explain: 'Option 3. The default gateway the client sends other networks’ traffic to.',
+          bytes: option(3, addressList(message.routers)),
+        });
+      }
+      if (message.dnsServers.length > 0) {
+        parts.push({
+          id: 'dhcp.option.6',
+          label: 'DNS servers',
+          value: message.dnsServers.join(', '),
+          explain: 'Option 6. Where the client asks to turn names into addresses.',
+          bytes: option(6, addressList(message.dnsServers)),
+        });
+      }
+      break;
+    }
+  }
+  parts.push({
+    id: 'dhcp.option.255',
+    label: 'End',
+    value: '255',
+    explain: 'Marks the end of the options.',
+    bytes: [255],
+  });
+  return parts;
+}
+
+/** A DHCP message as BOOTP lays it out: fixed fields, the magic cookie, then options. */
+function dhcpParts(message: DhcpMessage): Part[] {
+  const fromClient = FROM_CLIENT[message.type];
+  return [
+    {
+      id: 'dhcp.op',
+      label: 'Operation',
+      value: fromClient ? '1 (request)' : '2 (reply)',
+      explain: 'BOOTP’s own field: clients send requests and servers send replies.',
+      bytes: [fromClient ? 1 : 2],
+    },
+    {
+      id: 'dhcp.hardware',
+      label: 'Hardware type, length',
+      value: '1 (Ethernet), 6 bytes',
+      explain: 'The kind of address in the client hardware address field: an Ethernet MAC.',
+      bytes: [1, 6],
+    },
+    {
+      id: 'dhcp.hops',
+      label: 'Hops',
+      value: String(message.hops),
+      explain: 'How many relay agents passed the message on. A client sends 0.',
+      bytes: [message.hops],
+    },
+    {
+      id: 'dhcp.xid',
+      label: 'Transaction ID',
+      value: hex(message.xid, 8),
+      explain: 'A random number the client picks, so it can tell which replies answer its request.',
+      bytes: u32(message.xid),
+    },
+    {
+      id: 'dhcp.secs',
+      label: 'Seconds',
+      value: '0',
+      explain: 'How long the client has been trying. Servers may answer a patient client first.',
+      bytes: u16(0),
+    },
+    {
+      id: 'dhcp.flags',
+      label: 'Flags',
+      value: message.broadcast ? 'Broadcast' : 'Unicast',
+      explain: message.broadcast
+        ? 'The client cannot take unicast before it has an address, so it asks for broadcast replies.'
+        : 'Replies may come straight to the client’s address.',
+      bytes: u16(message.broadcast ? 0x8000 : 0),
+    },
+    {
+      id: 'dhcp.ciaddr',
+      label: 'Client address',
+      value: describeAddress(message.ciaddr, 'none yet'),
+      explain: 'The client’s current address, filled in only when it renews or releases one.',
+      bytes: ipBytes(message.ciaddr),
+    },
+    {
+      id: 'dhcp.yiaddr',
+      label: 'Your address',
+      value: describeAddress(message.yiaddr, 'none'),
+      explain: 'The address the server offers or grants the client.',
+      bytes: ipBytes(message.yiaddr),
+    },
+    {
+      id: 'dhcp.siaddr',
+      label: 'Next server',
+      value: UNSPECIFIED_ADDRESS,
+      explain: 'A server for booting over the network. Unused here.',
+      bytes: ipBytes(UNSPECIFIED_ADDRESS),
+    },
+    {
+      id: 'dhcp.giaddr',
+      label: 'Relay agent',
+      value: describeAddress(message.giaddr, 'not relayed'),
+      explain:
+        'The router that relayed the message from another network. The server picks the pool for that network.',
+      bytes: ipBytes(message.giaddr),
+    },
+    {
+      id: 'dhcp.chaddr',
+      label: 'Client MAC',
+      value: message.chaddr,
+      explain: 'The client’s hardware address. The server keys its leases by it.',
+      bytes: [...macBytes(message.chaddr), ...new Array<number>(10).fill(0)],
+    },
+    {
+      id: 'dhcp.legacy',
+      label: 'Server name, boot file',
+      value: 'Empty',
+      explain: 'Two BOOTP fields, 192 bytes in all, for booting over the network. Unused here.',
+      bytes: new Array<number>(192).fill(0),
+    },
+    {
+      id: 'dhcp.cookie',
+      label: 'Magic cookie',
+      value: '63 82 53 63',
+      explain: 'Says DHCP options follow, rather than old BOOTP vendor data.',
+      bytes: [0x63, 0x82, 0x53, 0x63],
+    },
+    ...dhcpOptions(message),
+  ];
+}
+
+function dhcpSummary(message: DhcpMessage): string {
+  const name = DHCP_NAMES[message.type];
+  switch (message.type) {
+    case 'discover':
+      return `${name} from ${message.chaddr}`;
+    case 'offer':
+    case 'ack':
+      return `${name} ${message.yiaddr} to ${message.chaddr}`;
+    case 'request':
+      return `${name} for ${message.requestedIp ?? message.ciaddr}`;
+    case 'nak':
+      return `${name} to ${message.chaddr}`;
+    case 'release':
+      return `${name} of ${message.ciaddr}`;
+  }
+}
+
+function dhcpLayer(message: DhcpMessage, fields: readonly Field[]): Layer {
+  return { id: 'dhcp', osi: 7, name: 'DHCP', summary: dhcpSummary(message), fields };
 }
 
 // IPv4
 
+const IP_PROTOCOL_NAMES: Record<Ipv4Payload['kind'], string> = { icmp: 'ICMP', udp: 'UDP' };
+
+function describeIpAddress(address: Ipv4Address, role: 'src' | 'dst') {
+  if (role === 'src') {
+    return address === UNSPECIFIED_ADDRESS
+      ? 'All zeros: the sender has no address yet, as a DHCP client asking for one.'
+      : 'The device that created the packet. It stays the same all the way.';
+  }
+  return address === LIMITED_BROADCAST
+    ? 'All ones: every host on this network. Routers never pass it on to another network.'
+    : 'Where the packet is going. Every router looks it up in its routing table.';
+}
+
 function ipv4Layers(wire: Wire, packet: Ipv4Packet): Layer[] {
-  const payload = icmpBytes(packet.payload);
+  const payload = payloadBytes(packet);
   const header = ipv4Header(packet, payload.length);
   const fields: Field[] = [
     wire.field(
@@ -330,7 +714,7 @@ function ipv4Layers(wire: Wire, packet: Ipv4Packet): Layer[] {
     wire.field(
       'ipv4.protocol',
       'Protocol',
-      `${IP_PROTOCOL[packet.payload.kind]} (ICMP)`,
+      `${IP_PROTOCOL[packet.payload.kind]} (${IP_PROTOCOL_NAMES[packet.payload.kind]})`,
       'Names what the packet carries, so the receiver hands it to the right protocol.',
       header.slice(9, 10),
     ),
@@ -345,14 +729,14 @@ function ipv4Layers(wire: Wire, packet: Ipv4Packet): Layer[] {
       'ipv4.src',
       'Source',
       packet.src,
-      'The device that created the packet. It stays the same all the way.',
+      describeIpAddress(packet.src, 'src'),
       header.slice(12, 16),
     ),
     wire.field(
       'ipv4.dst',
       'Destination',
       packet.dst,
-      'Where the packet is going. Every router looks it up in its routing table.',
+      describeIpAddress(packet.dst, 'dst'),
       header.slice(16, 20),
     ),
   ];
@@ -364,7 +748,9 @@ function ipv4Layers(wire: Wire, packet: Ipv4Packet): Layer[] {
       summary: `${packet.src} → ${packet.dst}, TTL ${packet.ttl}`,
       fields,
     },
-    ...icmpLayers(wire, packet.payload),
+    ...(packet.payload.kind === 'icmp'
+      ? icmpLayers(wire, packet.payload)
+      : udpLayers(wire, packet, packet.payload)),
   ];
 }
 

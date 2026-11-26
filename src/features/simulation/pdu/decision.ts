@@ -152,7 +152,8 @@ function decideIp(device: Device, packet: Ipv4Packet, sent: readonly SentFrame[]
     }
   }
   for (const { port, frame } of sent) {
-    const message = ipv4Of(frame)?.payload;
+    const payload = ipv4Of(frame)?.payload;
+    const message = payload?.kind === 'icmp' ? payload : undefined;
     if (message?.type === 'echo-reply') return { kind: 'replied', reply: 'echo', out: port };
     if (message?.type === 'time-exceeded') {
       return { kind: 'dropped', reason: { kind: 'ttl-expired' }, notified: port };
@@ -165,7 +166,7 @@ function decideIp(device: Device, packet: Ipv4Packet, sent: readonly SentFrame[]
       return { kind: 'resolving', nextHop: arp.targetIp, out: port, forThisDevice: mine };
     }
   }
-  if (mine) {
+  if (mine && packet.payload.kind === 'icmp') {
     const message = packet.payload;
     switch (message.type) {
       case 'echo-reply':

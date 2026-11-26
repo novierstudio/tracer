@@ -1,14 +1,15 @@
 import type { FrameEvent } from '@/engine/events';
 import type { Frame } from '@/engine/frame';
-import type { ArpPacket, Bpdu, IcmpMessage, Ipv4Packet } from '@/engine/pdu';
+import type { ArpPacket, Bpdu, DhcpMessage, IcmpMessage, Ipv4Packet } from '@/engine/pdu';
 
 /** The protocol a frame shows as: the innermost one the engine models. */
-export type ProtocolId = 'arp' | 'icmp' | 'stp' | 'hello';
+export type ProtocolId = 'arp' | 'icmp' | 'dhcp' | 'stp' | 'hello';
 
 /** Each protocol's short label and colour token. The label means colour is never the only cue. */
 export const PROTOCOLS: Record<ProtocolId, { label: string; token: `--proto-${string}` }> = {
   arp: { label: 'ARP', token: '--proto-arp' },
   icmp: { label: 'ICMP', token: '--proto-icmp' },
+  dhcp: { label: 'DHCP', token: '--proto-dhcp' },
   stp: { label: 'STP', token: '--proto-stp' },
   hello: { label: 'Hello', token: '--proto-stp' },
 };
@@ -19,6 +20,9 @@ function ipProtocol(packet: Ipv4Packet): ProtocolId {
   switch (packet.payload.kind) {
     case 'icmp':
       return 'icmp';
+    case 'udp':
+      // DHCP is the one protocol over UDP so far.
+      return packet.payload.payload.kind;
   }
 }
 
@@ -80,8 +84,27 @@ function describeBpdu(bpdu: Bpdu): string {
   return flags.length > 0 ? `${text} · ${flags.join(', ')}` : text;
 }
 
+function describeDhcp(message: DhcpMessage): string {
+  const relayed = message.giaddr === '0.0.0.0' ? '' : ` via relay ${message.giaddr}`;
+  switch (message.type) {
+    case 'discover':
+      return `DHCP Discover from ${message.chaddr}${relayed}`;
+    case 'offer':
+      return `DHCP Offer ${message.yiaddr} to ${message.chaddr}${relayed}`;
+    case 'request':
+      return `DHCP Request for ${message.requestedIp ?? message.ciaddr} from ${message.chaddr}${relayed}`;
+    case 'ack':
+      return `DHCP Ack ${message.yiaddr} to ${message.chaddr}${relayed}`;
+    case 'nak':
+      return `DHCP Nak to ${message.chaddr}${relayed}`;
+    case 'release':
+      return `DHCP Release of ${message.ciaddr} from ${message.chaddr}`;
+  }
+}
+
 function describePacket(packet: Ipv4Packet): string {
-  return describeIcmp(packet, packet.payload);
+  const { payload } = packet;
+  return payload.kind === 'icmp' ? describeIcmp(packet, payload) : describeDhcp(payload.payload);
 }
 
 /** The Info column: what the frame says, in a line a student can read. */

@@ -33,6 +33,8 @@ export function stopProbe(ctx: IpContext, id: number) {
 
 function deliver(ctx: IpContext, packet: Ipv4Packet) {
   const message = packet.payload;
+  // UDP has nothing listening yet.
+  if (message.kind !== 'icmp') return;
   if (message.type === 'echo-request') {
     const reply = { kind: 'icmp', type: 'echo-reply', id: message.id, seq: message.seq } as const;
     originate(ctx, packet.src, reply, { src: packet.dst });
