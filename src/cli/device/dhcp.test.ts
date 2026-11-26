@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
+import type { DhcpBindingEntry } from '../../engine/api';
 import type { RouterConfig } from '../../model';
 import { applyLines, withBlankConfig } from './session';
 import { runningConfig } from './show';
-import { consoleOn, router } from './testing';
+import { consoleOn, router, switchDevice } from './testing';
 
 const ENTER = ['enable', 'configure terminal'];
 
@@ -217,5 +218,95 @@ describe('running-config', () => {
   ])('writes %s back as it was typed', (typed, printed) => {
     const lines = runningConfig(configure(['ip dhcp pool LAN', typed]).c.device);
     expect(lines).toContain(printed);
+  });
+});
+
+/** Runs a show command and renders its query with `bindings`, as a terminal does with the answer. */
+function showWith(c: ReturnType<typeof consoleOn>, line: string, bindings: DhcpBindingEntry[]) {
+  const { output, query } = c.session.run(c.device, line);
+  if (query?.kind !== 'dhcpBindings') throw new Error(`${line} asked for ${query?.kind}`);
+  return { live: query.render(bindings), output };
+}
+
+const binding = (address: string, mac: string, expiresAt?: number) =>
+  ({
+    address,
+    mac,
+    pool: 'LAN',
+    ...(expiresAt !== undefined && { expiresAt }),
+  }) as DhcpBindingEntry;
+
+describe('show ip dhcp binding', () => {
+  it('lists each lease with its MAC and when it runs out on the router’s clock', () => {
+    const { c } = configure(['end']);
+    const day = 24 * 60 * 60_000;
+    const { live, output } = showWith(c, 'show ip dhcp binding', [
+      binding('192.168.1.11', '00:50:79:66:68:00', day + 5 * 60_000),
+      binding('192.168.1.12', '00:50:79:66:68:01', 13 * 60 * 60_000),
+      binding('192.168.1.13', '00:50:79:66:68:02'),
+    ]);
+    expect(live).toEqual([
+      'Bindings from all pools not associated with VRF:',
+      'IP address          Client-ID/              Lease expiration        Type',
+      '                    Hardware address/',
+      '                    User name',
+      '192.168.1.11        0050.7966.6800          Mar 02 1993 12:05 AM    Automatic',
+      '192.168.1.12        0050.7966.6801          Mar 01 1993 01:00 PM    Automatic',
+      '192.168.1.13        0050.7966.6802          Infinite                Automatic',
+    ]);
+    expect(output).toHaveLength(4);
+  });
+});
+
+describe('show ip dhcp pool', () => {
+  const pools = () =>
+    configure([
+      'ip dhcp pool LAN',
+      'network 192.168.1.0 255.255.255.0',
+      'ip dhcp pool EMPTY',
+      'end',
+    ]).c;
+
+  it('counts each pool’s addresses and leases', () => {
+    const { live } = showWith(pools(), 'show ip dhcp pool', [
+      binding('192.168.1.11', '00:50:79:66:68:00'),
+      binding('192.168.1.12', '00:50:79:66:68:01'),
+    ]);
+    expect(live).toEqual([
+      'Pool LAN :',
+      ' Utilization mark (high/low)    : 100 / 0',
+      ' Subnet size (first/next)       : 0 / 0',
+      ' Total addresses                : 254',
+      ' Leased addresses               : 2',
+      ' Pending event                  : none',
+      ' 1 subnet is currently in the pool :',
+      ' Current index        IP address range                    Leased addresses',
+      ' 192.168.1.13         192.168.1.1      - 192.168.1.254     2',
+      '',
+      'Pool EMPTY :',
+      ' Utilization mark (high/low)    : 100 / 0',
+      ' Subnet size (first/next)       : 0 / 0',
+      ' Total addresses                : 0',
+      ' Leased addresses               : 0',
+      ' Pending event                  : none',
+      ' 0 subnet is currently in the pool :',
+    ]);
+  });
+
+  it('shows one pool by name, and refuses one it does not have', () => {
+    const c = pools();
+    const { live } = showWith(c, 'show ip dhcp pool EMPTY', []);
+    expect(live[0]).toBe('Pool EMPTY :');
+    expect(live).toHaveLength(7);
+    expect(c.run('show ip dhcp pool NOPE')).toEqual(['%Pool NOPE is not found']);
+  });
+});
+
+describe('on a switch', () => {
+  it('has no DHCP server commands', () => {
+    const c = consoleOn(switchDevice());
+    expect(c.runAll([...ENTER, 'ip dhcp pool LAN'])).toContain(
+      "% Invalid input detected at '^' marker.",
+    );
   });
 });

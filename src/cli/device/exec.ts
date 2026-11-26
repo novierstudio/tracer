@@ -12,7 +12,7 @@ const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 /** A router whose clock was never set counts from boot on March 1, 1993, as IOS does. */
-const BOOT = Date.UTC(1993, 2, 1);
+export const BOOT = Date.UTC(1993, 2, 1);
 
 const pad = (n: number, width = 2) => String(n).padStart(width, '0');
 
