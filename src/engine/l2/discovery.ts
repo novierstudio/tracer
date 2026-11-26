@@ -313,14 +313,26 @@ export const discoveryModule: SimModule<DiscoveryState> = {
 const remaining = (ctx: DeviceContext, expires: SimTime) =>
   Math.max(0, Math.ceil((expires - ctx.now) / 1000));
 
-/** The neighbours whose advertisements have not run out, in the order they were first heard. */
-const live = <P>(ctx: DeviceContext, neighbors: Map<string, Heard<P>>) =>
-  [...neighbors.values()].filter((heard) => heard.expires > ctx.now);
+/** The neighbours whose advertisements have not run out, by local port in hardware order. */
+function live<P>(
+  ctx: DeviceContext,
+  neighbors: Map<string, Heard<P>>,
+  sender: (packet: P) => string,
+) {
+  const order = ctx.device.ports.map((port) => port.id);
+  return [...neighbors.values()]
+    .filter((heard) => heard.expires > ctx.now)
+    .sort(
+      (a, b) =>
+        order.indexOf(a.port) - order.indexOf(b.port) ||
+        sender(a.packet).localeCompare(sender(b.packet)),
+    );
+}
 
 export function discoveryStatus(ctx: Ctx): DiscoveryStatus {
   const device = iosDevice(ctx.device);
   const config = device?.config;
-  const cdpNeighbors = live(ctx, ctx.state.cdp.neighbors).map(
+  const cdpNeighbors = live(ctx, ctx.state.cdp.neighbors, CDP.sender).map(
     ({ port, packet, expires }): CdpNeighbor => ({
       deviceId: packet.deviceId,
       localPort: port,
@@ -335,7 +347,7 @@ export function discoveryStatus(ctx: Ctx): DiscoveryStatus {
       duplex: packet.duplex,
     }),
   );
-  const lldpNeighbors = live(ctx, ctx.state.lldp.neighbors).map(
+  const lldpNeighbors = live(ctx, ctx.state.lldp.neighbors, LLDP.sender).map(
     ({ port, packet, expires }): LldpNeighbor => ({
       chassisId: packet.chassisId,
       localPort: port,
