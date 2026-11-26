@@ -14,7 +14,9 @@ export type Mode =
   | { readonly kind: 'subinterface-config'; readonly interface: SubinterfaceId }
   | { readonly kind: 'line-config'; readonly line: LineRef }
   | { readonly kind: 'vlan-config'; readonly vlan: VlanId }
-  | { readonly kind: 'router-config'; readonly protocol: string };
+  | { readonly kind: 'router-config'; readonly protocol: string }
+  /** `ip dhcp pool NAME`. */
+  | { readonly kind: 'dhcp-config'; readonly pool: string };
 
 export type ModeKind = Mode['kind'];
 export type ModeOf<K extends ModeKind> = Extract<Mode, { kind: K }>;
@@ -44,6 +46,7 @@ const MODES: { readonly [K in ModeKind]: ModeSpec<K> } = {
   'line-config': { suffix: () => '(config-line)#', exit: GLOBAL_CONFIG, config: true },
   'vlan-config': { suffix: () => '(config-vlan)#', exit: GLOBAL_CONFIG, config: true },
   'router-config': { suffix: () => '(config-router)#', exit: GLOBAL_CONFIG, config: true },
+  'dhcp-config': { suffix: () => '(dhcp-config)#', exit: GLOBAL_CONFIG, config: true },
 };
 
 export function prompt(hostname: string, mode: Mode): string {

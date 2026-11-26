@@ -1,6 +1,8 @@
 import {
   carriesVlan,
   formatSubnetMask,
+  type DhcpPool,
+  type DhcpServerConfig,
   formatVlans,
   INTERFACE_TYPES,
   normalizeVlans,
@@ -119,11 +121,12 @@ function interfaceBlock(entry: InterfaceEntry): string[] {
       const { vlan, native } = entry.config.encapsulation;
       lines.push(` encapsulation dot1Q ${vlan}${native ? ' native' : ''}`);
     }
-    const { ipv4 } = entry.config;
+    const { ipv4, helperAddresses = [] } = entry.config;
     lines.push(
       ipv4
         ? ` ip address ${ipv4.address} ${formatSubnetMask(ipv4.prefixLength)}`
         : ' no ip address',
+      ...helperAddresses.map((address) => ` ip helper-address ${address}`),
     );
   }
   if (entry.kind !== 'subinterface') {
@@ -164,6 +167,36 @@ function routeLine({ prefix, nextHop, distance }: StaticRoute): string {
   const via = nextHop.kind === 'address' ? nextHop.address : nextHop.interface;
   const suffix = distance === undefined ? '' : ` ${distance}`;
   return `ip route ${prefix.address} ${formatSubnetMask(prefix.prefixLength)} ${via}${suffix}`;
+}
+
+/** `lease` as IOS writes it: days, then hours and minutes only as far as they are needed. */
+function leaseLine(lease: NonNullable<DhcpPool['lease']>): string {
+  if (lease === 'infinite') return ' lease infinite';
+  const parts = [Math.floor(lease / 1440), Math.floor((lease % 1440) / 60), lease % 60];
+  while (parts.length > 1 && parts.at(-1) === 0) parts.pop();
+  return ` lease ${parts.join(' ')}`;
+}
+
+/** The excluded ranges, then each pool as a block, every group closed by `!`. */
+function dhcpLines({ excluded, pools }: DhcpServerConfig): string[] {
+  const out = excluded.map(({ first, last }) =>
+    first === last
+      ? `ip dhcp excluded-address ${first}`
+      : `ip dhcp excluded-address ${first} ${last}`,
+  );
+  if (out.length > 0) out.push('!');
+  for (const [name, pool] of Object.entries(pools)) {
+    out.push(`ip dhcp pool ${name}`);
+    if (pool.network) {
+      const { address, prefixLength } = pool.network;
+      out.push(` network ${address} ${formatSubnetMask(prefixLength)}`);
+    }
+    if (pool.defaultRouters) out.push(` default-router ${pool.defaultRouters.join(' ')}`);
+    if (pool.dnsServers) out.push(` dns-server ${pool.dnsServers.join(' ')}`);
+    if (pool.lease !== undefined) out.push(leaseLine(pool.lease));
+    out.push('!');
+  }
+  return out;
 }
 
 function lineBody(device: IosDevice, line: LineConfig): string[] {
@@ -234,6 +267,7 @@ export function runningConfig(device: IosDevice): string[] {
   if (config.enableSecret) out.push(`enable secret 5 ${config.enableSecret}`);
   if (config.enablePassword)
     out.push(`enable password ${passwordText(device, config.enablePassword)}`);
+  if (device.kind === 'router' && device.config.dhcp) out.push(...dhcpLines(device.config.dhcp));
   if (!config.domainLookup) out.push('no ip domain-lookup');
   out.push('!');
   if (device.kind === 'switch') out.push(...spanningTreeLines(device.config), '!');
