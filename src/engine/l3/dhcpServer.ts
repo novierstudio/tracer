@@ -17,7 +17,7 @@ import {
   type Ipv4Packet,
 } from '../pdu';
 import { interfacesOf, type IpContext } from './context';
-import { isLan, ownsAddress, type IpInterface } from './interfaces';
+import { isLan, ownsAddress, routesPackets, type IpInterface } from './interfaces';
 import { compareAddresses, inPrefix, ipv4ToUint32, uint32ToIpv4 } from './ipv4';
 import { broadcastOn, originate } from './output';
 import { udp } from './udp';
@@ -277,13 +277,26 @@ function serve(ctx: IpContext, message: DhcpMessage, arrival: IpInterface | unde
   }
 }
 
-/** Where an interface relays DHCP broadcasts to, from its `ip helper-address` lines. */
+/**
+ * Where an interface relays DHCP broadcasts to, from its `ip helper-address` lines: a router's
+ * port or subinterface, or a routing switch's routed port or VLAN interface.
+ */
 function helpersOf(ctx: IpContext, name: InterfaceId): readonly Ipv4Address[] {
   const { device } = ctx;
-  if (device.kind !== 'router') return [];
-  const { interfaces, subinterfaces } = device.config;
-  const config = name in interfaces ? interfaces[name as never] : subinterfaces[name as never];
-  return config?.helperAddresses ?? [];
+  if (!routesPackets(device)) return [];
+  const key = name as never;
+  switch (device.kind) {
+    case 'router': {
+      const { interfaces, subinterfaces } = device.config;
+      return (name in interfaces ? interfaces[key] : subinterfaces[key])?.helperAddresses ?? [];
+    }
+    case 'switch': {
+      const { interfaces, virtualInterfaces } = device.config;
+      return (name in interfaces ? interfaces[key] : virtualInterfaces[key])?.helperAddresses ?? [];
+    }
+    default:
+      return [];
+  }
 }
 
 /**
@@ -339,7 +352,7 @@ export function onDhcpServerPort(
   message: DhcpMessage,
   arrival: IpInterface | undefined,
 ) {
-  if (ctx.device.kind !== 'router') return;
+  if (!routesPackets(ctx.device)) return;
   if (!FROM_CLIENT[message.type]) {
     relayBack(ctx, message);
     return;

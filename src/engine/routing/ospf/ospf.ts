@@ -141,7 +141,7 @@ type Plan = Pick<Iface, 'ip' | 'area' | 'type' | 'cost' | 'priority' | 'passive'
  * in that statement's area. Ethernet is broadcast, serial point-to-point.
  */
 function plan(ctx: DeviceContext, device: Router, config: OspfConfig): Plan[] {
-  return ipInterfaces(device, (port) => ctx.portUp(port), undefined).flatMap((ip): Plan[] => {
+  return ipInterfaces(device, ctx, undefined).flatMap((ip): Plan[] => {
     const network = config.networks.find((candidate) =>
       matchesWildcard(ip.cidr.address, candidate.address, candidate.wildcard),
     );
@@ -171,7 +171,7 @@ function plan(ctx: DeviceContext, device: Router, config: OspfConfig): Plan[] {
 /** `router-id`, else the highest loopback address, else the highest interface address. */
 function pickRouterId(ctx: DeviceContext, config: OspfConfig): Ipv4Address | undefined {
   if (config.routerId) return config.routerId;
-  const interfaces = ipInterfaces(ctx.device, (port) => ctx.portUp(port), undefined);
+  const interfaces = ipInterfaces(ctx.device, ctx, undefined);
   const highest = (list: readonly IpInterface[]) =>
     list
       .map((iface) => iface.cidr.address)
@@ -1132,9 +1132,7 @@ export function ospfStatus(ctx: OspfContext): OspfStatus | undefined {
       interfaces: [],
       sources: [],
     };
-  const order = ipInterfaces(ctx.device, (port) => ctx.portUp(port), undefined).map(
-    (ip) => ip.name,
-  );
+  const order = ipInterfaces(ctx.device, ctx, undefined).map((ip) => ip.name);
   const interfaces = [...process.interfaces.values()].sort(
     (a, b) => order.indexOf(a.name) - order.indexOf(b.name),
   );
@@ -1167,7 +1165,7 @@ export const ospfModule: SimModule<OspfState> = {
     const { process } = ctx.state;
     if (!process || packetIn(frame)?.payload.kind !== 'ospf') return;
     const interfaces = [...process.interfaces.values()].map((iface) => iface.ip);
-    const arrived = arrival(ctx.device, interfaces, port, frame, [ALL_SPF_ROUTERS, ALL_D_ROUTERS]);
+    const arrived = arrival(ctx, interfaces, port, frame, [ALL_SPF_ROUTERS, ALL_D_ROUTERS]);
     const iface = arrived && process.interfaces.get(arrived.iface.name);
     if (!arrived || !iface || arrived.packet.payload.kind !== 'ospf') return;
     const { src, dst, payload } = arrived.packet;

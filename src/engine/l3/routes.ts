@@ -7,7 +7,7 @@ import type {
   StaticRoute,
 } from '@/model';
 import { gatewayOf, type HostAddressing } from './hostAddress';
-import type { IpInterface } from './interfaces';
+import { routesPackets, type IpInterface } from './interfaces';
 import { compareAddresses, inPrefix, networkOf } from './ipv4';
 
 /**
@@ -77,7 +77,7 @@ const SOURCE_ORDER: Record<Route['source'], number> = {
 /**
  * A host's default gateway, from its config or its DHCP lease, is a static default route, as
  * `route print` shows it. So is a switch's `ip default-gateway`, which its management interface
- * uses.
+ * uses until `ip routing` turns on its static routes instead.
  */
 function configuredRoutes(
   device: Device,
@@ -94,6 +94,7 @@ function configuredRoutes(
         : [];
     }
     case 'switch': {
+      if (device.config.ipRouting) return device.config.staticRoutes ?? [];
       const gateway = device.config.defaultGateway;
       return gateway
         ? [{ prefix: DEFAULT_ROUTE, nextHop: { kind: 'address', address: gateway } }]
@@ -211,7 +212,7 @@ function compareRoutes(a: Route, b: Route): number {
 /**
  * The routing table: from every candidate route, the best to each network. The candidates are a
  * connected route for each working interface and a local route for each of a router's own
- * addresses, each static route, and the routes the device's routing protocols learned. A route
+ * addresses, as for a switch with `ip routing`, each static route, and the routes the device's routing protocols learned. A route
  * out of an interface that is down is no candidate, and a static route is installed only while
  * its next hop resolves through the table. Sorted by network, as `show ip route` lists it. A host's
  * gateway is `host`'s, from its config or its DHCP lease.
@@ -225,7 +226,7 @@ export function routingTable(
   let candidates: Route[] = [];
   for (const iface of interfaces) {
     candidates.push({ source: 'connected', prefix: networkOf(iface.cidr), interface: iface.name });
-    if (device.kind === 'router' && iface.cidr.prefixLength < 32) {
+    if (routesPackets(device) && iface.cidr.prefixLength < 32) {
       const prefix = { address: iface.cidr.address, prefixLength: HOST_PREFIX };
       candidates.push({ source: 'local', prefix, interface: iface.name });
     }

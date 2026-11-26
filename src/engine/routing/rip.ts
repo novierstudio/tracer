@@ -123,7 +123,7 @@ const sameMajor = (a: Ipv4Address, b: Ipv4Address) => {
  * A loopback's network is advertised, but nothing is sent out of it.
  */
 function ripInterfaces(ctx: DeviceContext, config: RipConfig): IpInterface[] {
-  return ipInterfaces(ctx.device, (port) => ctx.portUp(port), undefined).filter((iface) => {
+  return ipInterfaces(ctx.device, ctx, undefined).filter((iface) => {
     const major = classfulNetwork(iface.cidr.address);
     return major !== undefined && config.networks.includes(major.address);
   });
@@ -489,10 +489,10 @@ export const ripModule: SimModule<RipState> = {
     const config = ripConfig(ctx.device);
     const datagram = packetIn(frame)?.payload;
     if (!config || datagram?.kind !== 'udp' || datagram.dstPort !== UDP_PORT.rip) return;
-    const interfaces = ipInterfaces(ctx.device, (candidate) => ctx.portUp(candidate), undefined);
+    const interfaces = ipInterfaces(ctx.device, ctx, undefined);
     // RIPv1 only broadcasts, so a router pinned to it never joins RIPv2's group.
     const groups = config.version === 1 ? [] : [RIP_GROUP];
-    const arrived = arrival(ctx.device, interfaces, port, frame, groups);
+    const arrived = arrival(ctx, interfaces, port, frame, groups);
     if (arrived) onMessage(ctx, config, arrived);
   },
   onTimer(ctx, key) {

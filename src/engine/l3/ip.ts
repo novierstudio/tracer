@@ -18,7 +18,13 @@ import {
   takeDhcpReply,
 } from './dhcpClient';
 import { matchAnswer, type EchoAnswer } from './echo';
-import { lanInterfaceFor, ownsAddress, serialOn, type IpInterface } from './interfaces';
+import {
+  lanInterfaceFor,
+  ownsAddress,
+  routesPackets,
+  serialOn,
+  type IpInterface,
+} from './interfaces';
 import { originate, reportError, transmit } from './output';
 import { finishPing, onPingAnswer, onPingTimer } from './ping';
 import { nextHop } from './routes';
@@ -60,8 +66,8 @@ function deliver(ctx: IpContext, packet: Ipv4Packet, arrival?: IpInterface) {
 
 /**
  * A packet arrived on a working interface. One for this device, or for every host on the
- * network, is delivered. A router forwards the rest with the TTL decremented, or tells the sender
- * why it cannot. A host drops them.
+ * network, is delivered. A router, or a switch with `ip routing`, forwards the rest with the TTL
+ * decremented, or tells the sender why it cannot. A host or a layer 2 switch drops them.
  */
 function receive(ctx: IpContext, packet: Ipv4Packet, arrival: IpInterface) {
   const { interfaces, routes } = routesOf(ctx);
@@ -69,7 +75,7 @@ function receive(ctx: IpContext, packet: Ipv4Packet, arrival: IpInterface) {
     deliver(ctx, packet, arrival);
     return;
   }
-  if (ctx.device.kind !== 'router') return;
+  if (!routesPackets(ctx.device)) return;
   // A router forwards unicast only. A multicast stays on its own link, where routing protocols,
   // which run in modules of their own, read it.
   if (isMulticast(packet.dst)) return;
@@ -125,7 +131,7 @@ export const ipModule: SimModule<IpState> = {
       case 'ethernet': {
         if (takeDhcpReply(ctx, port, frame)) return;
         // A LAN interface takes frames of its VLAN for its own MAC or broadcast.
-        const iface = lanInterfaceFor(ctx.device, interfacesOf(ctx), port, frame);
+        const iface = lanInterfaceFor(ctx, interfacesOf(ctx), port, frame);
         if (!iface) return;
         if (frame.dst !== iface.medium.mac && frame.dst !== BROADCAST_MAC) return;
         if (frame.payload.kind === 'arp') onArp(ctx, iface, port, frame.payload);

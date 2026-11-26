@@ -184,12 +184,13 @@ export function labBuilder(seed = 1) {
       return add(device);
     },
 
-    switch(name: string, switchports: Record<string, Switchport> = {}): DeviceId {
+    /** `model` 'switch-l3-24' makes a multilayer switch, which takes `ip routing`. */
+    switch(name: string, switchports: Record<string, Switchport> = {}, model = 'switch'): DeviceId {
       const device = createDevice(
         {
           ...base,
           kind: 'switch',
-          model: 'switch',
+          model,
           hostname: Hostname.parse(name),
           ports: SWITCH_PORTS,
         },
