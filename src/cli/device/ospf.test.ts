@@ -197,8 +197,9 @@ describe('router ospf', () => {
     const { c } = configured([]);
 
     expect(c.session.help(c.device, 'router ')).toEqual([
-      '  ospf  Open Shortest Path First (OSPF)',
-      '  rip   Routing Information Protocol (RIP)',
+      '  eigrp  Enhanced Interior Gateway Routing Protocol (EIGRP)',
+      '  ospf   Open Shortest Path First (OSPF)',
+      '  rip    Routing Information Protocol (RIP)',
     ]);
     expect(c.session.help(c.device, 'router ospf ')).toEqual(['  <1-65535>  Process ID']);
   });

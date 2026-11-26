@@ -141,8 +141,9 @@ describe('router rip', () => {
     const { c } = configured([]);
 
     expect(c.session.help(c.device, 'router ')).toEqual([
-      '  ospf  Open Shortest Path First (OSPF)',
-      '  rip   Routing Information Protocol (RIP)',
+      '  eigrp  Enhanced Interior Gateway Routing Protocol (EIGRP)',
+      '  ospf   Open Shortest Path First (OSPF)',
+      '  rip    Routing Information Protocol (RIP)',
     ]);
   });
 });

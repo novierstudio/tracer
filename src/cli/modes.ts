@@ -16,6 +16,7 @@ export type Mode =
   | { readonly kind: 'vlan-config'; readonly vlan: VlanId }
   | { readonly kind: 'rip-config' }
   | { readonly kind: 'ospf-config'; readonly processId: number }
+  | { readonly kind: 'eigrp-config'; readonly asn: number }
   /** `ip dhcp pool NAME`. */
   | { readonly kind: 'dhcp-config'; readonly pool: string }
   /** `ip access-list standard NAME`. */
@@ -53,6 +54,7 @@ const MODES: { readonly [K in ModeKind]: ModeSpec<K> } = {
   'vlan-config': { suffix: () => '(config-vlan)#', exit: GLOBAL_CONFIG, config: true },
   'rip-config': { suffix: () => '(config-router)#', exit: GLOBAL_CONFIG, config: true },
   'ospf-config': { suffix: () => '(config-router)#', exit: GLOBAL_CONFIG, config: true },
+  'eigrp-config': { suffix: () => '(config-router)#', exit: GLOBAL_CONFIG, config: true },
   'dhcp-config': { suffix: () => '(dhcp-config)#', exit: GLOBAL_CONFIG, config: true },
   'std-acl-config': { suffix: () => '(config-std-nacl)#', exit: GLOBAL_CONFIG, config: true },
   'ext-acl-config': { suffix: () => '(config-ext-nacl)#', exit: GLOBAL_CONFIG, config: true },

@@ -1,9 +1,10 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { createIdSource, type DeviceId } from '@/model';
+import { createIdSource, type Device, type DeviceId } from '@/model';
+import { applyLines } from '@/cli/device/session';
 import { importPkt } from '@/importers/pkt/mapper';
 import type { PingEvent } from '../api';
-import { ms } from '../core/time';
+import { ms, simTime } from '../core/time';
 import { createEngine } from '../engine';
 import { createSimService } from '../service';
 import { STACKS } from '../stacks';
@@ -11,14 +12,21 @@ import { ip } from '../testing';
 
 /**
  * Router1 - Router2 - Router3 - Router4 in a chain, each with a loopback, saved by Packet Tracer
- * 7.1 for an EIGRP lab. EIGRP is not simulated, so only neighbours and own addresses answer.
+ * 7.1 for an EIGRP lab with no EIGRP configured yet. `configure` gives each router its lines.
  */
-function eigrpLab() {
+function eigrpLab(configure: (hostname: string) => readonly string[] = () => []) {
   const result = importPkt(readFileSync('src/importers/pkt/__fixtures__/pt7.1-eigrp-lab.pkt'), {
     ids: createIdSource(1),
   });
   if (!result.ok) throw new Error(JSON.stringify(result.error));
-  const { topology } = result.value;
+  const topology = { ...result.value.topology, devices: { ...result.value.topology.devices } };
+  // The lab's exercise, typed at each router's CLI.
+  for (const [id, device] of Object.entries(topology.devices) as [DeviceId, Device][]) {
+    if (device.kind !== 'router') continue;
+    const { config, errors } = applyLines(device, configure(device.config.hostname));
+    if (errors.length > 0) throw new Error(JSON.stringify(errors));
+    topology.devices[id] = { ...device, config };
+  }
   const engine = createEngine({ seed: 1, stacks: STACKS, linkDelay: ms(1) });
   const sim = createSimService({ engine, frames: { now: () => 0, request: () => {} } });
   sim.load(topology);
@@ -39,7 +47,9 @@ function eigrpLab() {
       event.kind === 'summary' ? `${event.received}/${event.sent}` : event.kind,
     );
   };
-  return { ping };
+  /** Lets the simulation run until `seconds` in. */
+  const settle = (seconds: number) => engine.runUntil(simTime(seconds * 1000));
+  return { ping, settle };
 }
 
 const fiveTimes = (kind: string) => Array.from({ length: 5 }, () => kind);
@@ -57,5 +67,18 @@ describe('a lab imported from Packet Tracer', () => {
     const { ping } = eigrpLab();
 
     expect(ping('Router1', '10.1.2.2')).toEqual([...fiveTimes('timeout'), '0/5']);
+  });
+
+  it('converges once each router runs EIGRP, and pings end to end', () => {
+    // Each router's loopback is n.n.n.n, so `network n.0.0.0` takes it in with the 10.1.x links.
+    const { ping, settle } = eigrpLab((hostname) => {
+      const n = hostname.slice('Router'.length);
+      return ['router eigrp 1', 'network 10.0.0.0', `network ${n}.0.0.0`];
+    });
+    settle(3);
+
+    expect(ping('Router1', '10.1.3.2')).toEqual([...fiveTimes('reply'), '5/5']);
+    expect(ping('Router1', '4.4.4.4')).toEqual([...fiveTimes('reply'), '5/5']);
+    expect(ping('Router4', '1.1.1.1')).toEqual([...fiveTimes('reply'), '5/5']);
   });
 });
