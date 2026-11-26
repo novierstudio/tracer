@@ -6,6 +6,7 @@ import {
   configAddressing,
   formatArp,
   formatIpconfig,
+  formatNslookup,
   formatReply,
   pingHeader,
   pingSummary,
@@ -132,6 +133,14 @@ export function hostShell({ host, backend, wallClock = Date.now }: ShellContext)
             return io.print(['The ARP entry deletion failed: Element not found.', '']);
           }
           return io.print(['']);
+        }
+        case 'nslookup': {
+          // Ctrl+C gives the prompt back; the lookup times out in the simulation on its own.
+          const lookup = await Promise.race([
+            backend.nslookup(device.id, command.name, command.server),
+            aborted(io.signal),
+          ]);
+          return io.print(lookup ? formatNslookup(lookup) : ['^C', '']);
         }
         case 'ping': {
           if (!address) return io.print(['PING: transmit failed. General failure.', '']);

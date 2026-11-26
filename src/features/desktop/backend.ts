@@ -1,7 +1,12 @@
 import type {
   ArpTableEntry,
+  BrowseTarget,
   DhcpOutcome,
+  DnsLookup,
+  FetchEvent,
+  FetchFailure,
   HostAddressing,
+  HttpResponse,
   PingOptions,
   PingReply,
   TraceOptions,
@@ -11,8 +16,13 @@ import type { DeviceId, Ipv4Address } from '@/model';
 
 export type {
   ArpTableEntry,
+  BrowseTarget,
   DhcpOutcome,
+  DnsLookup,
+  FetchEvent,
+  FetchFailure,
   HostAddressing,
+  HttpResponse,
   PingOptions,
   PingReply,
   TraceOptions,
@@ -60,4 +70,17 @@ export interface HostBackend {
   renewDhcp(device: DeviceId): Promise<DhcpOutcome>;
   /** `ipconfig /release`: the host gives its lease back. */
   releaseDhcp(device: DeviceId): Promise<void>;
+  /** `nslookup`: asks `server`, or the host's own DNS server, for `name`. Resolves with the outcome. */
+  nslookup(device: DeviceId, name: string, server: Ipv4Address | undefined): Promise<DnsLookup>;
+  /**
+   * A web browser's page load. `onEvent` hears each step, ending with a `response` or `failed`,
+   * and the promise resolves after that last one. Aborting `signal` stops passing events on and
+   * resolves at once; the simulation finishes the load unseen.
+   */
+  browse(
+    device: DeviceId,
+    target: BrowseTarget,
+    onEvent: (event: FetchEvent) => void,
+    signal: AbortSignal,
+  ): Promise<void>;
 }

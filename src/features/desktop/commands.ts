@@ -1,4 +1,4 @@
-import { err, Ipv4Address, ok, type Result } from '@/model';
+import { DomainName, err, Ipv4Address, ok, type Result } from '@/model';
 
 /** A Command Prompt line, parsed. */
 export type HostCommand =
@@ -12,6 +12,8 @@ export type HostCommand =
   | { kind: 'arp-show' }
   /** Without an address, every entry. */
   | { kind: 'arp-clear'; address?: Ipv4Address }
+  /** Without a server, the host's own DNS server. */
+  | { kind: 'nslookup'; name: DomainName; server?: Ipv4Address }
   | { kind: 'help' }
   | { kind: 'cls' };
 
@@ -74,6 +76,15 @@ const ARP_USAGE = [
   '',
 ];
 
+export const NSLOOKUP_USAGE = [
+  '',
+  'Usage:',
+  '   nslookup name [server]',
+  '',
+  '   Looks up the IPv4 address of name, asking server or else the default DNS server.',
+  '',
+];
+
 export const HELP = [
   '',
   'Available commands:',
@@ -86,6 +97,7 @@ export const HELP = [
   '  ipconfig /all       Also show the MAC address, DHCP lease and DNS settings.',
   '  ipconfig /renew     Ask the DHCP server for an address, or to extend the lease.',
   '  ipconfig /release   Give the DHCP lease back.',
+  "  nslookup <name>     Ask the DNS server for a name's address. Add an IP to ask that server.",
   '  ping <ip>           Send 4 echo requests. -n <count> sends more or fewer, -t until Ctrl+C.',
   '  tracert <ip>        List the routers on the way to an address, hop by hop.',
   '',
@@ -196,6 +208,19 @@ function parseArp(args: readonly string[]): Result<HostCommand, ParseError> {
   return address.success ? ok({ kind: 'arp-clear', address: address.data }) : err(ARP_USAGE);
 }
 
+function parseNslookup(args: readonly string[]): Result<HostCommand, ParseError> {
+  const [name, server, ...rest] = args;
+  if (name === undefined || flag(name) !== undefined || rest.length > 0) return err(NSLOOKUP_USAGE);
+  const domain = DomainName.safeParse(name);
+  if (!domain.success) return err([`*** Invalid name: ${name}`]);
+  if (server === undefined) return ok({ kind: 'nslookup', name: domain.data });
+  const address = Ipv4Address.safeParse(server);
+  if (!address.success) {
+    return err([`*** Can't find address for server ${server}: Non-existent domain`]);
+  }
+  return ok({ kind: 'nslookup', name: domain.data, server: address.data });
+}
+
 export function parseCommand(line: string): Result<HostCommand, ParseError> {
   const [name, ...args] = line.trim().split(/\s+/).filter(Boolean);
   if (name === undefined) return ok({ kind: 'empty' });
@@ -208,6 +233,8 @@ export function parseCommand(line: string): Result<HostCommand, ParseError> {
       return parseIpconfig(args);
     case 'arp':
       return parseArp(args);
+    case 'nslookup':
+      return parseNslookup(args);
     case 'help':
       return ok({ kind: 'help' });
     case 'cls':

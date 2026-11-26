@@ -1,6 +1,7 @@
 import type {
   DeviceUnavailable,
   DhcpOutcome,
+  DnsLookup,
   PingEvent,
   PingSummary,
   ProbeHandle,
@@ -108,6 +109,27 @@ export function engineBackend(source: TopologySource): HostBackend {
     async releaseDhcp(device) {
       const released = await (await engine()).sim.dhcpRelease(device);
       if (!released.ok) throw new Error(`IPCONFIG: ${UNAVAILABLE[released.error]}`);
+    },
+    async nslookup(device, name, server) {
+      const client = await engine();
+      let settle!: (lookup: DnsLookup) => void;
+      const lookup = new Promise<DnsLookup>((resolve) => (settle = resolve));
+      const started = await client.resolve(device, name, server, (heard) => settle(heard));
+      if (!started.ok) throw new Error(`*** Can't look up ${name}: ${UNAVAILABLE[started.error]}`);
+      return lookup;
+    },
+    async browse(device, target, onEvent, signal) {
+      const client = await engine();
+      let finish!: () => void;
+      const finished = new Promise<void>((resolve) => (finish = resolve));
+      const started = await client.browse(device, target, (event) => {
+        if (!signal.aborted) onEvent(event);
+        if (event.kind === 'response' || event.kind === 'failed') finish();
+      });
+      if (!started.ok) throw new Error(`The page could not load: ${UNAVAILABLE[started.error]}`);
+      if (signal.aborted) finish();
+      else signal.addEventListener('abort', finish, { once: true });
+      await finished;
     },
   };
 }

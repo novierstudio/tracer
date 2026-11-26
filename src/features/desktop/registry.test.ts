@@ -22,6 +22,8 @@ function setup() {
     hostIp: async () => ({ addressing: { kind: 'unassigned' }, now: 0 }),
     renewDhcp: async () => ({ kind: 'failed' }),
     releaseDhcp: async () => {},
+    nslookup: async () => ({ kind: 'no-server' }),
+    browse: async () => {},
   };
   return { ...lab, store, aborted, prompts: createHostPromptRegistry(store, backend) };
 }
