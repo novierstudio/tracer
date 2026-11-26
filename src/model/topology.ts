@@ -110,6 +110,17 @@ const ospfInterfaceFields = {
   ospfPriority: OspfPriority.optional(),
 };
 
+/**
+ * What an interface tells routing protocols about itself. Absent means the defaults for its
+ * kind and speed. Neither changes how fast frames actually go.
+ */
+const metricInterfaceFields = {
+  /** `bandwidth`, in kbit/s, 1 to 10000000. EIGRP and OSPF derive their metrics from it. */
+  bandwidth: z.int().min(1).max(10_000_000).optional(),
+  /** `delay`, in tens of microseconds, 1 to 16777215. EIGRP adds it up along a path. */
+  delay: z.int().min(1).max(16_777_215).optional(),
+};
+
 /** A numbered access list, 1 to 99 standard or 100 to 199 extended, or a named one. */
 export const AclName = z
   .string()
@@ -158,6 +169,7 @@ export const RoutedInterface = z.object({
   ...interfaceFields,
   ...ipv6InterfaceFields,
   ...ospfInterfaceFields,
+  ...metricInterfaceFields,
   ...filterInterfaceFields,
   ipv4: Ipv4Cidr.optional(),
   /** Bit/s a serial port clocks when its end of the cable is DCE. */
@@ -238,6 +250,7 @@ export type Dot1q = z.infer<typeof Dot1q>;
 /** A router subinterface. It has no speed, duplex or clock of its own: those belong to its port. */
 export const Subinterface = z.object({
   ...ospfInterfaceFields,
+  ...metricInterfaceFields,
   ...ipv6InterfaceFields,
   ...filterInterfaceFields,
   shutdown: z.boolean(),
@@ -416,6 +429,57 @@ export const OspfConfig = z.object({
 export type OspfConfig = z.infer<typeof OspfConfig>;
 
 /**
+ * `network <address> [wildcard]`: an interface whose address matches runs EIGRP. Without a
+ * wildcard, IOS keeps the address's classful network and matches any address in it.
+ */
+export const EigrpNetwork = z.object({
+  address: Ipv4Address,
+  wildcard: Ipv4Address.optional(),
+});
+export type EigrpNetwork = z.infer<typeof EigrpNetwork>;
+
+/** `redistribute static [metric bandwidth delay reliability load mtu]`. */
+export const EigrpRedistribution = z.object({
+  /** Absent means each route takes the metric of the interface it leaves by. */
+  metric: z
+    .object({
+      /** kbit/s. */
+      bandwidth: z.int().min(1).max(4294967295),
+      /** Tens of microseconds. */
+      delay: z.int().min(0).max(4294967295),
+      reliability: z.int().min(0).max(255),
+      load: z.int().min(1).max(255),
+      mtu: z.int().min(1).max(65535),
+    })
+    .optional(),
+});
+export type EigrpRedistribution = z.infer<typeof EigrpRedistribution>;
+
+/** One of EIGRP's K-values, which weigh the parts of its composite metric. */
+const KValue = z.int().min(0).max(255);
+
+/** `router eigrp <asn>`. Tracer runs one EIGRP process per router. */
+export const EigrpConfig = z.object({
+  /** The autonomous system, 1 to 65535. Neighbours must agree on it. */
+  asn: z.int().min(1).max(65535),
+  /** `eigrp router-id`. Absent means the highest loopback address, else the highest interface address. */
+  routerId: Ipv4Address.optional(),
+  /** In the order entered, as IOS lists them. */
+  networks: z.array(EigrpNetwork).default(() => []),
+  /** `passive-interface`: no hellos, so no neighbours, but its network is still advertised. */
+  passiveInterfaces: z.array(InterfaceId).default(() => []),
+  /** `auto-summary`. Off by default since IOS 15. */
+  autoSummary: z.boolean().default(false),
+  /** `redistribute static`. Absent means static routes stay out of EIGRP. */
+  redistributeStatic: EigrpRedistribution.optional(),
+  /** `variance`: a feasible successor within this many times the best metric shares the load. */
+  variance: z.int().min(1).max(128).default(1),
+  /** `metric weights 0 k1 k2 k3 k4 k5`. Absent means IOS's 1 0 1 0 0. */
+  kValues: z.tuple([KValue, KValue, KValue, KValue, KValue]).optional(),
+});
+export type EigrpConfig = z.infer<typeof EigrpConfig>;
+
+/**
  * What an access list entry matches an address against: the bits where `wildcard` has a 0.
  * `any` is 0.0.0.0 255.255.255.255 and `host A` is A 0.0.0.0. The address keeps only the bits
  * that matter, as IOS stores it.
@@ -582,6 +646,8 @@ export const RouterConfig = z.object({
   rip: RipConfig.optional(),
   /** Absent until `router ospf`. */
   ospf: OspfConfig.optional(),
+  /** Absent until `router eigrp`. */
+  eigrp: EigrpConfig.optional(),
   /** Absent until the first `ip nat` global command, and again once the last one goes. */
   nat: NatConfig.optional(),
   /** `ipv6 unicast-routing`: the router forwards IPv6 and sends router advertisements. */
