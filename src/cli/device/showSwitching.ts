@@ -13,7 +13,7 @@ import type { SwitchDevice } from './context';
 import type { PortStates } from './query';
 import { ciscoMac } from './show';
 
-const NO_ENGINE = ['% The simulation is not running, so there is no live state to show.'];
+export const NO_ENGINE = ['% The simulation is not running, so there is no live state to show.'];
 
 /** `show mac address-table`: what the switch has learned, by VLAN then address. */
 export function showMacAddressTable(

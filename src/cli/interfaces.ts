@@ -85,6 +85,18 @@ const SHORT: Record<InterfaceType, string> = {
 };
 
 /** `FastEthernet0/1` as IOS abbreviates it in tables, `Fa0/1`. */
+/**
+ * An interface as Packet Tracer abbreviates it in EtherChannel, port security and LLDP tables:
+ * `Fa0/1`, `Gig0/1`, `Se0/0/0`, `Po1`.
+ */
+export function ptShortName(id: string): string {
+  return id
+    .replace(/^FastEthernet/, 'Fa')
+    .replace(/^GigabitEthernet/, 'Gig')
+    .replace(/^Serial/, 'Se')
+    .replace(/^Port-channel/, 'Po');
+}
+
 export function shortInterfaceName(id: InterfaceId): string {
   const type = TYPE_NAMES.find((name) => id.startsWith(name));
   return type ? SHORT[type] + id.slice(type.length) : id;

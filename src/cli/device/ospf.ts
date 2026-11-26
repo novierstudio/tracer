@@ -11,7 +11,7 @@ import type { ModeOf } from '../modes';
 import { iface, ipv4, keyword, num } from '../params';
 import { defineCommand } from '../tree';
 import { INVALID_INPUT, type RouterContext } from './context';
-import { findInterface, interfaceEntries } from './show';
+import { findInterface, interfaceEntries, isLayer2 } from './show';
 import { showIpOspfInterface, showIpOspfInterfaceBrief, showIpOspfNeighbor } from './showOspf';
 
 const routerCommand = defineCommand<RouterContext>();
@@ -63,7 +63,7 @@ export function eachInterface(
   const ids = mode.kind === 'interface-config' ? mode.interfaces : [mode.interface];
   for (const id of ids) {
     const target = findInterface(ctx.device, id);
-    if (!target || target.kind === 'switched') return ctx.reject(INVALID_INPUT);
+    if (!target || isLayer2(target)) return ctx.reject(INVALID_INPUT);
     edit(target.config);
   }
   return NOTHING;

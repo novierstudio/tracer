@@ -12,7 +12,18 @@ import type { SimTime } from './core/time';
 import type { LinkEnd, LinkStatus } from './engine';
 import type { EventId, SimEvent } from './events';
 import type { MacTableEntry, SpanningTreeVlan } from './l2/switching';
-import type { Layer2Status } from './l2/status';
+import type {
+  CdpNeighbor,
+  ChannelMember,
+  ChannelPortFlag,
+  DiscoveryStatus,
+  ErrDisabledPort,
+  EtherChannelStatus,
+  Layer2Status,
+  LldpNeighbor,
+  PortSecurityStatus,
+  SecureAddressEntry,
+} from './l2/status';
 import type { PortRole, PortState, SpanningTreePort, StpTimes } from './l2/stp';
 import type { AclHits } from './l3/acl';
 import type { ArpTableEntry } from './l3/arp';
@@ -60,7 +71,16 @@ export type {
   AclHits,
   ArpTableEntry,
   BrowseTarget,
+  CdpNeighbor,
+  ChannelMember,
+  ChannelPortFlag,
   DeviceUnavailable,
+  DiscoveryStatus,
+  ErrDisabledPort,
+  EtherChannelStatus,
+  LldpNeighbor,
+  PortSecurityStatus,
+  SecureAddressEntry,
   DhcpBindingEntry,
   DhcpListener,
   DhcpOutcome,

@@ -26,7 +26,7 @@ import {
 } from '../params';
 import { defineCommand } from '../tree';
 import { INVALID_INPUT, type DeviceContext } from './context';
-import { findInterface } from './show';
+import { findInterface, isLayer2 } from './show';
 import {
   ANY,
   NO_WILDCARD,
@@ -282,7 +282,7 @@ export function eachRoutedInterface(
   const ids = mode.kind === 'interface-config' ? mode.interfaces : [mode.interface];
   for (const id of ids) {
     const target = findInterface(ctx.device, id);
-    if (!target || target.kind === 'switched') return ctx.reject(INVALID_INPUT);
+    if (!target || isLayer2(target)) return ctx.reject(INVALID_INPUT);
     edit(target.config as Draft<RoutedInterface | Subinterface>);
   }
   return NOTHING;

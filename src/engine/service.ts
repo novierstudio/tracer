@@ -420,6 +420,7 @@ export function createSimService({
         ...discovery.value,
         ...(switched.ok ? switched.value : none),
         ports: ports.ok ? ports.value : {},
+        clock: engine.now,
       });
     },
     portStates: (device) =>

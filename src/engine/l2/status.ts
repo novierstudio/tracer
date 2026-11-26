@@ -134,4 +134,6 @@ export type Layer2Status = DiscoveryStatus &
   SwitchL2Status & {
     /** Whether each port's link is up now. */
     readonly ports: Readonly<Partial<Record<PortId, boolean>>>;
+    /** The simulated clock, for the ages show commands print. */
+    readonly clock: SimTime;
   };

@@ -48,6 +48,7 @@ import {
 } from './context';
 import {
   findInterface,
+  isLayer2,
   runningConfig,
   type InterfaceEntry,
   showInterfaces,
@@ -58,6 +59,14 @@ import {
 } from './show';
 import { showArp, showIpRoute, showSwitchIpRoute } from './showRouting';
 import { spanningTreeCommands } from './spanningTree';
+import {
+  enterPortChannel,
+  etherchannelCommands,
+  isPortChannelId,
+  portChannelTargets,
+  removePortChannel,
+} from './etherchannel';
+import { portSecurityCommands } from './portSecurity';
 import {
   showInterfacesSwitchport,
   showInterfacesTrunk,
@@ -142,6 +151,14 @@ function eachInterface(
   return NOTHING;
 }
 
+/** `shutdown` on a port-channel shuts its members too, as IOS does. */
+function setShutdown(ctx: DeviceContext, target: InterfaceEntry, shutdown: boolean) {
+  target.config.shutdown = shutdown;
+  if (target.kind !== 'port-channel' || ctx.device.kind !== 'switch') return undefined;
+  for (const port of target.members) ctx.device.config.interfaces[port]!.shutdown = shutdown;
+  return undefined;
+}
+
 /** A router can add a subinterface to any of its Ethernet ports. */
 function enterSubinterface(ctx: DeviceContext, id: SubinterfaceId): readonly string[] {
   const { device } = ctx;
@@ -155,7 +172,10 @@ function enterInterfaces(ctx: DeviceContext, ids: readonly InterfaceId[]): reado
   for (const id of ids) {
     if (isVirtual(id)) ctx.device.config.virtualInterfaces[id] ??= { shutdown: false };
     else if (isSubinterface(id)) return enterSubinterface(ctx, id);
-    else if (!findInterface(ctx.device, id)) return ctx.reject(INVALID_INPUT);
+    else if (isPortChannelId(id)) {
+      if (ctx.device.kind !== 'switch') return ctx.reject(INVALID_INPUT);
+      enterPortChannel(ctx as SwitchContext, id);
+    } else if (!findInterface(ctx.device, id)) return ctx.reject(INVALID_INPUT);
   }
   return NOTHING;
 }
@@ -560,6 +580,8 @@ export const commonCommands = [
         delete device.config.subinterfaces[name];
       } else if (isVirtual(name)) {
         delete device.config.virtualInterfaces[name];
+      } else if (isPortChannelId(name) && device.kind === 'switch') {
+        return removePortChannel(ctx as SwitchContext, name);
       } else {
         return ctx.reject('% Removal of physical interfaces is not permitted');
       }
@@ -624,7 +646,7 @@ export const commonCommands = [
     ],
     run: ({ ip, mask: prefix }, ctx, mode) =>
       eachInterface(ctx, mode, (target) => {
-        if (target.kind === 'switched') return INVALID_INPUT;
+        if (isLayer2(target)) return INVALID_INPUT;
         if (target.kind === 'subinterface' && !target.config.encapsulation) {
           return SUBINTERFACE_NEEDS_VLAN;
         }
@@ -635,7 +657,7 @@ export const commonCommands = [
       }),
     no: (_a, ctx, mode) =>
       eachInterface(ctx, mode, (target) => {
-        if (target.kind === 'switched') return INVALID_INPUT;
+        if (isLayer2(target)) return INVALID_INPUT;
         delete target.config.ipv4;
         return undefined;
       }),
@@ -643,10 +665,8 @@ export const commonCommands = [
   command({
     modes: ANY_IF,
     path: [keyword('shutdown', 'Shutdown the selected interface')],
-    run: (_a, ctx, mode) =>
-      eachInterface(ctx, mode, (target) => void (target.config.shutdown = true)),
-    no: (_a, ctx, mode) =>
-      eachInterface(ctx, mode, (target) => void (target.config.shutdown = false)),
+    run: (_a, ctx, mode) => eachInterface(ctx, mode, (target) => setShutdown(ctx, target, true)),
+    no: (_a, ctx, mode) => eachInterface(ctx, mode, (target) => setShutdown(ctx, target, false)),
   }),
   command({
     modes: ANY_IF,
@@ -672,7 +692,12 @@ export const commonCommands = [
     ],
     run: ({ speed }, ctx, mode) =>
       eachInterface(ctx, mode, (target) => {
-        if (target.kind === 'subinterface' || !isEthernet(target.port)) return INVALID_INPUT;
+        if (
+          target.kind === 'subinterface' ||
+          target.kind === 'port-channel' ||
+          !isEthernet(target.port)
+        )
+          return INVALID_INPUT;
         if (speed === '1000' && target.port?.kind !== 'gigabitEthernet') return INVALID_INPUT;
         if (speed === 'auto') delete target.config.speed;
         else target.config.speed = Number(speed) as 10 | 100 | 1000;
@@ -680,7 +705,7 @@ export const commonCommands = [
       }),
     no: (_a, ctx, mode) =>
       eachInterface(ctx, mode, (target) =>
-        target.kind !== 'subinterface' && isEthernet(target.port)
+        target.kind !== 'subinterface' && target.kind !== 'port-channel' && isEthernet(target.port)
           ? void delete target.config.speed
           : INVALID_INPUT,
       ),
@@ -697,14 +722,19 @@ export const commonCommands = [
     ],
     run: ({ duplex }, ctx, mode) =>
       eachInterface(ctx, mode, (target) => {
-        if (target.kind === 'subinterface' || !isEthernet(target.port)) return INVALID_INPUT;
+        if (
+          target.kind === 'subinterface' ||
+          target.kind === 'port-channel' ||
+          !isEthernet(target.port)
+        )
+          return INVALID_INPUT;
         if (duplex === 'auto') delete target.config.duplex;
         else target.config.duplex = duplex;
         return undefined;
       }),
     no: (_a, ctx, mode) =>
       eachInterface(ctx, mode, (target) =>
-        target.kind !== 'subinterface' && isEthernet(target.port)
+        target.kind !== 'subinterface' && target.kind !== 'port-channel' && isEthernet(target.port)
           ? void delete target.config.duplex
           : INVALID_INPUT,
       ),
@@ -839,7 +869,7 @@ export function helperAddressCommands() {
     (change: (current: readonly Ipv4Address[], address?: Ipv4Address) => readonly Ipv4Address[]) =>
     (args: { address?: Ipv4Address }, ctx: DeviceContext, mode: InterfaceMode) =>
       eachInterface(ctx, mode, (target) => {
-        if (target.kind === 'switched') return INVALID_INPUT;
+        if (isLayer2(target)) return INVALID_INPUT;
         const next = change(target.config.helperAddresses ?? [], args.address);
         if (next.length > 0) target.config.helperAddresses = [...next];
         else delete target.config.helperAddresses;
@@ -980,9 +1010,13 @@ function eachSwitchport(
   mode: ModeOf<'interface-config'>,
   edit: (port: Draft<SwitchedInterface>) => void,
 ) {
-  return eachInterface(ctx, mode, (target) =>
-    target.kind === 'switched' ? void edit(target.config) : INVALID_INPUT,
-  );
+  return eachInterface(ctx, mode, (target) => {
+    if (target.kind === 'switched') return void edit(target.config);
+    if (target.kind !== 'port-channel') return INVALID_INPUT;
+    // A port-channel's settings go to its members as well.
+    for (const config of portChannelTargets(ctx.device, target.id)) edit(config);
+    return undefined;
+  });
 }
 
 const orUnset = (vlan: VlanId | undefined) => (vlan === DEFAULT_VLAN ? undefined : vlan);
@@ -1144,6 +1178,8 @@ export const switchCommands = [
   ...aclCommands,
   ...switchShowCommands,
   ...spanningTreeCommands,
+  ...etherchannelCommands,
+  ...portSecurityCommands,
   switchCommand({
     modes: GLOBAL,
     path: [keyword('vlan', 'Vlan commands'), num('vlan', 1, 4094, 'ISL VLAN IDs 1-1005')],
@@ -1200,8 +1236,16 @@ export const switchCommands = [
       }),
     ],
     run: ({ mode: target }, ctx, mode) =>
-      eachSwitchport(ctx, mode, (port) => setSwitchportMode(port, target)),
-    no: (_a, ctx, mode) => eachSwitchport(ctx, mode, (port) => setSwitchportMode(port, 'access')),
+      eachSwitchport(ctx, mode, (port) => {
+        setSwitchportMode(port, target);
+        if (target === 'access') port.modeAccess = true;
+        else delete port.modeAccess;
+      }),
+    no: (_a, ctx, mode) =>
+      eachSwitchport(ctx, mode, (port) => {
+        setSwitchportMode(port, 'access');
+        delete port.modeAccess;
+      }),
   }),
   switchCommand({
     modes: IF,

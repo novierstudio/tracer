@@ -1,5 +1,6 @@
 import {
   Ipv4Address,
+  MacAddress,
   normalizeVlans,
   SubnetMask,
   type InterfaceId,
@@ -139,6 +140,19 @@ export function ipv4<N extends string>(name: N, help: string): Param<N, Ipv4Addr
     help,
     singleToken('ipv4', 'A.B.C.D', (text) => Ipv4Address.safeParse(text).data),
   );
+}
+
+/** A MAC address as IOS writes it, `H.H.H`: three groups of up to four hex digits. */
+export function mac<N extends string>(name: N, help: string): Param<N, MacAddress> {
+  const read = (text: string) => {
+    if (!/^[0-9a-f]{1,4}\.[0-9a-f]{1,4}\.[0-9a-f]{1,4}$/i.test(text)) return undefined;
+    const hex = text
+      .split('.')
+      .map((group) => group.padStart(4, '0'))
+      .join('');
+    return MacAddress.safeParse(hex.match(/.{2}/g)!.join(':')).data;
+  };
+  return param(name, help, singleToken('mac', 'H.H.H', read));
 }
 
 /** A dotted subnet mask such as `255.255.255.0`, read as its prefix length. */
