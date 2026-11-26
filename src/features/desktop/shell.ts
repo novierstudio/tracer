@@ -1,9 +1,11 @@
 import { addressOf } from '@/engine/l3/hostAddress';
 import type { RemoteStack } from '@/features/terminal/remote';
 import type { TerminalSession } from '@/features/terminal/session';
+import { hostFiles } from '@/model/defaults';
 import { isIpv6 } from '@/model/ipv6';
 import type { HostBackend, PingReply, TraceProbe } from './backend';
 import { HELP, parseCommand } from './commands';
+import { formatDir } from './files';
 import {
   addressPort,
   configAddressing,
@@ -139,6 +141,8 @@ export function hostShell({
           return io.print(HELP);
         case 'cls':
           return io.clear();
+        case 'dir':
+          return io.print(formatDir(hostFiles(device.config)));
         case 'ipconfig':
           return io.print(await ipconfig(command.all));
         case 'ipv6config':

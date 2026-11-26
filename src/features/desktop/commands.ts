@@ -19,6 +19,9 @@ export type HostCommand =
   /** `telnet <ip>` or `ssh -l <user> <ip>`: a session on a router or switch's vty line. */
   | { kind: 'remote'; protocol: 'telnet'; target: Ipv4Address }
   | { kind: 'remote'; protocol: 'ssh'; target: Ipv4Address; user: string }
+  /** `ftp <ip>`: an FTP session at an `ftp>` prompt. */
+  | { kind: 'ftp'; target: Ipv4Address }
+  | { kind: 'dir' }
   | { kind: 'help' }
   | { kind: 'cls' };
 
@@ -101,6 +104,7 @@ export const NSLOOKUP_USAGE = [
 ];
 
 const TELNET_USAGE = ['', 'Usage: telnet target', ''];
+const FTP_USAGE = ['', 'Usage: ftp target', ''];
 const SSH_USAGE = ['', 'Usage: SSH -l username target', ''];
 
 export const HELP = [
@@ -110,6 +114,8 @@ export const HELP = [
   '  arp -a              Show the ARP cache: IP addresses this host has resolved to MACs.',
   '  arp -d [ip]         Clear the ARP cache, or one address in it.',
   '  cls                 Clear the screen.',
+  '  dir                 List the files on this computer.',
+  '  ftp <ip>            Log in to an FTP server to put, get, list, rename and delete files.',
   '  help                Show this list.',
   '  ipconfig            Show the IP address, subnet mask and default gateway.',
   '  ipconfig /all       Also show the MAC address, DHCP lease and DNS settings.',
@@ -266,6 +272,15 @@ function parseTelnet(args: readonly string[]): Result<HostCommand, ParseError> {
   return ok({ kind: 'remote', protocol: 'telnet', target: address.data });
 }
 
+function parseFtp(args: readonly string[]): Result<HostCommand, ParseError> {
+  const [target, ...rest] = args;
+  if (target === undefined || rest.length > 0) return err(FTP_USAGE);
+  const address = Ipv4Address.safeParse(target);
+  if (!address.success)
+    return err([`% Unknown command or computer name, or unable to find computer address`]);
+  return ok({ kind: 'ftp', target: address.data });
+}
+
 function parseSsh(args: readonly string[]): Result<HostCommand, ParseError> {
   const [option, user, target, ...rest] = args;
   if (option !== '-l' || user === undefined || target === undefined || rest.length > 0) {
@@ -297,6 +312,10 @@ export function parseCommand(line: string): Result<HostCommand, ParseError> {
       return parseTelnet(args);
     case 'ssh':
       return parseSsh(args);
+    case 'ftp':
+      return parseFtp(args);
+    case 'dir':
+      return ok({ kind: 'dir' });
     case 'help':
       return ok({ kind: 'help' });
     case 'cls':
