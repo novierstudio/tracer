@@ -1,7 +1,13 @@
 import type { FrameEvent, SentFrame } from '@/engine/events';
 import type { Frame } from '@/engine/frame';
 import { ingressVlan } from '@/engine/l2/switching';
-import { BROADCAST_MAC, type ArpPacket, type Ipv4Packet } from '@/engine/pdu';
+import {
+  BROADCAST_MAC,
+  LIMITED_BROADCAST,
+  type ArpPacket,
+  type DhcpMessage,
+  type Ipv4Packet,
+} from '@/engine/pdu';
 import { shortPortName } from '@/features/canvas/cables';
 import type { Device, Ipv4Address, MacAddress, PortId, VlanId } from '@/model';
 
@@ -20,9 +26,22 @@ export type Decision =
   | { kind: 'resolving'; nextHop: Ipv4Address; out: PortId; forThisDevice: boolean }
   | { kind: 'learned'; ip: Ipv4Address; mac: MacAddress; released: readonly PortId[] }
   | { kind: 'received'; message: 'echo-reply' | 'time-exceeded' | 'unreachable'; from: Ipv4Address }
+  | { kind: 'dhcp'; step: DhcpStep }
   | { kind: 'dropped'; reason: DropReason; notified?: PortId }
   | { kind: 'ignored'; reason: IgnoreReason }
   | { kind: 'silent' };
+
+/** What a DHCP server, relay agent or client did with a DHCP message. */
+export type DhcpStep =
+  | { kind: 'offered'; address: Ipv4Address; out: PortId }
+  | { kind: 'acked'; address: Ipv4Address; out: PortId }
+  | { kind: 'refused'; out: PortId }
+  | { kind: 'released'; address: Ipv4Address }
+  | { kind: 'relayed'; to: Ipv4Address; out: PortId }
+  | { kind: 'relayed-back'; out: PortId }
+  | { kind: 'requested'; address: Ipv4Address; out: PortId }
+  | { kind: 'bound'; address: Ipv4Address }
+  | { kind: 'restarted'; out: PortId };
 
 /** How a switch changed a frame's 802.1Q tag on its way out. */
 export type Retag =
@@ -34,14 +53,17 @@ export type DropReason =
   | { kind: 'no-route-back'; dst: Ipv4Address }
   | { kind: 'tagged-on-access' }
   | { kind: 'vlan-not-allowed'; vlan: VlanId }
-  | { kind: 'no-port'; vlan: VlanId };
+  | { kind: 'no-port'; vlan: VlanId }
+  | { kind: 'no-offer' };
 
 export type IgnoreReason =
   | { kind: 'other-mac'; dst: MacAddress }
   | { kind: 'arp-for-other'; target: Ipv4Address }
   | { kind: 'other-ip'; dst: Ipv4Address }
   | { kind: 'bpdu' }
-  | { kind: 'own-mac' };
+  | { kind: 'own-mac' }
+  | { kind: 'dhcp-for-other'; client: MacAddress }
+  | { kind: 'dhcp-not-server'; message: DhcpMessage['type'] };
 
 const ipv4Of = (frame: Frame): Ipv4Packet | undefined =>
   frame.kind === 'hdlc'
@@ -49,6 +71,11 @@ const ipv4Of = (frame: Frame): Ipv4Packet | undefined =>
     : frame.kind === 'ethernet' && frame.payload.kind === 'ipv4'
       ? frame.payload
       : undefined;
+
+const dhcpOf = (frame: Frame): DhcpMessage | undefined => {
+  const payload = ipv4Of(frame)?.payload;
+  return payload?.kind === 'udp' ? payload.payload : undefined;
+};
 
 const arpOf = (frame: Frame): ArpPacket | undefined =>
   frame.kind === 'ethernet' && frame.payload.kind === 'arp' ? frame.payload : undefined;
@@ -143,8 +170,93 @@ function decideArp(device: Device, arp: ArpPacket, sent: readonly SentFrame[]): 
   };
 }
 
-function decideIp(device: Device, packet: Ipv4Packet, sent: readonly SentFrame[]): Decision {
-  const mine = ownAddresses(device).includes(packet.dst);
+const FROM_CLIENT: Record<DhcpMessage['type'], boolean> = {
+  discover: true,
+  request: true,
+  release: true,
+  offer: false,
+  ack: false,
+  nak: false,
+};
+
+/**
+ * What a router or host did with a DHCP message, read from what it sent. A router serves or
+ * relays what clients send and passes servers' replies back; a host takes the replies for its
+ * own MAC and leaves the rest to servers.
+ */
+function decideDhcp(
+  device: Device,
+  packet: Ipv4Packet,
+  message: DhcpMessage,
+  sent: readonly SentFrame[],
+): Decision | undefined {
+  const answer = sent.flatMap(({ port, frame }) => {
+    const reply = dhcpOf(frame);
+    return reply?.xid === message.xid ? [{ port, reply, packet: ipv4Of(frame)! }] : [];
+  })[0];
+  if (device.kind === 'router') {
+    if (!FROM_CLIENT[message.type]) {
+      return answer
+        ? { kind: 'dhcp', step: { kind: 'relayed-back', out: answer.port } }
+        : undefined;
+    }
+    if (!answer) {
+      if (message.type === 'release') {
+        return { kind: 'dhcp', step: { kind: 'released', address: message.ciaddr } };
+      }
+      return message.type === 'discover' && packet.dst === LIMITED_BROADCAST
+        ? { kind: 'dropped', reason: { kind: 'no-offer' } }
+        : undefined;
+    }
+    const { reply, port: out } = answer;
+    switch (reply.type) {
+      case 'offer':
+        return { kind: 'dhcp', step: { kind: 'offered', address: reply.yiaddr, out } };
+      case 'ack':
+        return { kind: 'dhcp', step: { kind: 'acked', address: reply.yiaddr, out } };
+      case 'nak':
+        return { kind: 'dhcp', step: { kind: 'refused', out } };
+      default:
+        return { kind: 'dhcp', step: { kind: 'relayed', to: answer.packet.dst, out } };
+    }
+  }
+  if (device.kind !== 'pc' && device.kind !== 'server') return undefined;
+  if (FROM_CLIENT[message.type]) {
+    return { kind: 'ignored', reason: { kind: 'dhcp-not-server', message: message.type } };
+  }
+  if (!ownMac(device, message.chaddr)) {
+    return { kind: 'ignored', reason: { kind: 'dhcp-for-other', client: message.chaddr } };
+  }
+  switch (message.type) {
+    case 'offer':
+      return answer
+        ? { kind: 'dhcp', step: { kind: 'requested', address: message.yiaddr, out: answer.port } }
+        : { kind: 'silent' };
+    case 'ack':
+      return { kind: 'dhcp', step: { kind: 'bound', address: message.yiaddr } };
+    case 'nak': {
+      const discover = sent.find(({ frame }) => dhcpOf(frame)?.type === 'discover');
+      return discover
+        ? { kind: 'dhcp', step: { kind: 'restarted', out: discover.port } }
+        : { kind: 'silent' };
+    }
+    default:
+      return undefined;
+  }
+}
+
+function decideIp(
+  device: Device,
+  packet: Ipv4Packet,
+  sent: readonly SentFrame[],
+  unicastToMe: boolean,
+): Decision {
+  // A DHCP host's address is not in its config, but a unicast frame for its MAC is for it.
+  const leasedHere =
+    unicastToMe &&
+    (device.kind === 'pc' || device.kind === 'server') &&
+    device.config.ipv4.mode === 'dhcp';
+  const mine = leasedHere || ownAddresses(device).includes(packet.dst);
   for (const { port, frame } of sent) {
     const next = ipv4Of(frame);
     if (next && isForwardOf(packet, next)) {
@@ -166,6 +278,9 @@ function decideIp(device: Device, packet: Ipv4Packet, sent: readonly SentFrame[]
       return { kind: 'resolving', nextHop: arp.targetIp, out: port, forThisDevice: mine };
     }
   }
+  const message = dhcpOf({ kind: 'hdlc', payload: packet });
+  const dhcp = message && decideDhcp(device, packet, message, sent);
+  if (dhcp) return dhcp;
   if (mine && packet.payload.kind === 'icmp') {
     const message = packet.payload;
     switch (message.type) {
@@ -205,7 +320,8 @@ export function decide(event: FrameEvent, device: Device | undefined): Decision 
   const arp = arpOf(frame);
   if (arp) return decideArp(device, arp, sent);
   const packet = ipv4Of(frame);
-  return packet ? decideIp(device, packet, sent) : { kind: 'silent' };
+  const unicastToMe = frame.kind === 'ethernet' && frame.dst !== BROADCAST_MAC;
+  return packet ? decideIp(device, packet, sent, unicastToMe) : { kind: 'silent' };
 }
 
 /** The short reason the canvas shows on a drop marker, for decisions that are drops. */
@@ -224,6 +340,8 @@ export function dropLabel(decision: Decision | undefined): string | undefined {
       return 'VLAN mismatch';
     case 'no-port':
       return 'Nowhere to send';
+    case 'no-offer':
+      return 'No offer';
   }
 }
 
@@ -275,6 +393,40 @@ function describeDrop(name: string, { reason, notified }: Extract<Decision, { ki
       return `${name} dropped it: the trunk does not allow VLAN ${reason.vlan}.`;
     case 'no-port':
       return `${name} dropped it: no other port is in VLAN ${reason.vlan}.`;
+    case 'no-offer':
+      return `${name} sent no offer: it has no DHCP pool for this network, or no free address left in it.`;
+  }
+}
+
+const DHCP_NAMES: Record<DhcpMessage['type'], string> = {
+  discover: 'a Discover',
+  request: 'a Request',
+  release: 'a Release',
+  offer: 'an Offer',
+  ack: 'an Ack',
+  nak: 'a Nak',
+};
+
+function describeDhcp(name: string, step: DhcpStep): string {
+  switch (step.kind) {
+    case 'offered':
+      return `${name}'s DHCP server offered ${step.address} and sent the Offer out ${shortPortName(step.out)}.`;
+    case 'acked':
+      return `${name}'s DHCP server leased ${step.address} to the client and sent an Ack out ${shortPortName(step.out)}.`;
+    case 'refused':
+      return `${name}'s DHCP server cannot grant that address, so it sent a Nak out ${shortPortName(step.out)}.`;
+    case 'released':
+      return `${name}'s DHCP server took ${step.address} back, free for the next client.`;
+    case 'relayed':
+      return `${name} relayed it to DHCP server ${step.to} out ${shortPortName(step.out)}, with its own address as the relay agent.`;
+    case 'relayed-back':
+      return `${name} passed the server's reply back to the client's network out ${shortPortName(step.out)}.`;
+    case 'requested':
+      return `${name} took the offer of ${step.address} and broadcast a Request for it out ${shortPortName(step.out)}.`;
+    case 'bound':
+      return `${name} now has ${step.address}: the DHCP server confirmed the lease.`;
+    case 'restarted':
+      return `${name} was refused, so it starts over with a Discover out ${shortPortName(step.out)}.`;
   }
 }
 
@@ -290,6 +442,10 @@ function describeIgnore(name: string, reason: IgnoreReason) {
       return `${name} kept it: it is addressed to ${name} itself.`;
     case 'bpdu':
       return `${name} ignored it: only switches run spanning tree.`;
+    case 'dhcp-for-other':
+      return `${name} ignored it: it is for DHCP client ${reason.client}, not ${name}.`;
+    case 'dhcp-not-server':
+      return `${name} ignored it: only a DHCP server answers ${DHCP_NAMES[reason.message]}.`;
   }
 }
 
@@ -329,6 +485,8 @@ export function describeDecision(decision: Decision, name: string): string {
         : `${name} learned that ${decision.ip} is at ${decision.mac} and saved it in its ARP cache.`;
     case 'received':
       return describeReceived(name, decision);
+    case 'dhcp':
+      return describeDhcp(name, decision.step);
     case 'dropped':
       return describeDrop(name, decision);
     case 'ignored':

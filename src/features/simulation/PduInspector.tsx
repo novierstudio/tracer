@@ -45,8 +45,13 @@ const DECISION_LOOK: Record<Decision['kind'], { icon: LucideIcon; tone: Tone; la
     resolving: { icon: SearchIcon, tone: 'accent', layer: ['ipv4'] },
     learned: { icon: BookmarkCheckIcon, tone: 'accent', layer: ['arp'] },
     received: { icon: CircleCheckIcon, tone: 'ok', layer: ['icmp'] },
-    dropped: { icon: CircleXIcon, tone: 'err', layer: ['ipv4', 'dot1q', 'ethernet'] },
-    ignored: { icon: EyeOffIcon, tone: 'muted', layer: ['arp', 'ipv4', 'bpdu', 'ethernet'] },
+    dhcp: { icon: ReplyIcon, tone: 'accent', layer: ['dhcp'] },
+    dropped: { icon: CircleXIcon, tone: 'err', layer: ['dhcp', 'ipv4', 'dot1q', 'ethernet'] },
+    ignored: {
+      icon: EyeOffIcon,
+      tone: 'muted',
+      layer: ['arp', 'dhcp', 'ipv4', 'bpdu', 'ethernet'],
+    },
     silent: { icon: MinusIcon, tone: 'muted', layer: [] },
   };
 
