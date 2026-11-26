@@ -166,6 +166,8 @@ export function createTraffic({
   // Chips whose packet goes on from where they land, so they do not fade out there.
   const continued = new WeakSet<Chip>();
   let latest = 0;
+  const listeners = new Set<() => void>();
+  const changed = () => listeners.forEach((listener) => listener());
 
   const chip = (
     event: FrameEvent,
@@ -255,6 +257,7 @@ export function createTraffic({
       addRings(fresh, wallNow);
       forgetOldLandings();
       if (chips.length > MAX_HELD) chips = chips.slice(chips.length - MAX_HELD);
+      changed();
     },
 
     showMoment({ arriving, resting, leaving }: Moment, wallNow: number, slideMs: number) {
@@ -266,6 +269,7 @@ export function createTraffic({
         ...resting.map((event) => chip(event, wallNow, slideMs, 'rest')),
       ];
       addRings(arrived, wallNow);
+      changed();
     },
 
     /** Names drops from now on with `next`, as the overlay does once it has loaded. */
@@ -277,6 +281,7 @@ export function createTraffic({
       chips = [];
       rings = [];
       landings.clear();
+      changed();
     },
 
     /**
@@ -308,11 +313,28 @@ export function createTraffic({
       };
     },
 
-    /** Whether any chip or ring is on screen or waiting for its turn. */
-    get busy() {
-      return chips.length > 0 || rings.length > 0;
+    /**
+     * Whether what `frame` shows will change after `wallNow`, so the overlay must draw again: a
+     * chip slides, fades, pops, waits for its turn or will leave, or a ring spreads or will go.
+     * Chips at rest where they landed, as a paused step leaves them, change no more.
+     */
+    animating(wallNow: number, { reducedMotion = false } = {}): boolean {
+      return rings.length > 0 || chips.some((c) => changesAfter(c, wallNow, reducedMotion));
+    },
+
+    /** Calls `listener` whenever chips are added or cleared. Returns the unsubscribe. */
+    subscribe(listener: () => void) {
+      listeners.add(listener);
+      return () => void listeners.delete(listener);
     },
   };
+
+  function changesAfter(c: Chip, wallNow: number, reducedMotion: boolean) {
+    if (c.start > wallNow || endOf(c) !== Infinity) return true;
+    if (reducedMotion || c.motion === 'rest') return false;
+    // An arrival slides until it lands, and a dropped one's cross pops after that.
+    return wallNow < landsAt(c) + (c.drop === undefined ? 0 : POP_MS);
+  }
 }
 
 /** When a chip reaches the point it is drawn at for good: its far end, or at once if lost. */

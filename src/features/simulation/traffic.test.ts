@@ -63,7 +63,7 @@ describe('realtime traffic', () => {
     expect(starts(traffic, 1300)).toEqual([[2, 1300]]);
     expect(starts(traffic, 1650)).toEqual([[3, 1600]]);
     expect(traffic.frame(1900).chips).toEqual([]);
-    expect(traffic.busy).toBe(false);
+    expect(traffic.animating(1900)).toBe(false);
   });
 
   it('chains a hop that arrives in a later batch onto the chip still on screen', () => {
@@ -449,5 +449,109 @@ describe('reduced motion', () => {
     const late = traffic.frame(RING_MS - 10, still).rings;
     expect(early).toHaveLength(1);
     expect(late).toEqual(early);
+  });
+});
+
+describe('animating, which keeps the overlay drawing', () => {
+  /** Draws `at`, as the overlay does, then asks whether the next frame would differ. */
+  const animatingAt = (
+    traffic: ReturnType<typeof createTraffic>,
+    at: number,
+    reducedMotion = false,
+  ) => {
+    traffic.frame(at, { reducedMotion });
+    return traffic.animating(at, { reducedMotion });
+  };
+
+  it('holds while a realtime packet crosses, waits for its next hop or fades, and stops once it is gone', () => {
+    const traffic = createTraffic();
+    expect(animatingAt(traffic, 0)).toBe(false);
+    traffic.addRealtime(
+      [
+        hop({ id: 1, from: 'PC1', to: 'SW1', sentAt: 0 }),
+        hop({ id: 2, from: 'SW1', to: 'R1', sentAt: 1 }),
+      ],
+      1000,
+    );
+    for (const at of [1000, 1299, 1300, 1599]) expect(animatingAt(traffic, at)).toBe(true);
+    expect(animatingAt(traffic, 1600)).toBe(false);
+  });
+
+  it('holds while a step’s packets slide in, then stops with them resting where they landed', () => {
+    const traffic = createTraffic();
+    traffic.showMoment(
+      {
+        arriving: [hop({ id: 5, from: 'SW1', to: 'R1', sentAt: 4 })],
+        resting: [hop({ id: 4, from: 'PC1', to: 'SW1', sentAt: 3 })],
+        leaving: [],
+      },
+      0,
+      400,
+    );
+    expect(animatingAt(traffic, 200)).toBe(true);
+    expect(animatingAt(traffic, 400)).toBe(false);
+    expect(traffic.frame(60_000).chips).toHaveLength(2);
+  });
+
+  it('holds while a step back’s packets slide home, and stops once they have gone', () => {
+    const traffic = createTraffic();
+    traffic.showMoment(
+      { arriving: [], resting: [], leaving: [hop({ id: 5, from: 'SW1', to: 'R1', sentAt: 4 })] },
+      0,
+      400,
+    );
+    expect(animatingAt(traffic, 399)).toBe(true);
+    expect(animatingAt(traffic, 400)).toBe(false);
+  });
+
+  it('holds while a dropped arrival’s cross pops, and stops once it has settled', () => {
+    const { event, traffic } = echoToNowhere();
+    traffic.showMoment({ arriving: [event], resting: [], leaving: [] }, 0, 400);
+    expect(animatingAt(traffic, 400 + 100)).toBe(true);
+    expect(animatingAt(traffic, 400 + 1000)).toBe(false);
+  });
+
+  it('holds while a fan-out ring spreads, and stops once it has gone', () => {
+    const traffic = createTraffic();
+    traffic.showMoment(
+      {
+        arriving: [
+          broadcast({ id: 2, from: 'SW1', to: 'R1', sentAt: 1 }),
+          broadcast({ id: 3, from: 'SW1', to: 'PC2', sentAt: 1 }),
+        ],
+        resting: [],
+        leaving: [],
+      },
+      0,
+      100,
+    );
+    expect(animatingAt(traffic, RING_MS - 10)).toBe(true);
+    expect(animatingAt(traffic, RING_MS)).toBe(false);
+  });
+
+  it('under reduced motion, stops at once for a step, but holds until realtime chips leave', () => {
+    const traffic = createTraffic();
+    traffic.showMoment(
+      { arriving: [hop({ id: 5, from: 'SW1', to: 'R1', sentAt: 4 })], resting: [], leaving: [] },
+      0,
+      400,
+    );
+    expect(animatingAt(traffic, 0, true)).toBe(false);
+
+    traffic.addRealtime([hop({ id: 1, from: 'PC1', to: 'SW1', sentAt: 0 })], 1000);
+    expect(animatingAt(traffic, 1000, true)).toBe(true);
+  });
+
+  it('tells subscribers when chips arrive or are cleared, until they unsubscribe', () => {
+    const traffic = createTraffic();
+    let calls = 0;
+    const stop = traffic.subscribe(() => calls++);
+    traffic.addRealtime([hop({ id: 1, from: 'PC1', to: 'SW1', sentAt: 0 })], 0);
+    traffic.showMoment({ arriving: [], resting: [], leaving: [] }, 0, 400);
+    traffic.clear();
+    expect(calls).toBe(3);
+    stop();
+    traffic.clear();
+    expect(calls).toBe(3);
   });
 });
