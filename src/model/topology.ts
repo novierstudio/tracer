@@ -246,6 +246,23 @@ export const DhcpServerConfig = z.object({
 });
 export type DhcpServerConfig = z.infer<typeof DhcpServerConfig>;
 
+/**
+ * `router rip`. Without `version`, IOS sends RIPv1 and accepts either version; `version 1` or
+ * `version 2` pins both to one.
+ */
+export const RipConfig = z.object({
+  version: z.union([z.literal(1), z.literal(2)]).optional(),
+  /** `network`: classful networks, as IOS keeps them, so `network 10.1.1.0` is 10.0.0.0. */
+  networks: z.array(Ipv4Address).default(() => []),
+  /** On unless `no auto-summary`: subnets of another classful network go out as that network. */
+  autoSummary: z.boolean().default(true),
+  /** `passive-interface`: RIP advertises their networks but sends no updates out of them. */
+  passiveInterfaces: z.array(InterfaceId).default(() => []),
+  /** `default-information originate`: advertise a default route to every neighbour. */
+  defaultOriginate: z.boolean().default(false),
+});
+export type RipConfig = z.infer<typeof RipConfig>;
+
 export const DEFAULT_ROUTER_HOSTNAME = Hostname.parse('Router');
 export const DEFAULT_SWITCH_HOSTNAME = Hostname.parse('Switch');
 
@@ -293,6 +310,8 @@ export const RouterConfig = z.object({
   staticRoutes: z.array(StaticRoute).default(() => []),
   /** Absent until the first `ip dhcp` command, and again once the last pool and range go. */
   dhcp: DhcpServerConfig.optional(),
+  /** Absent until `router rip`. */
+  rip: RipConfig.optional(),
 });
 export type RouterConfig = z.infer<typeof RouterConfig>;
 
@@ -433,11 +452,22 @@ export type AnnotationKind = Annotation['kind'];
 export const StpTimers = z.enum(['fast', 'ios']);
 export type StpTimers = z.infer<typeof StpTimers>;
 
+/**
+ * How fast routing protocols talk. `fast` gets a lab converged in seconds; `ios` runs the real
+ * IOS timers, such as RIP's 30 s updates.
+ */
+export const RoutingTimers = z.enum(['fast', 'ios']);
+export type RoutingTimers = z.infer<typeof RoutingTimers>;
+
 /** Settings for the whole lab rather than any one device. They never reach a running-config. */
-export const LabSettings = z.object({ stpTimers: StpTimers });
+export const LabSettings = z.object({
+  stpTimers: StpTimers,
+  /** Absent in files from before routing protocols. */
+  routingTimers: RoutingTimers.default('fast'),
+});
 export type LabSettings = z.infer<typeof LabSettings>;
 
-export const DEFAULT_LAB_SETTINGS: LabSettings = { stpTimers: 'fast' };
+export const DEFAULT_LAB_SETTINGS: LabSettings = { stpTimers: 'fast', routingTimers: 'fast' };
 
 const TopologyShape = z.object({
   version: z.literal(TOPOLOGY_VERSION),

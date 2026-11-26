@@ -330,7 +330,7 @@ export function dhcpReplyIn(frame: EthernetFrame): DhcpMessage | undefined {
   if (packet.kind !== 'ipv4') return undefined;
   const datagram = packet.payload;
   if (datagram.kind !== 'udp' || datagram.dstPort !== UDP_PORT.dhcpClient) return undefined;
-  return datagram.payload;
+  return datagram.payload.kind === 'dhcp' ? datagram.payload : undefined;
 }
 
 /**

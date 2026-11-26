@@ -197,7 +197,11 @@ describe('show spanning-tree timers', () => {
       '             Hello Time  2 sec  Max Age 8 sec  Forward Delay 2 sec',
       '             Hello Time  2 sec  Max Age 8 sec  Forward Delay 2 sec',
     ]);
-    sim.applyPatch({ devices: {}, links: {}, settings: { stpTimers: 'ios' } });
+    sim.applyPatch({
+      devices: {},
+      links: {},
+      settings: { stpTimers: 'ios', routingTimers: 'fast' },
+    });
     expect(timers()).toEqual([
       '             Hello Time  2 sec  Max Age 20 sec  Forward Delay 15 sec',
       '             Hello Time  2 sec  Max Age 20 sec  Forward Delay 15 sec',

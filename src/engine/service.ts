@@ -20,6 +20,7 @@ import { dhcpBindings } from './l3/dhcpServer';
 import { ipModule, stopProbe } from './l3/ip';
 import { pingSummary, startPing } from './l3/ping';
 import { startTrace } from './l3/traceroute';
+import { ripModule, ripStatus } from './routing/rip';
 
 /** The wall clock and frame timer that drive playback. The worker passes the real ones. */
 export type FrameClock = {
@@ -312,6 +313,8 @@ export function createSimService({
     },
     arpTable: (device) => engine.withModule(device, ipModule, arpTable),
     routes: (device) => engine.withModule(device, ipModule, (ctx) => routesOf(ctx).routes),
+    routingProtocols: (device) =>
+      engine.withModule(device, ripModule, (ctx) => ({ rip: ripStatus(ctx) })),
     macTable: (device) =>
       engine.withModule(device, switchingModule, (ctx) => macTable(ctx.state, ctx.now)),
     spanningTree: (device) =>

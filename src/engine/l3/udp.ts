@@ -14,7 +14,8 @@ export const udp = (srcPort: number, dstPort: number, payload: UdpPayload): UdpD
 /**
  * A datagram for this device, by the port it is for. `arrival` is the interface it came in on,
  * absent for one the device sent itself. A DHCP host takes its replies on port 68 before IP sees
- * them, since it may have no address yet, and nothing else listens, so other ports drop.
+ * them, since it may have no address yet. RIP's port 520 drops here: RIP runs in a module of its
+ * own, which reads its datagrams from the frames it sees.
  */
 export function deliverUdp(
   ctx: IpContext,
@@ -24,7 +25,8 @@ export function deliverUdp(
 ) {
   switch (datagram.dstPort) {
     case UDP_PORT.dhcpServer:
-      onDhcpServerPort(ctx, packet, datagram.payload, arrival);
+      if (datagram.payload.kind === 'dhcp')
+        onDhcpServerPort(ctx, packet, datagram.payload, arrival);
       return;
     default:
       return;

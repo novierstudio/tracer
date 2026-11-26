@@ -33,3 +33,18 @@ export function inPrefix({ address, prefixLength }: Ipv4Cidr, candidate: Ipv4Add
 /** Orders addresses numerically, as IOS lists them. */
 export const compareAddresses = (a: Ipv4Address, b: Ipv4Address) =>
   ipv4ToUint32(a) - ipv4ToUint32(b);
+
+/** The class A, B or C prefix length of an address: 8, 16 or 24. Class D and E have none. */
+export function classfulLength(address: Ipv4Address): PrefixLength | undefined {
+  const first = Number(address.split('.')[0]);
+  if (first < 128) return 8 as PrefixLength;
+  if (first < 192) return 16 as PrefixLength;
+  if (first < 224) return 24 as PrefixLength;
+  return undefined;
+}
+
+/** The classful network an address is in, such as 10.0.0.0/8 for 10.1.2.3. */
+export function classfulNetwork(address: Ipv4Address): Ipv4Cidr | undefined {
+  const prefixLength = classfulLength(address);
+  return prefixLength === undefined ? undefined : networkOf({ address, prefixLength });
+}

@@ -224,12 +224,12 @@ describe('topology files', () => {
 
     const read = expectOk(parseTopology(document));
 
-    expect(labSettings(read)).toEqual({ stpTimers: 'fast' });
+    expect(labSettings(read)).toEqual({ stpTimers: 'fast', routingTimers: 'fast' });
   });
 
   it('keep the real IOS timers setting through a save and load', () => {
     const { topology } = richLab();
-    const ios: Topology = { ...topology, settings: { stpTimers: 'ios' } };
+    const ios: Topology = { ...topology, settings: { stpTimers: 'ios', routingTimers: 'ios' } };
 
     expect(expectOk(parseTopologyJson(serializeTopology(ios)))).toEqual(ios);
   });

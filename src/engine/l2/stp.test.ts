@@ -23,7 +23,11 @@ const CONVERGED = STP_CONVERGED;
 const FAST = { hello: 2, maxAge: 8, forwardDelay: 2 };
 const IOS = { hello: 2, maxAge: 20, forwardDelay: 15 };
 
-const timersPatch = (stpTimers: StpTimers) => ({ devices: {}, links: {}, settings: { stpTimers } });
+const timersPatch = (stpTimers: StpTimers) => ({
+  devices: {},
+  links: {},
+  settings: { stpTimers, routingTimers: 'fast' as const },
+});
 
 /**
  * Three switches cabled in a triangle on their gigabit ports, PC1 on SW2 Fa0/1 and PC2 on SW3
@@ -59,7 +63,7 @@ function triangle({ portfast = false, timers }: { portfast?: boolean; timers?: S
     };
   }
 
-  if (timers) topology = { ...topology, settings: { stpTimers: timers } };
+  if (timers) topology = { ...topology, settings: { stpTimers: timers, routingTimers: 'fast' } };
 
   const engine = createEngine({ seed: 1, stacks: STACKS, linkDelay: ms(1) });
   const sim = createSimService({ engine, frames: { now: () => 0, request: () => {} } });

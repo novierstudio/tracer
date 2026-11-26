@@ -273,7 +273,7 @@ function icmpLayers(wire: Wire, message: IcmpMessage): Layer[] {
       wire.field(
         'quoted.start',
         'First 8 bytes',
-        describeIcmpStart(original.payload),
+        original.payload.kind === 'icmp' ? describeIcmpStart(original.payload) : 'UDP',
         'The start of that packet’s payload: for a ping, its identifier and sequence number.',
         bytes.slice(28, 36),
       ),
@@ -315,7 +315,7 @@ const portName = (port: number) => {
 
 /** The UDP header's fields and then its payload's, with the checksum over the IPv4 pseudo-header. */
 function udpParts(packet: Ipv4Packet, datagram: UdpDatagram): Part[] {
-  const data = dhcpParts(datagram.payload);
+  const data = datagram.payload.kind === 'dhcp' ? dhcpParts(datagram.payload) : [];
   const dataBytes = data.flatMap((part) => part.bytes);
   const length = 8 + dataBytes.length;
   const header = [...u16(datagram.srcPort), ...u16(datagram.dstPort), ...u16(length)];
@@ -375,7 +375,8 @@ function udpLayers(wire: Wire, packet: Ipv4Packet, datagram: UdpDatagram): Layer
     summary: `${portName(datagram.srcPort)} → ${portName(datagram.dstPort)}`,
     fields: fields.slice(0, 4),
   };
-  return [udp, dhcpLayer(datagram.payload, fields.slice(4))];
+  const { payload } = datagram;
+  return payload.kind === 'dhcp' ? [udp, dhcpLayer(payload, fields.slice(4))] : [udp];
 }
 
 // DHCP

@@ -14,7 +14,10 @@ describe('share links', () => {
   });
 
   it("carries the lab's spanning tree timers setting", () => {
-    const lab = { ...buildLab().topology, settings: { stpTimers: 'ios' as const } };
+    const lab = {
+      ...buildLab().topology,
+      settings: { stpTimers: 'ios' as const, routingTimers: 'fast' as const },
+    };
     expect(decodeLab(encodeLab(lab))).toEqual({ ok: true, value: lab });
   });
 
