@@ -4,7 +4,15 @@ import type { EventId, FrameEvent } from '@/engine/events';
 import { ALL_SPF_ROUTERS, multicastMac, RIP_GROUP, type EthernetFrame } from '@/engine/pdu';
 import { routedLab } from '@/engine/testing';
 import { PortId, type LinkId, type MacAddress } from '@/model';
-import { ospfDbd, ospfHello, ospfPacket, pingFrames, ripPacket, ripV2Response } from '../testing';
+import {
+  echoRequest6,
+  ospfDbd,
+  ospfHello,
+  ospfPacket,
+  pingFrames,
+  ripPacket,
+  ripV2Response,
+} from '../testing';
 import { inspect, type PduView } from './inspect';
 
 const value = (view: PduView, id: string) =>
@@ -150,5 +158,56 @@ describe('inspect an OSPF hello', () => {
     ]);
     expect(value(inspection.views[0]!, 'ospf.dr')).toBe('10.0.12.1');
     expect(value(inspection.views[1]!, 'ospf.flags')).toBe('0x03 (More, Master)');
+  });
+});
+
+describe('inspect an IPv6 packet a router forwards', () => {
+  const { lab, r1, sw1 } = routedLab();
+  const router = lab.device(r1);
+  if (router.kind !== 'router') throw new Error('R1 is not a router');
+  const topology = {
+    ...lab.topology,
+    devices: {
+      ...lab.topology.devices,
+      [r1]: { ...router, config: { ...router.config, ipv6UnicastRouting: true as const } },
+    },
+  };
+  const own = router.ports.find((port) => port.id === 'GigabitEthernet0/0')!;
+  const frame = (dst: string, hopLimit: number): EthernetFrame => ({
+    kind: 'ethernet',
+    src: '02:00:00:00:00:21' as MacAddress,
+    dst: dst as MacAddress,
+    payload: { ...echoRequest6, hopLimit },
+  });
+  const event: FrameEvent = {
+    kind: 'frame',
+    id: 1 as EventId,
+    time: 1 as SimTime,
+    sentAt: 0 as SimTime,
+    link: 'lnk' as LinkId,
+    from: { device: sw1, port: PortId.parse('GigabitEthernet0/1') },
+    to: { device: r1, port: PortId.parse('GigabitEthernet0/0') },
+    frame: frame(own.kind === 'serial' ? '' : own.mac, 128),
+    outcome: 'delivered',
+    sent: [{ port: PortId.parse('GigabitEthernet0/1'), frame: frame('02:00:00:00:00:31', 127) }],
+  };
+
+  it('shows the hop limit the router lowered, and no header checksum to fix', () => {
+    const inspection = inspect(event, topology);
+    expect(inspection.sentence).toBe(
+      'R1 forwarded it out Gi0/1 and lowered the hop limit from 128 to 127.',
+    );
+    const [arrived, left] = inspection.views;
+    expect(arrived!.layers.map((layer) => layer.name)).toEqual([
+      'Physical',
+      'Ethernet II',
+      'IPv6',
+      'ICMPv6',
+    ]);
+    expect(left!.changed.get('ipv6.hopLimit')).toBe('128');
+    expect(value(left!, 'ipv6.hopLimit')).toBe('127');
+    expect([...left!.changed.keys()].filter((id) => id.startsWith('ipv6'))).toEqual([
+      'ipv6.hopLimit',
+    ]);
   });
 });
