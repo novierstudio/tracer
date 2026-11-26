@@ -42,6 +42,7 @@ export const emptyNatTable = (): NatTable => ({ bindings: [], flows: [] });
 export const NAT_TIMEOUTS = {
   binding: ms(86_400_000),
   [IP_PROTOCOL.icmp]: ms(60_000),
+  [IP_PROTOCOL.tcp]: ms(86_400_000),
   [IP_PROTOCOL.udp]: ms(300_000),
 } as const satisfies Record<string, SimDuration>;
 
@@ -85,6 +86,8 @@ function withPort(payload: Ipv4Payload, side: 'src' | 'dst', port: number): Ipv4
       return payload.type === 'echo-request' || payload.type === 'echo-reply'
         ? { ...payload, id: port }
         : payload;
+    case 'tcp':
+      return side === 'src' ? { ...payload, srcPort: port } : { ...payload, dstPort: port };
     case 'udp':
       return side === 'src' ? { ...payload, srcPort: port } : { ...payload, dstPort: port };
     default:

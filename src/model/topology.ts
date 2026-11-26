@@ -110,12 +110,17 @@ export const AclName = z
   .regex(/^(?:[1-9]\d?|1\d\d|[A-Za-z][!-~]*)$/, 'Invalid access list name');
 export type AclName = z.infer<typeof AclName>;
 
-/** Interface settings for packet filtering and NAT. Absent means none. */
-const filterInterfaceFields = {
+/** `ip access-group`: the lists that filter an interface's packets. Absent means none. */
+const accessGroupFields = {
   /** `ip access-group <acl> in`: the list that filters packets arriving on the interface. */
   accessGroupIn: AclName.optional(),
   /** `ip access-group <acl> out`: the list that filters packets the interface forwards out. */
   accessGroupOut: AclName.optional(),
+};
+
+/** Interface settings for packet filtering and NAT. Absent means none. */
+const filterInterfaceFields = {
+  ...accessGroupFields,
   /** `ip nat inside` or `ip nat outside`. */
   nat: z.enum(['inside', 'outside']).optional(),
 };
@@ -179,6 +184,8 @@ export const SwitchInterface = z.object({
   ipv4: Ipv4Cidr.optional(),
   /** A routed port's `ip helper-address` lines. */
   helperAddresses,
+  /** A routed port's access lists. */
+  ...accessGroupFields,
 });
 export type SwitchInterface = z.infer<typeof SwitchInterface>;
 
