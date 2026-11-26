@@ -26,6 +26,7 @@ import {
   type RipMessage,
   type RouterLsa,
 } from '@/engine/pdu';
+import type { Ipv6Packet } from '@/engine/pdu6';
 import { createSimService } from '@/engine/service';
 import { STACKS } from '@/engine/stacks';
 import { TCP_PORT, TCP_WINDOW, type TcpFlags, type TcpSegment } from '@/engine/tcp';
@@ -39,6 +40,7 @@ import type {
   PrefixLength,
   Topology,
 } from '@/model';
+import { ALL_NODES, ALL_ROUTERS, linkLocalOf, solicitedNode, type Ipv6Address } from '@/model/ipv6';
 
 const mac = (n: number) => `02:00:00:00:00:${n.toString(16).padStart(2, '0')}` as MacAddress;
 const ip = (text: string) => text as Ipv4Address;
@@ -59,6 +61,86 @@ export const echoRequest: Ipv4Packet = {
   ttl: 128,
   id: 1,
   payload: { kind: 'icmp', type: 'echo-request', id: 1, seq: 1 },
+};
+
+const ip6 = (text: string) => text as Ipv6Address;
+
+/** PC1's MAC in the IPv6 samples, and its gateway R1's. */
+export const PC1_MAC = '00:d0:97:12:34:56' as MacAddress;
+export const R1_MAC = '00:d0:58:aa:bb:01' as MacAddress;
+
+export const PC1_IPV6 = ip6('2001:db8:1::10');
+export const R1_IPV6 = ip6('2001:db8:1::1');
+export const R1_LINK_LOCAL = ip6('fe80::1');
+
+/** PC1 pings 2001:db8:2::10 across R1. */
+export const echoRequest6: Ipv6Packet = {
+  kind: 'ipv6',
+  src: PC1_IPV6,
+  dst: ip6('2001:db8:2::10'),
+  hopLimit: 128,
+  payload: { kind: 'icmpv6', type: 'echo-request', id: 1, seq: 1 },
+};
+
+/** PC1 asks for its gateway's MAC, at the gateway's solicited-node group. */
+export const neighborSolicitation: Ipv6Packet = {
+  kind: 'ipv6',
+  src: PC1_IPV6,
+  dst: solicitedNode(R1_IPV6),
+  hopLimit: 255,
+  payload: { kind: 'icmpv6', type: 'neighbor-solicitation', target: R1_IPV6, sourceMac: PC1_MAC },
+};
+
+/** R1 answers `neighborSolicitation`. */
+export const neighborAdvertisement: Ipv6Packet = {
+  kind: 'ipv6',
+  src: R1_IPV6,
+  dst: PC1_IPV6,
+  hopLimit: 255,
+  payload: {
+    kind: 'icmpv6',
+    type: 'neighbor-advertisement',
+    target: R1_IPV6,
+    router: true,
+    solicited: true,
+    override: true,
+    targetMac: R1_MAC,
+  },
+};
+
+export const routerSolicitation: Ipv6Packet = {
+  kind: 'ipv6',
+  src: linkLocalOf(PC1_MAC),
+  dst: ALL_ROUTERS,
+  hopLimit: 255,
+  payload: { kind: 'icmpv6', type: 'router-solicitation', sourceMac: PC1_MAC },
+};
+
+/** R1 advertises 2001:db8:1::/64 for SLAAC, with IOS's default lifetimes. */
+export const routerAdvertisement: Ipv6Packet = {
+  kind: 'ipv6',
+  src: R1_LINK_LOCAL,
+  dst: ALL_NODES,
+  hopLimit: 255,
+  payload: {
+    kind: 'icmpv6',
+    type: 'router-advertisement',
+    curHopLimit: 64,
+    managed: false,
+    other: false,
+    routerLifetime: 1800,
+    sourceMac: R1_MAC,
+    mtu: 1500,
+    prefixes: [
+      {
+        prefix: { address: ip6('2001:db8:1::'), prefixLength: 64 },
+        onLink: true,
+        autonomous: true,
+        validLifetime: 2592000,
+        preferredLifetime: 604800,
+      },
+    ],
+  },
 };
 
 /** A RIP message in a UDP datagram from 10.0.12.1, to RIPv2's group or, for v1, broadcast. */

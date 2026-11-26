@@ -45,7 +45,9 @@ import {
   isMulticast,
   multicastMac,
 } from '@/engine/pdu';
+import type { Ipv6Packet } from '@/engine/pdu6';
 import type { TcpSegment } from '@/engine/tcp';
+import { isIpv6MulticastMac } from '@/model/ipv6';
 import {
   formatSubnetMask,
   prefixMask,
@@ -54,7 +56,17 @@ import {
   type MacAddress,
   type PrefixLength,
 } from '@/model';
-import { formatSeconds, hex, internetChecksum, ipBytes, u16, u32, type Part } from './encode';
+import {
+  formatSeconds,
+  hex,
+  internetChecksum,
+  ipBytes,
+  macBytes,
+  u16,
+  u32,
+  type Part,
+} from './encode';
+import { describeIpv6GroupMac, ipv6Sections } from './ipv6';
 import { describeDns, describeHttp, dnsParts, portName, tcpFlagNames, tcpParts } from './web';
 
 /**
@@ -73,6 +85,8 @@ export type LayerId =
   | 'arp'
   | 'ipv4'
   | 'icmp'
+  | 'ipv6'
+  | 'icmpv6'
   | 'quoted'
   | 'udp'
   | 'tcp'
@@ -116,7 +130,6 @@ class Wire {
   }
 }
 
-const macBytes = (mac: MacAddress) => mac.split(':').map((part) => parseInt(part, 16));
 /** CRC-32 as Ethernet computes its frame check sequence. */
 export function crc32(bytes: readonly number[]): number {
   let crc = 0xffffffff;
@@ -980,6 +993,19 @@ function ipv4Layers(wire: Wire, packet: Ipv4Packet): Layer[] {
   ];
 }
 
+function ipv6Layers(wire: Wire, packet: Ipv6Packet): Layer[] {
+  return ipv6Sections(packet).map(({ parts, ...section }) => ({
+    ...section,
+    osi: 3,
+    fields: parts.map(({ id, label, value, explain, bytes }) =>
+      wire.field(id, label, value, explain, bytes),
+    ),
+  }));
+}
+
+const ipLayers = (wire: Wire, packet: Ipv4Packet | Ipv6Packet) =>
+  packet.kind === 'ipv4' ? ipv4Layers(wire, packet) : ipv6Layers(wire, packet);
+
 function payloadLayers(wire: Wire, packet: Ipv4Packet): Layer[] {
   const { payload } = packet;
   switch (payload.kind) {
@@ -1695,10 +1721,17 @@ function describeMac(mac: MacAddress, role: 'dst' | 'src') {
   if (mac.startsWith('01:00:5e')) {
     return 'An IPv4 multicast MAC: 01:00:5e and the group’s last 23 bits. Only devices in the group take it.';
   }
+  if (isIpv6MulticastMac(mac)) return describeIpv6GroupMac(mac);
   return 'The next device on this LAN that should take the frame. A router rewrites it at every hop.';
 }
 
 const MIN_PAYLOAD = 46;
+
+const ETHER_TYPE_NAMES: Record<keyof typeof ETHER_TYPE, string> = {
+  arp: 'ARP',
+  ipv4: 'IPv4',
+  ipv6: 'IPv6',
+};
 
 function ethernetLayers(wire: Wire, frame: EthernetFrame): Layer[] {
   const { payload, tag } = frame;
@@ -1779,13 +1812,11 @@ function ethernetLayers(wire: Wire, frame: EthernetFrame): Layer[] {
     typeField = wire.field(
       'ethernet.type',
       'EtherType',
-      `${hex(ETHER_TYPE[payload.kind], 4)} (${payload.kind === 'arp' ? 'ARP' : 'IPv4'})`,
+      `${hex(ETHER_TYPE[payload.kind], 4)} (${ETHER_TYPE_NAMES[payload.kind]})`,
       'Names what the frame carries, so the receiver hands it to the right protocol.',
       u16(ETHER_TYPE[payload.kind]),
     );
-    // TODO(NOV-238): decode IPv6.
-    if (payload.kind === 'arp') inner.push(...arpLayers(wire, payload));
-    else if (payload.kind === 'ipv4') inner.push(...ipv4Layers(wire, payload));
+    inner.push(...(payload.kind === 'arp' ? arpLayers(wire, payload) : ipLayers(wire, payload)));
   }
 
   const trailer: Field[] = [];
@@ -1824,7 +1855,8 @@ function ethernetLayers(wire: Wire, frame: EthernetFrame): Layer[] {
 
 // HDLC
 
-function hdlcLayers(wire: Wire, packet: Ipv4Packet): Layer[] {
+function hdlcLayers(wire: Wire, packet: Ipv4Packet | Ipv6Packet): Layer[] {
+  const name = ETHER_TYPE_NAMES[packet.kind];
   const flag = (id: string) =>
     wire.field(id, 'Flag', hex(0x7e, 2), 'Marks where an HDLC frame begins and ends.', [0x7e]);
   const fields = [
@@ -1840,12 +1872,12 @@ function hdlcLayers(wire: Wire, packet: Ipv4Packet): Layer[] {
     wire.field(
       'hdlc.protocol',
       'Protocol',
-      `${hex(ETHER_TYPE.ipv4, 4)} (IPv4)`,
+      `${hex(ETHER_TYPE[packet.kind], 4)} (${name})`,
       'Names what the frame carries, as an EtherType does on Ethernet.',
-      u16(ETHER_TYPE.ipv4),
+      u16(ETHER_TYPE[packet.kind]),
     ),
   ];
-  const inner = ipv4Layers(wire, packet);
+  const inner = ipLayers(wire, packet);
   const fcs = crc16(wire.data.slice(1));
   fields.push(
     wire.field(
@@ -1858,7 +1890,7 @@ function hdlcLayers(wire: Wire, packet: Ipv4Packet): Layer[] {
     flag('hdlc.close'),
   );
   return [
-    { id: 'hdlc', osi: 2, name: 'Cisco HDLC', summary: 'Serial link, IPv4 inside', fields },
+    { id: 'hdlc', osi: 2, name: 'Cisco HDLC', summary: `Serial link, ${name} inside`, fields },
     ...inner,
   ];
 }
@@ -1872,8 +1904,7 @@ export function dissect(frame: Frame): Dissection {
       layers = ethernetLayers(wire, frame);
       break;
     case 'hdlc':
-      // TODO(NOV-238): decode IPv6.
-      layers = frame.payload.kind === 'ipv4' ? hdlcLayers(wire, frame.payload) : [];
+      layers = hdlcLayers(wire, frame.payload);
       break;
     case 'hello':
       layers = [
