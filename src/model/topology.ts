@@ -1,6 +1,14 @@
 import { z } from 'zod';
 import { AnnotationId, DeviceId, LinkId } from './ids';
-import { Hostname, Ipv4Address, Ipv4Cidr, ipv4ToUint32, MacAddress, VlanId } from './values';
+import {
+  Hostname,
+  Ipv4Address,
+  Ipv4Cidr,
+  ipv4ToUint32,
+  MacAddress,
+  PrefixLength,
+  VlanId,
+} from './values';
 
 export const TOPOLOGY_VERSION = 1;
 
@@ -96,9 +104,26 @@ const ospfInterfaceFields = {
   ospfPriority: OspfPriority.optional(),
 };
 
+/** A numbered access list, 1 to 99 standard or 100 to 199 extended, or a named one. */
+export const AclName = z
+  .string()
+  .regex(/^(?:[1-9]\d?|1\d\d|[A-Za-z][!-~]*)$/, 'Invalid access list name');
+export type AclName = z.infer<typeof AclName>;
+
+/** Interface settings for packet filtering and NAT. Absent means none. */
+const filterInterfaceFields = {
+  /** `ip access-group <acl> in`: the list that filters packets arriving on the interface. */
+  accessGroupIn: AclName.optional(),
+  /** `ip access-group <acl> out`: the list that filters packets the interface forwards out. */
+  accessGroupOut: AclName.optional(),
+  /** `ip nat inside` or `ip nat outside`. */
+  nat: z.enum(['inside', 'outside']).optional(),
+};
+
 export const RoutedInterface = z.object({
   ...interfaceFields,
   ...ospfInterfaceFields,
+  ...filterInterfaceFields,
   ipv4: Ipv4Cidr.optional(),
   /** Bit/s a serial port clocks when its end of the cable is DCE. */
   clockRate: z.int().positive().optional(),
@@ -176,6 +201,7 @@ export type Dot1q = z.infer<typeof Dot1q>;
 /** A router subinterface. It has no speed, duplex or clock of its own: those belong to its port. */
 export const Subinterface = z.object({
   ...ospfInterfaceFields,
+  ...filterInterfaceFields,
   shutdown: z.boolean(),
   description: z.string().optional(),
   /** IOS refuses an address until the subinterface has an encapsulation. */
@@ -311,6 +337,108 @@ export const OspfConfig = z.object({
 });
 export type OspfConfig = z.infer<typeof OspfConfig>;
 
+/**
+ * What an access list entry matches an address against: the bits where `wildcard` has a 0.
+ * `any` is 0.0.0.0 255.255.255.255 and `host A` is A 0.0.0.0. The address keeps only the bits
+ * that matter, as IOS stores it.
+ */
+export const AclAddress = z.object({ address: Ipv4Address, wildcard: Ipv4Address });
+export type AclAddress = z.infer<typeof AclAddress>;
+
+const L4Port = z.int().min(0).max(65535);
+
+/** A TCP or UDP port match: `eq`, `neq`, `gt` or `lt` one port, or `range` both ends included. */
+export const AclPort = z.discriminatedUnion('op', [
+  z.object({ op: z.enum(['eq', 'neq', 'gt', 'lt']), port: L4Port }),
+  z.object({ op: z.literal('range'), first: L4Port, last: L4Port }),
+]);
+export type AclPort = z.infer<typeof AclPort>;
+
+export const AclAction = z.enum(['permit', 'deny']);
+export type AclAction = z.infer<typeof AclAction>;
+
+const AclRemark = z.object({ kind: z.literal('remark'), text: z.string() });
+
+/** A standard list matches the source address only. */
+export const StandardAclEntry = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('rule'), action: AclAction, source: AclAddress }),
+  AclRemark,
+]);
+export type StandardAclEntry = z.infer<typeof StandardAclEntry>;
+
+/** The protocols an extended entry names. `ip` matches every packet. */
+export const AclProtocol = z.enum(['ip', 'icmp', 'tcp', 'udp']);
+export type AclProtocol = z.infer<typeof AclProtocol>;
+
+/** The ICMP messages an `icmp` entry can name, as `permit icmp any any echo-reply` does. */
+export const AclIcmpType = z.enum(['echo', 'echo-reply', 'unreachable', 'time-exceeded']);
+export type AclIcmpType = z.infer<typeof AclIcmpType>;
+
+/** An extended list matches protocol, both addresses, and TCP or UDP ports or an ICMP type. */
+export const ExtendedAclEntry = z.discriminatedUnion('kind', [
+  z.object({
+    kind: z.literal('rule'),
+    action: AclAction,
+    protocol: AclProtocol,
+    source: AclAddress,
+    /** TCP and UDP only. */
+    sourcePort: AclPort.optional(),
+    destination: AclAddress,
+    /** TCP and UDP only. */
+    destinationPort: AclPort.optional(),
+    /** ICMP only. */
+    icmpType: AclIcmpType.optional(),
+  }),
+  AclRemark,
+]);
+export type ExtendedAclEntry = z.infer<typeof ExtendedAclEntry>;
+
+/** Entries in order: the first rule that matches decides, and a packet no rule matches is denied. */
+export const AccessList = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('standard'), entries: z.array(StandardAclEntry) }),
+  z.object({ type: z.literal('extended'), entries: z.array(ExtendedAclEntry) }),
+]);
+export type AccessList = z.infer<typeof AccessList>;
+
+/** `ip nat pool NAME first last netmask M`: the inside global addresses dynamic NAT lends. */
+export const NatPool = z.object({
+  first: Ipv4Address,
+  last: Ipv4Address,
+  prefixLength: PrefixLength,
+});
+export type NatPool = z.infer<typeof NatPool>;
+
+export const NatPoolName = z.string().regex(/^\S+$/, 'Invalid pool name');
+
+/** `ip nat inside source static LOCAL GLOBAL`: one inside host always appears as `global`. */
+export const NatStatic = z.object({ local: Ipv4Address, global: Ipv4Address });
+export type NatStatic = z.infer<typeof NatStatic>;
+
+/**
+ * `ip nat inside source list ACL pool P [overload]` or `... interface I overload`: inside hosts
+ * the list permits borrow an address from the pool, or the interface's own. With `overload`
+ * (PAT) they share addresses and are told apart by port.
+ */
+export const NatDynamic = z.object({
+  acl: AclName,
+  to: z.discriminatedUnion('kind', [
+    z.object({ kind: z.literal('pool'), pool: NatPoolName }),
+    z.object({ kind: z.literal('interface'), interface: InterfaceId }),
+  ]),
+  overload: z.boolean(),
+});
+export type NatDynamic = z.infer<typeof NatDynamic>;
+
+/** A router's inside source NAT. */
+export const NatConfig = z.object({
+  pools: z.record(NatPoolName, NatPool),
+  /** In the order entered. A static mapping wins over a dynamic one. */
+  statics: z.array(NatStatic),
+  /** In the order entered, at most one per access list. */
+  dynamic: z.array(NatDynamic),
+});
+export type NatConfig = z.infer<typeof NatConfig>;
+
 export const DEFAULT_ROUTER_HOSTNAME = Hostname.parse('Router');
 export const DEFAULT_SWITCH_HOSTNAME = Hostname.parse('Switch');
 
@@ -345,6 +473,8 @@ const iosFields = {
   /** `ip domain-lookup`, on unless the config says `no ip domain-lookup`. */
   domainLookup: z.boolean().default(true),
   bannerMotd: z.string().optional(),
+  /** Absent until the first access list, and again once the last one goes. */
+  accessLists: z.record(AclName, AccessList).optional(),
   /** The saved config in NVRAM, as running-config lines. Absent until the first save. */
   startupConfig: z.array(z.string()).optional(),
   unknownLines: z.array(z.string()),
@@ -362,6 +492,8 @@ export const RouterConfig = z.object({
   rip: RipConfig.optional(),
   /** Absent until `router ospf`. */
   ospf: OspfConfig.optional(),
+  /** Absent until the first `ip nat` global command, and again once the last one goes. */
+  nat: NatConfig.optional(),
 });
 export type RouterConfig = z.infer<typeof RouterConfig>;
 
