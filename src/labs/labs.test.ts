@@ -19,6 +19,7 @@ const HEADLINE_PING: Record<string, string> = {
   'stp-triangle': '192.168.1.11',
   'dhcp-router': '192.168.1.1',
   'ospf-three-routers': '192.168.3.10',
+  'eigrp-feasible-successor': '192.168.3.10',
   'dns-web-server': '192.168.1.20',
   'pat-acl': '203.0.113.10',
   // PC3's SLAAC address: LAN B's prefix and PC3's MAC, b2:1f:56:da:90:69, by EUI-64.

@@ -59,6 +59,7 @@ it('switches the routing protocol timers to the IOS ones, leaving spanning tree 
     'RIP sends updates every 30 s; a silent route is invalid after 180 s, held down 180 s and flushed after 240 s, as on a real router.',
   );
   expect(dialog).toHaveTextContent(`OSPF hello ${ospfIos.hello} s, dead ${ospfIos.dead} s.`);
+  expect(dialog).toHaveTextContent('EIGRP hello 5 s, hold 15 s.');
   act(() => editorStore.getState().undo());
   expect(fast).toHaveAttribute('aria-checked', 'true');
 });
