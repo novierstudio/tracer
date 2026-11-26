@@ -135,10 +135,16 @@ describe('the traceroute command', () => {
     expect(c.session.run(c.device, 'do traceroute 192.168.2.10').stream).toEqual(TRACE);
   });
 
-  it('completes from tr and asks for an address', () => {
+  it('completes from tr and asks for an address, IPv6 on a router only', () => {
     const c = consoleOn(router());
     expect(c.session.help(c.device, 'tr')).toEqual(['traceroute']);
     expect(c.session.help(c.device, 'traceroute ')).toEqual([
+      '  A.B.C.D     Trace route to destination address',
+      '  X:X:X:X::X  Trace route to destination address',
+      '  ipv6        IPv6 trace',
+    ]);
+    const s = consoleOn(switchDevice());
+    expect(s.session.help(s.device, 'traceroute ')).toEqual([
       '  A.B.C.D  Trace route to destination address',
     ]);
   });

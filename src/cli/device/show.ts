@@ -27,6 +27,7 @@ import {
 import { encodeType7 } from '../passwords';
 import type { IosDevice } from './context';
 import type { PortStates } from './query';
+import { ipv6InterfaceLines, ipv6RouteLine } from './ipv6Config';
 import { accessListLines, natLines } from './showAclNat';
 
 export const IOS_VERSION = '15.1';
@@ -150,6 +151,7 @@ function interfaceBlock(entry: InterfaceEntry): string[] {
     if (entry.config.duplex) lines.push(` duplex ${entry.config.duplex}`);
     if (entry.config.speed) lines.push(` speed ${entry.config.speed}`);
   }
+  if (entry.kind !== 'switched') lines.push(...ipv6InterfaceLines(entry.config.ipv6));
   if (entry.kind === 'routed' && entry.config.clockRate)
     lines.push(` clock rate ${entry.config.clockRate}`);
   if (config.shutdown) lines.push(' shutdown');
@@ -310,6 +312,9 @@ export function runningConfig(device: IosDevice): string[] {
     out.push(`enable password ${passwordText(device, config.enablePassword)}`);
   if (device.kind === 'router' && device.config.dhcp) out.push(...dhcpLines(device.config.dhcp));
   if (device.kind === 'switch' && device.config.ipRouting) out.push('ip routing');
+  if (device.kind === 'router' && device.config.ipv6UnicastRouting) {
+    out.push('ipv6 unicast-routing');
+  }
   if (!config.domainLookup) out.push('no ip domain-lookup');
   out.push('!');
   if (device.kind === 'switch') out.push(...spanningTreeLines(device.config), '!');
@@ -321,6 +326,8 @@ export function runningConfig(device: IosDevice): string[] {
   if (device.kind === 'router' && device.config.nat) out.push(...natLines(device.config.nat), '!');
   const staticRoutes = config.staticRoutes ?? [];
   if (staticRoutes.length > 0) out.push(...staticRoutes.map(routeLine), '!');
+  const ipv6Routes = device.kind === 'router' ? (device.config.ipv6StaticRoutes ?? []) : [];
+  if (ipv6Routes.length > 0) out.push(...ipv6Routes.map(ipv6RouteLine), '!');
   out.push(...accessListLines(device));
   if (device.kind === 'switch' && device.config.defaultGateway) {
     out.push(`ip default-gateway ${device.config.defaultGateway}`, '!');
