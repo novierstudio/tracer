@@ -40,7 +40,7 @@ const cidr = (text: string) => {
   return Ipv4Cidr.parse({ address, prefixLength: Number(prefixLength) });
 };
 
-type Cable = { cable: 'straight' | 'crossover' } | { cable: 'serial'; dce: 'a' | 'b' };
+type Cable = { cable: 'straight' | 'crossover' | 'console' } | { cable: 'serial'; dce: 'a' | 'b' };
 
 function labBuilder(id: string) {
   const sample = SAMPLE_LABS.find((lab) => lab.id === id)!;
@@ -620,6 +620,61 @@ function ipv6Slaac() {
   return lab.topology;
 }
 
+function remoteManagement() {
+  const lab = labBuilder('remote-management');
+  lab.ios('R1', 'router-2g2s', 424, 40, [
+    'enable secret class',
+    'ip domain-name lab.local',
+    'username admin privilege 15 secret cisco123',
+    'crypto key generate rsa general-keys modulus 1024',
+    'ip ssh version 2',
+    'interface GigabitEthernet0/0',
+    ' ip address 192.168.1.1 255.255.255.0',
+    ' no shutdown',
+    'banner motd #Authorized access only#',
+    'line con 0',
+    ' password cisco',
+    ' login',
+    'line vty 0 15',
+    ' login local',
+    ' transport input ssh',
+  ]);
+  lab.ios('SW1', 'switch-24', 424, 232, [
+    'enable secret class',
+    'interface Vlan1',
+    ' ip address 192.168.1.2 255.255.255.0',
+    ' no shutdown',
+    'ip default-gateway 192.168.1.1',
+    'line vty 0 15',
+    ' password cisco',
+    ' login',
+    ' transport input telnet',
+  ]);
+  lab.pc('PC1', 136, 232, '192.168.1.10/24', '192.168.1.1');
+  lab.cable(['PC1', 'FastEthernet0'], ['SW1', 'FastEthernet0/1']);
+  lab.cable(['SW1', 'GigabitEthernet0/1'], ['R1', 'GigabitEthernet0/0']);
+  lab.cable(['PC1', 'RS232'], ['R1', 'Console'], { cable: 'console' });
+  lab.note(
+    'console',
+    -64,
+    16,
+    'The dotted cable is a console cable, from PC1’s RS232 port to R1’s Console port. PC1’s Terminal app talks to R1 over it, with no IP address needed.',
+  );
+  lab.note(
+    'ssh',
+    552,
+    -16,
+    'R1 runs SSH version 2 with a 1024-bit RSA key. Its vty lines take SSH only and check the local user admin.',
+  );
+  lab.note(
+    'telnet',
+    552,
+    280,
+    'SW1 is managed at 192.168.1.2 on Vlan1. Its vty lines take Telnet with the password cisco.',
+  );
+  return lab.topology;
+}
+
 export const BUILDERS: Record<string, () => Topology> = {
   'two-pcs-switch': twoPcsSwitch,
   'two-lans-router': twoLansRouter,
@@ -632,4 +687,5 @@ export const BUILDERS: Record<string, () => Topology> = {
   'dns-web-server': dnsWebServer,
   'pat-acl': patAcl,
   'ipv6-slaac': ipv6Slaac,
+  'remote-management': remoteManagement,
 };

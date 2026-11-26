@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { FetchEvent, PingEvent } from '@/engine/api';
+import type { FetchEvent, PingEvent, TerminalEvent } from '@/engine/api';
 import { ms, simTime } from '@/engine/core/time';
 import { createEngine } from '@/engine/engine';
 import { createSimService } from '@/engine/service';
@@ -23,6 +23,7 @@ const HEADLINE_PING: Record<string, string> = {
   'pat-acl': '203.0.113.10',
   // PC3's SLAAC address: LAN B's prefix and PC3's MAC, b2:1f:56:da:90:69, by EUI-64.
   'ipv6-slaac': '2001:db8:2:0:b01f:56ff:feda:9069',
+  'remote-management': '192.168.1.1',
 };
 
 async function load(id: string): Promise<Topology> {
@@ -119,4 +120,21 @@ it('DNS and a web server: PC1 browses to www.lab.local by name and gets Server1â
     kind: 'response',
     response: { status: 200, body: expect.stringContaining('Welcome to www.lab.local') },
   });
+});
+
+it('Remote management: PC1 reaches R1 by SSH, and R1 refuses its Telnet', async () => {
+  const topology = await load('remote-management');
+  const engine = createEngine({ seed: 1, stacks: STACKS, linkDelay: ms(1) });
+  const sim = createSimService({ engine, frames: { now: () => 0, request: () => {} } });
+  sim.load(topology);
+  engine.runUntil(SETTLED);
+  const pc1 = Object.values(topology.devices).find((d) => d.config.hostname === 'PC1')!;
+  const open = (protocol: 'ssh' | 'telnet') => {
+    const events: TerminalEvent[] = [];
+    sim.openTerminal(pc1.id, Ipv4Address.parse('192.168.1.1'), protocol, (e) => events.push(e));
+    while (events.length === 0 && engine.nextTime() !== undefined) engine.step();
+    return events[0];
+  };
+  expect(open('ssh')).toMatchObject({ kind: 'open' });
+  expect(open('telnet')).toEqual({ kind: 'failed', why: 'refused' });
 });
