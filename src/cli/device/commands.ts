@@ -64,8 +64,10 @@ import {
   showMacAddressTable,
   showVlanBrief,
 } from './showSwitching';
+import { aclCommands } from './acl';
 import { execCommands } from './exec';
 import { dhcpCommands } from './dhcp';
+import { natCommands } from './nat';
 import { ospfCommands } from './ospf';
 import { ripCommands } from './rip';
 
@@ -80,6 +82,8 @@ const CONFIG = [
   'rip-config',
   'dhcp-config',
   'ospf-config',
+  'std-acl-config',
+  'ext-acl-config',
 ] as const;
 const GLOBAL = ['global-config'] as const;
 const IF = ['interface-config'] as const;
@@ -806,6 +810,8 @@ export const routerCommands = [
   ...dhcpCommands,
   ...ospfCommands,
   ...ripCommands,
+  ...aclCommands,
+  ...natCommands,
 ];
 
 /** `ip helper-address`: relay the DHCP broadcasts heard on an interface to a server elsewhere. */
@@ -1118,6 +1124,7 @@ const switchShowCommands = [
 
 export const switchCommands = [
   ...commonCommands,
+  ...aclCommands,
   ...switchShowCommands,
   ...spanningTreeCommands,
   switchCommand({

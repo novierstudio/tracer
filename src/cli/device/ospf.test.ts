@@ -685,6 +685,8 @@ describe('OSPF show commands', () => {
         '  GigabitEthernet  GigabitEthernet IEEE 802.3z',
       ]),
     );
-    expect(c.session.help(c.device, 'show ip ')).toContain('  ospf       OSPF information');
+    expect(c.session.help(c.device, 'show ip ')).toContainEqual(
+      expect.stringMatching(/^ {2}ospf +OSPF information$/),
+    );
   });
 });

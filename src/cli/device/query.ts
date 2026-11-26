@@ -1,8 +1,10 @@
 import type {
+  AclHits,
   ArpTableEntry,
   DeviceUnavailable,
   DhcpBindingEntry,
   MacTableEntry,
+  NatTranslationEntry,
   PingListener,
   PingOptions,
   ProbeHandle,
@@ -32,6 +34,10 @@ export interface EngineAnswers {
   /** A router's DHCP leases in force. */
   readonly dhcpBindings: readonly DhcpBindingEntry[];
   readonly protocols: RoutingProtocols;
+  readonly aclHits: AclHits;
+  readonly natTranslations: readonly NatTranslationEntry[];
+  /** `clear ip nat translation *`: how many translations it cleared. Asking clears them. */
+  readonly natCleared: number;
 }
 
 export type EngineQueryKind = keyof EngineAnswers;

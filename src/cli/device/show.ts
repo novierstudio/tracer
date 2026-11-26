@@ -27,6 +27,7 @@ import {
 import { encodeType7 } from '../passwords';
 import type { IosDevice } from './context';
 import type { PortStates } from './query';
+import { accessListLines, natLines } from './showAclNat';
 
 export const IOS_VERSION = '15.1';
 export const UNSUPPORTED_MARKER = '! unsupported in Tracer';
@@ -132,12 +133,16 @@ function interfaceBlock(entry: InterfaceEntry): string[] {
       lines.push(` encapsulation dot1Q ${vlan}${native ? ' native' : ''}`);
     }
     const { ipv4, helperAddresses = [], ospfCost, ospfPriority } = entry.config;
+    const { accessGroupIn, accessGroupOut, nat } = entry.config;
     lines.push(
       ipv4
         ? ` ip address ${ipv4.address} ${formatSubnetMask(ipv4.prefixLength)}`
         : ' no ip address',
       ...helperAddresses.map((address) => ` ip helper-address ${address}`),
     );
+    if (accessGroupIn !== undefined) lines.push(` ip access-group ${accessGroupIn} in`);
+    if (accessGroupOut !== undefined) lines.push(` ip access-group ${accessGroupOut} out`);
+    if (nat !== undefined) lines.push(` ip nat ${nat}`);
     if (ospfCost !== undefined) lines.push(` ip ospf cost ${ospfCost}`);
     if (ospfPriority !== undefined) lines.push(` ip ospf priority ${ospfPriority}`);
   }
@@ -313,8 +318,10 @@ export function runningConfig(device: IosDevice): string[] {
     out.push(...ospfBlock(device.config.ospf), '!');
   }
   if (device.kind === 'router' && device.config.rip) out.push(...ripBlock(device.config.rip), '!');
+  if (device.kind === 'router' && device.config.nat) out.push(...natLines(device.config.nat), '!');
   const staticRoutes = config.staticRoutes ?? [];
   if (staticRoutes.length > 0) out.push(...staticRoutes.map(routeLine), '!');
+  out.push(...accessListLines(device));
   if (device.kind === 'switch' && device.config.defaultGateway) {
     out.push(`ip default-gateway ${device.config.defaultGateway}`, '!');
   }

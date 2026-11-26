@@ -17,7 +17,11 @@ export type Mode =
   | { readonly kind: 'rip-config' }
   | { readonly kind: 'ospf-config'; readonly processId: number }
   /** `ip dhcp pool NAME`. */
-  | { readonly kind: 'dhcp-config'; readonly pool: string };
+  | { readonly kind: 'dhcp-config'; readonly pool: string }
+  /** `ip access-list standard NAME`. */
+  | { readonly kind: 'std-acl-config'; readonly name: string }
+  /** `ip access-list extended NAME`. */
+  | { readonly kind: 'ext-acl-config'; readonly name: string };
 
 export type ModeKind = Mode['kind'];
 export type ModeOf<K extends ModeKind> = Extract<Mode, { kind: K }>;
@@ -50,6 +54,8 @@ const MODES: { readonly [K in ModeKind]: ModeSpec<K> } = {
   'rip-config': { suffix: () => '(config-router)#', exit: GLOBAL_CONFIG, config: true },
   'ospf-config': { suffix: () => '(config-router)#', exit: GLOBAL_CONFIG, config: true },
   'dhcp-config': { suffix: () => '(dhcp-config)#', exit: GLOBAL_CONFIG, config: true },
+  'std-acl-config': { suffix: () => '(config-std-nacl)#', exit: GLOBAL_CONFIG, config: true },
+  'ext-acl-config': { suffix: () => '(config-ext-nacl)#', exit: GLOBAL_CONFIG, config: true },
 };
 
 export function prompt(hostname: string, mode: Mode): string {

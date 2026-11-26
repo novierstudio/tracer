@@ -105,10 +105,32 @@ describe('replaying a Packet Tracer running-config', () => {
       shutdown: false,
       description: 'LAN to SW1',
       ipv4: { address: '192.168.10.1', prefixLength: 24 },
+      nat: 'inside',
       duplex: 'full',
       speed: 100,
     });
-    expect(config.interfaces['Serial0/0/0' as never]).toMatchObject({ clockRate: 64000 });
+    expect(config.interfaces['Serial0/0/0' as never]).toMatchObject({
+      clockRate: 64000,
+      nat: 'outside',
+    });
+    // Its PAT and access list lines are understood now, not kept as unknown lines.
+    expect(config.nat).toEqual({
+      pools: {},
+      statics: [],
+      dynamic: [{ acl: '1', to: { kind: 'interface', interface: 'Serial0/0/0' }, overload: true }],
+    });
+    expect(config.accessLists).toEqual({
+      '1': {
+        type: 'standard',
+        entries: [
+          {
+            kind: 'rule',
+            action: 'permit',
+            source: { address: '192.168.10.0', wildcard: '0.0.0.255' },
+          },
+        ],
+      },
+    });
     expect(config.lines.console).toEqual({
       password: 'cisco',
       login: 'password',
@@ -131,16 +153,10 @@ describe('replaying a Packet Tracer running-config', () => {
       'username admin secret 5 $1$mERr$hx5rVt7rPNoS4wqbXKX7m0',
       'license udi pid CISCO2911/K9 sn FTX1524X8M2-',
       'spanning-tree mode pvst',
-      'interface GigabitEthernet0/0',
-      ' ip nat inside',
-      'interface Serial0/0/0',
-      ' ip nat outside',
       'router ospf 1',
       ' log-adjacency-changes',
-      'ip nat inside source list 1 interface Serial0/0/0 overload',
       'ip classless',
       'ip flow-export version 9',
-      'access-list 1 permit 192.168.10.0 0.0.0.255',
       'line con 0',
       ' logging synchronous',
       'line vty 0 4',

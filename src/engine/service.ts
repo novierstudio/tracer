@@ -16,6 +16,7 @@ import type { Engine } from './engine';
 import type { EventId } from './events';
 import { createHistory, stepInstant, type History, type Input } from './history';
 import { macTable, spanningTreeOf, switchingModule } from './l2/switching';
+import { aclHits } from './l3/acl';
 import { arpTable, clearArp } from './l3/arp';
 import { hostAddressingOf, routesOf, type IpContext } from './l3/context';
 import { releaseDhcp, renewDhcp } from './l3/dhcpClient';
@@ -23,6 +24,7 @@ import { dhcpBindings } from './l3/dhcpServer';
 import { lookup } from './l3/dnsResolver';
 import { startFetch } from './l3/httpClient';
 import { ipModule, stopProbe } from './l3/ip';
+import { clearNat, natTranslations } from './l3/nat';
 import { pingSummary, startPing } from './l3/ping';
 import { startTrace } from './l3/traceroute';
 import { ospfModule, ospfStatus } from './routing/ospf/ospf';
@@ -403,6 +405,14 @@ export function createSimService({
         () => ({ kind: 'failed', failure: { kind: 'cancelled' } }),
         (ctx, once) => startFetch(ctx, target, once),
       ),
+    aclHits: (device) => engine.withModule(device, ipModule, aclHits),
+    natTranslations: (device) => engine.withModule(device, ipModule, natTranslations),
+    clearNatTranslations(device) {
+      let cleared: Result<number, DeviceUnavailable> | undefined;
+      input({ apply: () => void (cleared = engine.withModule(device, ipModule, clearNat)) });
+      requestFrame();
+      return cleared!;
+    },
     subscribe(next) {
       listener = next;
       sent = undefined;
