@@ -2,6 +2,7 @@
 // approximated or skipped on the way.
 
 import {
+  consolePortOf,
   createIdSource,
   emptyTopology,
   err,
@@ -14,6 +15,7 @@ import {
   SubnetMask,
   VlanId,
   type Cable,
+  type ConsolePortKind,
   type Device,
   type DeviceId,
   type DeviceKind,
@@ -149,7 +151,13 @@ const CABLES = new Map<string, Cable>([
   ['eStraightThrough', 'straight'],
   ['eCrossOver', 'crossover'],
   ['eSerial', 'serial'],
+  // A console cable is a rollover cable.
+  ['eRollOver', 'console'],
+  ['eConsole', 'console'],
 ]);
+
+/** How Packet Tracer names the management ports a console cable plugs into. */
+const CONSOLE_PORT_NAMES = /^(?:console|rs ?232)$/i;
 
 const LOGICAL_INTERFACE = /^(?:Vlan|Loopback|Tunnel|Port-channel|Virtual-|Dialer|BVI|NVI|Null)/i;
 
@@ -493,11 +501,16 @@ function hostnameAllocator(): Context['hostname'] {
 function resolveEnd(
   end: PtEnd,
   placed: ReadonlyMap<string, Placed>,
-): Result<{ readonly endpoint: Endpoint; readonly kind: PortKind }, LinkDropReason> {
+): Result<
+  { readonly endpoint: Endpoint; readonly kind: PortKind | ConsolePortKind },
+  LinkDropReason
+> {
   const target = placed.get(end.device);
   if (!target) return err({ kind: 'device-not-found' });
   if (!target.mapped) return err({ kind: 'device-skipped' });
   const { device, ports } = target.mapped;
+  const console = CONSOLE_PORT_NAMES.test(end.port) && consolePortOf(device.kind);
+  if (console) return ok({ endpoint: { device: device.id, port: console.id }, kind: console.kind });
   // Packet Tracer 5.x names a host's only port without a number: FastEthernet for FastEthernet0.
   const port =
     ports.get(end.port) ?? (/\d$/.test(end.port) ? undefined : ports.get(`${end.port}0`));
