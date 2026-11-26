@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Frame } from '@/engine/frame';
+import { httpText } from '@/engine/http';
 import {
   ALL_D_ROUTERS,
   ALL_SPF_ROUTERS,
@@ -16,6 +17,10 @@ import {
 } from '@/engine/pdu';
 import type { Ipv4Address, MacAddress, PrefixLength, VlanId } from '@/model';
 import {
+  dnsAnswer,
+  dnsNoSuchName,
+  dnsQuery,
+  httpOk,
   ospfAck,
   ospfDbd,
   ospfHello,
@@ -26,8 +31,12 @@ import {
   ripRequest,
   ripV1Response,
   ripV2Response,
+  tcpRefusal,
+  webPacket,
+  webSession,
 } from '../testing';
-import { crc32, dissect, formatLeaseTime, internetChecksum, type Dissection } from './layers';
+import { internetChecksum } from './encode';
+import { crc32, dissect, formatLeaseTime, type Dissection } from './layers';
 
 const mac = (n: number) => `02:00:00:00:00:0${n}` as MacAddress;
 const ip = (text: string) => text as Ipv4Address;
@@ -165,6 +174,14 @@ const ospfFrame = (packet: OspfPacket, dst: Ipv4Address = ALL_SPF_ROUTERS): Fram
   payload: ospfPacket(packet, dst),
 });
 
+/** A DNS message or TCP segment between PC1 and PC2, in an untagged Ethernet frame. */
+const webFrame = (payload: Parameters<typeof webPacket>[0]): Frame => ({
+  kind: 'ethernet',
+  dst: mac(2),
+  src: mac(1),
+  payload: webPacket(payload),
+});
+
 /** Every PDU kind the engine sends, by name. */
 const FRAMES: Record<string, Frame> = {
   'ARP request': arpRequest,
@@ -218,6 +235,13 @@ const FRAMES: Record<string, Frame> = {
   'OSPF LS request': ospfFrame(ospfLsr, '10.0.12.2' as Ipv4Address),
   'OSPF LS update': ospfFrame(ospfLsu, ALL_D_ROUTERS),
   'OSPF LS ack': ospfFrame(ospfAck),
+  'TCP SYN': webFrame(webSession[0]!),
+  'TCP RST': webFrame(tcpRefusal(webSession[0]!)),
+  'HTTP GET': webFrame(webSession[3]!),
+  'HTTP response': webFrame(webSession[4]!),
+  'DNS query': webFrame(dnsQuery),
+  'DNS answer': webFrame(dnsAnswer),
+  'DNS no such name': webFrame(dnsNoSuchName),
 };
 
 const fieldsOf = (dissection: Dissection) => dissection.layers.flatMap((layer) => layer.fields);
@@ -681,5 +705,182 @@ describe('dissect an OSPF packet', () => {
     expect(field(update, 'ethernet.dst')!.value).toBe('01:00:5e:00:00:06');
     expect(field(update, 'ethernet.dst')!.explain).toMatch(/DR and BDR only/);
     expect(field(update, 'ipv4.dst')!.explain).toMatch(/only the DR and BDR/);
+  });
+});
+
+/** Where TCP starts in an untagged Ethernet frame. */
+const TCP_START = 34;
+
+/** The TCP segment with the pseudo-header its checksum covers, read back from the frame. */
+function pseudoAndTcp(bytes: Uint8Array) {
+  const total = (bytes[16]! << 8) | bytes[17]!;
+  const tcpLength = total - 20;
+  return [
+    ...bytes.slice(26, 34),
+    0,
+    6,
+    tcpLength >> 8,
+    tcpLength & 0xff,
+    ...bytes.slice(TCP_START, TCP_START + tcpLength),
+  ];
+}
+
+const text = (bytes: readonly number[]) => new TextDecoder().decode(Uint8Array.from(bytes));
+
+describe('dissect a TCP segment', () => {
+  it('stacks a bare SYN as TCP at layer 4, with a 20-byte header and no data', () => {
+    const dissection = dissect(FRAMES['TCP SYN']!);
+    expect(dissection.layers.map((layer) => [layer.name, layer.osi])).toEqual([
+      ['Ethernet II', 2],
+      ['IPv4', 3],
+      ['TCP', 4],
+    ]);
+    expect(dissection.layers.at(-1)!.summary).toBe('49152 → 80 (HTTP) [SYN]');
+    expect(field(dissection, 'ipv4.protocol')!.value).toBe('6 (TCP)');
+    expect(field(dissection, 'ipv4.length')!.value).toBe('40 bytes');
+    expect(bytesOf(dissection, 'tcp.srcPort')).toEqual([0xc0, 0x00]);
+    expect(field(dissection, 'tcp.dstPort')!.value).toBe('80 (HTTP)');
+    // 4,000,000,000 is 0xEE6B2800, past the top of a signed 32-bit number.
+    expect(bytesOf(dissection, 'tcp.seq')).toEqual([0xee, 0x6b, 0x28, 0x00]);
+    expect(field(dissection, 'tcp.seq')!.value).toBe('4000000000');
+    expect(bytesOf(dissection, 'tcp.offset')).toEqual([0x50]);
+    expect(field(dissection, 'tcp.flags')!.value).toBe('0x02 (SYN)');
+    expect(field(dissection, 'tcp.ack')!.explain).toMatch(/ACK flag is off/);
+    expect(bytesOf(dissection, 'tcp.window')).toEqual([0xff, 0xff]);
+    expect(bytesOf(dissection, 'tcp.urgent')).toEqual([0, 0]);
+    expect(
+      field(dissection, 'tcp.urgent')!.bytes![1] - field(dissection, 'tcp.srcPort')!.bytes![0],
+    ).toBe(20);
+  });
+
+  it('names each flag a segment has set', () => {
+    const flags = (frame: Frame) => field(dissect(frame), 'tcp.flags')!;
+    expect(flags(webFrame(webSession[1]!)).value).toBe('0x12 (SYN, ACK)');
+    expect(flags(webFrame(webSession[3]!)).value).toBe('0x18 (PSH, ACK)');
+    expect(flags(webFrame(webSession[5]!)).value).toBe('0x11 (FIN, ACK)');
+    expect(flags(FRAMES['TCP RST']!).value).toBe('0x14 (RST, ACK)');
+    expect(flags(FRAMES['TCP RST']!).explain).toMatch(/^RST aborts/);
+  });
+
+  it('writes a TCP checksum that verifies over the pseudo-header, odd lengths included', () => {
+    const oddBody = webFrame({ ...webSession[4]!, payload: { ...httpOk, body: 'Hi!' } });
+    for (const frame of [...webSession.map(webFrame), FRAMES['TCP RST']!, oddBody]) {
+      expect(internetChecksum(pseudoAndTcp(dissect(frame).bytes))).toBe(0);
+    }
+    expect(pseudoAndTcp(dissect(oddBody).bytes).length % 2).toBe(1);
+  });
+});
+
+describe('dissect an HTTP message', () => {
+  it('puts HTTP at layer 7 over TCP, with the message’s exact wire text as its bytes', () => {
+    const dissection = dissect(FRAMES['HTTP GET']!);
+    expect(dissection.layers.map((layer) => [layer.name, layer.osi]).slice(2)).toEqual([
+      ['TCP', 4],
+      ['HTTP', 7],
+    ]);
+    expect(dissection.layers.at(-1)!.summary).toBe('GET / (Host www.lab.local)');
+    const http = dissection.layers.at(-1)!.fields.flatMap((f) => bytesOf(dissection, f.id));
+    expect(text(http)).toBe(httpText(webSession[3]!.payload!));
+    expect(field(dissection, 'ipv4.length')!.value).toBe(`${20 + 20 + 58} bytes`);
+    expect(dissection.layers.at(-1)!.fields.map((f) => [f.label, f.value])).toEqual([
+      ['Request line', 'GET / HTTP/1.1'],
+      ['Host', 'www.lab.local'],
+      ['Connection', 'close'],
+      ['End of headers', 'Blank line (CR LF)'],
+    ]);
+    expect(text(bytesOf(dissection, 'http.header.host'))).toBe('Host: www.lab.local\r\n');
+  });
+
+  it('shows a response’s status, headers and body, and counts the body in bytes', () => {
+    const dissection = dissect(FRAMES['HTTP response']!);
+    expect(dissection.layers.at(-1)!.summary).toBe('200 OK, text/html, 59 bytes');
+    expect(field(dissection, 'http.start')!.value).toBe('HTTP/1.1 200 OK');
+    expect(field(dissection, 'http.header.content-type')!.value).toBe('text/html');
+    expect(field(dissection, 'http.header.content-length')!.value).toBe('59');
+    expect(bytesOf(dissection, 'http.body')).toHaveLength(59);
+    expect(field(dissection, 'http.body')!.value).toMatch(/^59 bytes: <html><body>/);
+    expect(text(bytesOf(dissection, 'http.body'))).toBe(httpOk.body);
+  });
+});
+
+describe('dissect a DNS message', () => {
+  it('stacks DNS at layer 7 over UDP from port 53', () => {
+    const dissection = dissect(FRAMES['DNS answer']!);
+    expect(dissection.layers.map((layer) => [layer.name, layer.osi]).slice(2)).toEqual([
+      ['UDP', 4],
+      ['DNS', 7],
+    ]);
+    expect(dissection.layers.at(-1)!.summary).toBe('Response www.lab.local A 192.168.2.10');
+    expect(field(dissection, 'udp.srcPort')!.value).toBe('53 (DNS)');
+    // A 12-byte header, the 15-byte name with type and class, and a 16-byte answer.
+    expect(field(dissection, 'udp.length')!.value).toBe(`${8 + 12 + 19 + 16} bytes`);
+  });
+
+  it('lays out the header flags and counts of a query, an answer and a missing name', () => {
+    const query = dissect(FRAMES['DNS query']!);
+    expect(bytesOf(query, 'dns.id')).toEqual([0x1a, 0x2b]);
+    expect(bytesOf(query, 'dns.flags')).toEqual([0x01, 0x00]);
+    expect(field(query, 'dns.flags')!.value).toBe('0x0100 (standard query, recursion desired)');
+    expect(
+      ['qdcount', 'ancount', 'nscount', 'arcount'].map((c) => bytesOf(query, `dns.${c}`)),
+    ).toEqual([
+      [0, 1],
+      [0, 0],
+      [0, 0],
+      [0, 0],
+    ]);
+    const answer = dissect(FRAMES['DNS answer']!);
+    expect(bytesOf(answer, 'dns.flags')).toEqual([0x85, 0x80]);
+    expect(bytesOf(answer, 'dns.ancount')).toEqual([0, 1]);
+    const missing = dissect(FRAMES['DNS no such name']!);
+    expect(bytesOf(missing, 'dns.flags')).toEqual([0x85, 0x83]);
+    expect(field(missing, 'dns.flags')!.value).toMatch(/no such name\)$/);
+    expect(bytesOf(missing, 'dns.ancount')).toEqual([0, 0]);
+  });
+
+  it('writes the question’s name as labels, and the answer’s as a pointer back to it', () => {
+    const dissection = dissect(FRAMES['DNS answer']!);
+    const name = [3, ...'www', 3, ...'lab', 5, ...'local', 0].map((c) =>
+      typeof c === 'number' ? c : c.charCodeAt(0),
+    );
+    expect(bytesOf(dissection, 'dns.name')).toEqual(name);
+    expect(field(dissection, 'dns.name')!.explain).toMatch(/3 www 3 lab 5 local 0\.$/);
+    expect(bytesOf(dissection, 'dns.type')).toEqual([0, 1]);
+    expect(bytesOf(dissection, 'dns.class')).toEqual([0, 1]);
+    expect(bytesOf(dissection, 'dns.1.name')).toEqual([0xc0, 0x0c]);
+    // The pointer's 12 counts from the start of the DNS message, where the name begins.
+    const dnsStart = field(dissection, 'dns.id')!.bytes![0];
+    expect(field(dissection, 'dns.name')!.bytes![0]).toBe(dnsStart + 12);
+    expect(bytesOf(dissection, 'dns.1.type')).toEqual([0, 1]);
+    expect(field(dissection, 'dns.1.ttl')!.value).toBe('86400 s (1 day)');
+    expect(bytesOf(dissection, 'dns.1.ttl')).toEqual([0, 1, 0x51, 0x80]);
+    expect(bytesOf(dissection, 'dns.1.length')).toEqual([0, 4]);
+    expect(bytesOf(dissection, 'dns.1.address')).toEqual([192, 168, 2, 10]);
+  });
+
+  it('writes a UDP checksum that verifies over the pseudo-header', () => {
+    for (const name of ['DNS query', 'DNS answer', 'DNS no such name']) {
+      expect(internetChecksum(pseudoAndUdp(dissect(FRAMES[name]!).bytes))).toBe(0);
+    }
+  });
+});
+
+describe('an ICMP error about a TCP segment', () => {
+  it('reads the quoted ports and sequence number', () => {
+    const syn = webPacket(webSession[0]!);
+    const frame: Frame = {
+      kind: 'ethernet',
+      dst: mac(1),
+      src: mac(2),
+      payload: {
+        kind: 'ipv4',
+        src: ip('192.168.1.1'),
+        dst: syn.src,
+        ttl: 255,
+        id: 9,
+        payload: { kind: 'icmp', type: 'time-exceeded', original: { ...syn, ttl: 1 } },
+      },
+    };
+    expect(field(dissect(frame), 'quoted.start')!.value).toBe('TCP 49152 → 80, seq 4000000000');
   });
 });

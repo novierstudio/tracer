@@ -24,6 +24,9 @@ import {
   type Topology,
 } from '@/model';
 import {
+  dnsAnswer,
+  dnsNoSuchName,
+  dnsQuery,
   ospfAck,
   ospfDbd,
   ospfHello,
@@ -35,6 +38,9 @@ import {
   ripRequest,
   ripV1Response,
   ripV2Response,
+  tcpRefusal,
+  webPacket,
+  webSession,
 } from '../testing';
 import { decide, describeDecision, dropLabel } from './decision';
 
@@ -498,6 +504,96 @@ describe('an OSPF packet', () => {
   it('sent to another MAC is still ignored as another device’s frame', () => {
     expect(told(withOspf, 'R2', { ...hello, dst: mac(9) }, [])).toBe(
       "R2 ignored it: it is addressed to 02:00:00:00:00:09, not to R2's MAC.",
+    );
+  });
+});
+
+describe('fetching a web page', () => {
+  const { lab, pc1, pc2 } = routedLab();
+  const port = PortId.parse('FastEthernet0');
+  type Payload = Parameters<typeof webPacket>[0];
+
+  /** `payload` arriving at PC1 (the client) or PC2 (the server), which sent `replies` back. */
+  function sentence(to: DeviceId, packet: Ipv4Packet, replies: Payload[] = []) {
+    const device = lab.device(to);
+    const frame: EthernetFrame = {
+      kind: 'ethernet',
+      src: mac(9),
+      dst: macOf(device, 'FastEthernet0')!,
+      payload: packet,
+    };
+    const sent = replies.map((reply) => ({
+      port,
+      frame: { kind: 'ethernet', src: frame.dst, dst: mac(9), payload: webPacket(reply) } as const,
+    }));
+    const decision = decide(arrival(to, 'FastEthernet0', frame, sent), device)!;
+    expect(dropLabel(decision)).toBeUndefined();
+    return describeDecision(decision, device.config.hostname);
+  }
+  const at = (to: DeviceId, payload: Payload, replies?: Payload[]) =>
+    sentence(to, webPacket(payload), replies);
+  const s = webSession;
+
+  it('tells what the server and the client did with each of the nine segments', () => {
+    expect([
+      at(pc2, s[0]!, [s[1]!]),
+      at(pc1, s[1]!, [s[2]!, s[3]!]),
+      at(pc2, s[2]!),
+      at(pc2, s[3]!, [s[4]!, s[5]!]),
+      at(pc1, s[4]!, [s[6]!]),
+      at(pc1, s[5]!, [s[7]!]),
+      at(pc2, s[6]!),
+      at(pc2, s[7]!, [s[8]!]),
+      at(pc1, s[8]!),
+    ]).toEqual([
+      'PC2 is listening on port 80, so it answered the SYN with a SYN+ACK out Fa0.',
+      'PC1 finished the handshake with an ACK and sent GET / out Fa0.',
+      'PC2 took the ACK. An ACK needs no answer.',
+      'PC2 answered GET / with 200 OK out Fa0, then closed its side with a FIN.',
+      'PC1 got 200 OK and acknowledged it out Fa0.',
+      'PC1 acknowledged the FIN and closed its side too with a FIN out Fa0.',
+      'PC2 took the ACK. An ACK needs no answer.',
+      'PC2 acknowledged the FIN out Fa0: the connection is closed.',
+      'PC1 took the ACK. An ACK needs no answer.',
+    ]);
+  });
+
+  it('says a server refused a SYN to a port nothing listens on, and the client took the RST', () => {
+    const syn = { ...s[0]!, dstPort: 8080 };
+    const toServer = { ...webPacket(s[0]!), payload: syn };
+    const rst = tcpRefusal(syn);
+    expect(sentence(pc2, toServer, [rst])).toBe(
+      'PC2 has nothing listening on port 8080, so it refused the connection with a RST out Fa0.',
+    );
+    expect(sentence(pc1, { ...webPacket(s[1]!), payload: rst })).toBe(
+      'PC1 took the RST: the other end refused or aborted the connection.',
+    );
+  });
+
+  it('tells the DNS lookup at the server and the client, found or not', () => {
+    expect(at(pc2, dnsQuery, [dnsAnswer])).toBe(
+      'PC2 looked up www.lab.local and sent back its address, 192.168.2.10, out Fa0.',
+    );
+    expect(at(pc1, dnsAnswer, [s[0]!])).toBe(
+      'PC1 learned that www.lab.local is at 192.168.2.10 and opened a TCP connection to it with a SYN out Fa0.',
+    );
+    const missing = { ...dnsQuery, id: dnsNoSuchName.id, name: dnsNoSuchName.name };
+    expect(at(pc2, missing, [dnsNoSuchName])).toBe(
+      'PC2 knows no host named www.x.local, so it answered that there is no such name out Fa0.',
+    );
+    expect(at(pc1, dnsNoSuchName)).toBe(
+      'PC1 heard that no host is named www.x.local, so it cannot connect.',
+    );
+    // A host that runs no DNS server lets a query for it go unanswered.
+    expect(sentence(pc1, { ...webPacket(dnsQuery), dst: ip('192.168.1.10') })).toBe(
+      'PC1 sent nothing on.',
+    );
+  });
+
+  it('still says a host ignored a segment for another address', () => {
+    const elsewhere = { ...webPacket(s[0]!), dst: ip('192.168.2.99') };
+    expect(sentence(pc2, elsewhere)).toBe(
+      'PC2 ignored it: it is for 192.168.2.99, and PC2 does not route.',
     );
   });
 });

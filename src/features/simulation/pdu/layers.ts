@@ -16,7 +16,6 @@ import {
   PVST_MAC,
   RIP_GROUP,
   RIP_INFINITY,
-  UDP_PORT,
   UNKNOWN_MAC,
   UNREACHABLE_CODE,
   UNSPECIFIED_ADDRESS,
@@ -45,6 +44,7 @@ import {
   isMulticast,
   multicastMac,
 } from '@/engine/pdu';
+import type { TcpSegment } from '@/engine/tcp';
 import {
   formatSubnetMask,
   prefixMask,
@@ -53,6 +53,8 @@ import {
   type MacAddress,
   type PrefixLength,
 } from '@/model';
+import { formatSeconds, hex, internetChecksum, ipBytes, u16, u32, type Part } from './encode';
+import { describeDns, describeHttp, dnsParts, portName, tcpFlagNames, tcpParts } from './web';
 
 /**
  * A frame taken apart for the PDU inspector: its layers, outermost first, each a list of labelled
@@ -72,7 +74,10 @@ export type LayerId =
   | 'icmp'
   | 'quoted'
   | 'udp'
+  | 'tcp'
   | 'dhcp'
+  | 'dns'
+  | 'http'
   | 'rip'
   | 'ospf'
   | 'bpdu'
@@ -110,23 +115,7 @@ class Wire {
   }
 }
 
-const u16 = (value: number) => [(value >> 8) & 0xff, value & 0xff];
-const u32 = (value: number) => [...u16(Math.floor(value / 0x10000)), ...u16(value & 0xffff)];
 const macBytes = (mac: MacAddress) => mac.split(':').map((part) => parseInt(part, 16));
-const ipBytes = (address: string) => address.split('.').map(Number);
-const hex = (value: number, digits: number) =>
-  `0x${value.toString(16).toUpperCase().padStart(digits, '0')}`;
-
-/** The internet checksum: the ones' complement of the ones' complement sum of 16-bit words. */
-export function internetChecksum(bytes: readonly number[]): number {
-  let sum = 0;
-  for (let index = 0; index < bytes.length; index += 2) {
-    sum += (bytes[index]! << 8) | (bytes[index + 1] ?? 0);
-  }
-  while (sum > 0xffff) sum = (sum & 0xffff) + (sum >>> 16);
-  return ~sum & 0xffff;
-}
-
 /** CRC-32 as Ethernet computes its frame check sequence. */
 export function crc32(bytes: readonly number[]): number {
   let crc = 0xffffffff;
@@ -198,6 +187,10 @@ function payloadBytes(packet: Ipv4Packet): number[] {
       return udpParts(packet, payload).flatMap((part) => part.bytes);
     case 'ospf':
       return ospfBytes(payload);
+    case 'tcp': {
+      const { header, data } = tcpParts(packet, payload);
+      return [...header, ...data].flatMap((part) => part.bytes);
+    }
   }
 }
 
@@ -307,7 +300,7 @@ function icmpLayers(wire: Wire, message: IcmpMessage): Layer[] {
       wire.field(
         'quoted.start',
         'First 8 bytes',
-        original.payload.kind === 'icmp' ? describeIcmpStart(original.payload) : 'UDP',
+        describeIcmpStart(original.payload),
         'The start of that packet’s payload: for a ping, its identifier and sequence number.',
         bytes.slice(28, 36),
       ),
@@ -328,26 +321,14 @@ function icmpLayers(wire: Wire, message: IcmpMessage): Layer[] {
 function describeIcmpStart(payload: Ipv4Payload) {
   if (payload.kind === 'udp') return `UDP ${payload.srcPort} → ${payload.dstPort}`;
   if (payload.kind === 'ospf') return `OSPFv2 ${OSPF_NAMES[payload.type]} from ${payload.routerId}`;
+  if (payload.kind === 'tcp')
+    return `TCP ${payload.srcPort} → ${payload.dstPort}, seq ${payload.seq}`;
   return isEcho(payload)
     ? `ICMP ${ICMP_NAMES[payload.type]}, id ${payload.id}, seq ${payload.seq}`
     : `ICMP ${ICMP_NAMES[payload.type]}`;
 }
 
 // UDP
-
-/** A field before it is placed on the wire: its bytes, in wire order with the others. */
-type Part = Omit<Field, 'bytes'> & { readonly bytes: readonly number[] };
-
-const PORT_NAMES: Record<number, string> = {
-  [UDP_PORT.dhcpServer]: 'DHCP server',
-  [UDP_PORT.dhcpClient]: 'DHCP client',
-  [UDP_PORT.rip]: 'RIP',
-};
-
-const portName = (port: number) => {
-  const name = PORT_NAMES[port];
-  return name ? `${port} (${name})` : String(port);
-};
 
 /** The UDP header's fields and then its payload's, with the checksum over the IPv4 pseudo-header. */
 function udpParts(packet: Ipv4Packet, datagram: UdpDatagram): Part[] {
@@ -377,7 +358,7 @@ function udpParts(packet: Ipv4Packet, datagram: UdpDatagram): Part[] {
       label: 'Destination port',
       value: portName(datagram.dstPort),
       explain:
-        'Names the program the datagram is for. DHCP servers listen on 67, clients on 68, and RIP on 520.',
+        'Names the program the datagram is for. DNS servers listen on 53, DHCP servers on 67, clients on 68, and RIP on 520.',
       bytes: u16(datagram.dstPort),
     },
     {
@@ -421,6 +402,8 @@ function applicationParts(payload: UdpPayload): Part[] {
       return dhcpParts(payload);
     case 'rip':
       return ripParts(payload);
+    case 'dns':
+      return dnsParts(payload);
   }
 }
 
@@ -430,7 +413,30 @@ function applicationLayer(payload: UdpPayload, fields: readonly Field[]): Layer 
       return dhcpLayer(payload, fields);
     case 'rip':
       return ripLayer(payload, fields);
+    case 'dns':
+      return { id: 'dns', osi: 7, name: 'DNS', summary: capitalize(describeDns(payload)), fields };
   }
+}
+
+const capitalize = (text: string) => `${text[0]!.toUpperCase()}${text.slice(1)}`;
+
+// TCP
+
+function tcpLayers(wire: Wire, packet: Ipv4Packet, segment: TcpSegment): Layer[] {
+  const place = ({ id, label, value, explain, bytes }: Part) =>
+    wire.field(id, label, value, explain, bytes);
+  const { header, data } = tcpParts(packet, segment);
+  const tcp: Layer = {
+    id: 'tcp',
+    osi: 4,
+    name: 'TCP',
+    summary: `${portName(segment.srcPort)} → ${portName(segment.dstPort)} [${tcpFlagNames(segment.flags).join(', ')}]`,
+    fields: header.map(place),
+  };
+  const fields = data.map(place);
+  return segment.payload
+    ? [tcp, { id: 'http', osi: 7, name: 'HTTP', summary: describeHttp(segment.payload), fields }]
+    : [tcp];
 }
 
 // DHCP
@@ -462,25 +468,9 @@ const FROM_CLIENT: Record<DhcpMessageType, boolean> = {
   release: true,
 };
 
-const UNITS = [
-  [86400, 'day'],
-  [3600, 'hour'],
-  [60, 'minute'],
-  [1, 'second'],
-] as const;
-
-/** `86400` as `86400 s (1 day)`, `5400` as `5400 s (1 hour 30 minutes)`. */
-export function formatLeaseTime(lease: LeaseTime): string {
-  if (lease === 'infinite') return 'Infinite';
-  const words: string[] = [];
-  let rest = lease;
-  for (const [size, unit] of UNITS) {
-    const count = Math.floor(rest / size);
-    rest -= count * size;
-    if (count > 0) words.push(`${count} ${unit}${count === 1 ? '' : 's'}`);
-  }
-  return words.length > 0 ? `${lease} s (${words.join(' ')})` : '0 s';
-}
+/** A lease in seconds and the units a student reads, or `Infinite`. */
+export const formatLeaseTime = (lease: LeaseTime) =>
+  lease === 'infinite' ? 'Infinite' : formatSeconds(lease);
 
 /** A DHCP option: its code, its length, then its value. */
 const option = (code: number, value: readonly number[]) => [code, value.length, ...value];
@@ -862,6 +852,7 @@ function ripLayer(message: RipMessage, fields: readonly Field[]): Layer {
 
 const IP_PROTOCOL_NAMES: Record<Ipv4Payload['kind'], string> = {
   icmp: 'ICMP',
+  tcp: 'TCP',
   udp: 'UDP',
   ospf: 'OSPF',
 };
@@ -986,6 +977,8 @@ function payloadLayers(wire: Wire, packet: Ipv4Packet): Layer[] {
       return udpLayers(wire, packet, payload);
     case 'ospf':
       return ospfLayers(wire, payload);
+    case 'tcp':
+      return tcpLayers(wire, packet, payload);
   }
 }
 

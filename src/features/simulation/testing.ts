@@ -1,7 +1,9 @@
 import type { SimEventBatch } from '@/engine/api';
 import { ms, type SimTime } from '@/engine/core/time';
 import { createEngine } from '@/engine/engine';
+import { DNS_TTL, type DnsMessage, type DnsQuery, type DnsResponse } from '@/engine/dns';
 import type { EventId, FrameEvent } from '@/engine/events';
+import { byteLength, httpText, type HttpRequest, type HttpResponse } from '@/engine/http';
 import {
   ALL_SPF_ROUTERS,
   INITIAL_SEQUENCE,
@@ -26,6 +28,7 @@ import {
 } from '@/engine/pdu';
 import { createSimService } from '@/engine/service';
 import { STACKS } from '@/engine/stacks';
+import { TCP_PORT, TCP_WINDOW, type TcpFlags, type TcpSegment } from '@/engine/tcp';
 import { ip as parseIp, STP_CONVERGED } from '@/engine/testing';
 import type {
   DeviceId,
@@ -73,6 +76,114 @@ export function ripPacket(message: RipMessage): Ipv4Packet {
 const prefix = (length: number) => length as PrefixLength;
 
 /** Three routes: one a hop away, one two hops, and one poisoned. */
+/** PC1 in `routedLab`, browsing to PC2 there as the web and DNS server. */
+const CLIENT = ip('192.168.1.10');
+const SERVER = ip('192.168.2.10');
+const CLIENT_PORT = 49152;
+const DNS_CLIENT_PORT = 51000;
+
+export const dnsQuery: DnsQuery = { kind: 'dns', type: 'query', id: 0x1a2b, name: 'www.lab.local' };
+
+export const dnsAnswer: DnsResponse = {
+  ...dnsQuery,
+  type: 'response',
+  rcode: 'no-error',
+  answers: [{ name: 'www.lab.local', address: SERVER, ttl: DNS_TTL }],
+};
+
+export const dnsNoSuchName: DnsResponse = {
+  kind: 'dns',
+  type: 'response',
+  id: 0x1a2c,
+  name: 'www.x.local',
+  rcode: 'name-error',
+  answers: [],
+};
+
+export const httpGet: HttpRequest = {
+  kind: 'http',
+  type: 'request',
+  method: 'GET',
+  path: '/',
+  host: 'www.lab.local',
+};
+
+export const httpOk: HttpResponse = {
+  kind: 'http',
+  type: 'response',
+  status: 200,
+  reason: 'OK',
+  contentType: 'text/html',
+  body: '<html><body><h1>Welcome to www.lab.local</h1></body></html>',
+};
+
+const NO_FLAGS: TcpFlags = { syn: false, ack: false, fin: false, rst: false, psh: false };
+
+function segment(
+  from: 'client' | 'server',
+  seq: number,
+  ack: number,
+  flags: Partial<TcpFlags>,
+  payload?: TcpSegment['payload'],
+): TcpSegment {
+  const [srcPort, dstPort] =
+    from === 'client' ? [CLIENT_PORT, TCP_PORT.http] : [TCP_PORT.http, CLIENT_PORT];
+  return {
+    kind: 'tcp',
+    srcPort,
+    dstPort,
+    seq: seq >>> 0,
+    ack: ack >>> 0,
+    flags: { ...NO_FLAGS, ...flags },
+    window: TCP_WINDOW,
+    ...(payload && { payload }),
+  };
+}
+
+const CLIENT_ISN = 4_000_000_000;
+const SERVER_ISN = 123_456;
+const GET = byteLength(httpText(httpGet));
+const PAGE = byteLength(httpText(httpOk));
+
+/**
+ * The nine segments of fetching a page, in order: the handshake, the GET and its answer, then
+ * the server's FIN and the client's. A SYN or FIN counts one, data its UTF-8 bytes.
+ */
+export const webSession: readonly TcpSegment[] = [
+  segment('client', CLIENT_ISN, 0, { syn: true }),
+  segment('server', SERVER_ISN, CLIENT_ISN + 1, { syn: true, ack: true }),
+  segment('client', CLIENT_ISN + 1, SERVER_ISN + 1, { ack: true }),
+  segment('client', CLIENT_ISN + 1, SERVER_ISN + 1, { psh: true, ack: true }, httpGet),
+  segment('server', SERVER_ISN + 1, CLIENT_ISN + 1 + GET, { psh: true, ack: true }, httpOk),
+  segment('server', SERVER_ISN + 1 + PAGE, CLIENT_ISN + 1 + GET, { fin: true, ack: true }),
+  segment('client', CLIENT_ISN + 1 + GET, SERVER_ISN + 1 + PAGE, { ack: true }),
+  segment('client', CLIENT_ISN + 1 + GET, SERVER_ISN + 2 + PAGE, { fin: true, ack: true }),
+  segment('server', SERVER_ISN + 2 + PAGE, CLIENT_ISN + 2 + GET, { ack: true }),
+];
+
+/** What a server sends for a SYN to a port nothing listens on. */
+export const tcpRefusal = (syn: TcpSegment): TcpSegment => ({
+  ...syn,
+  srcPort: syn.dstPort,
+  dstPort: syn.srcPort,
+  seq: 0,
+  ack: (syn.seq + 1) >>> 0,
+  flags: { ...NO_FLAGS, rst: true, ack: true },
+});
+
+/** A DNS message or TCP segment between PC1 and PC2: to a well-known port means from the client. */
+export function webPacket(payload: DnsMessage | TcpSegment): Ipv4Packet {
+  const toServer =
+    payload.kind === 'tcp' ? payload.dstPort === TCP_PORT.http : payload.type === 'query';
+  const [src, dst] = toServer ? [CLIENT, SERVER] : [SERVER, CLIENT];
+  const base = { kind: 'ipv4', src, dst, ttl: 128, id: 21 } as const;
+  if (payload.kind === 'tcp') return { ...base, payload };
+  const [srcPort, dstPort] = toServer
+    ? [DNS_CLIENT_PORT, UDP_PORT.dns]
+    : [UDP_PORT.dns, DNS_CLIENT_PORT];
+  return { ...base, payload: { kind: 'udp', srcPort, dstPort, payload } };
+}
+
 export const ripV2Response: RipMessage = {
   kind: 'rip',
   command: 'response',

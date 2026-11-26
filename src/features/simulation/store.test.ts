@@ -5,6 +5,9 @@ import { currentFrames, receiveBatch, simulationStore, type SimulationState } fr
 import {
   arpRequest,
   batch,
+  dnsAnswer,
+  dnsNoSuchName,
+  dnsQuery,
   echoRequest,
   hop,
   ospfAck,
@@ -17,6 +20,8 @@ import {
   ripRequest,
   ripV1Response,
   ripV2Response,
+  webPacket,
+  webSession,
 } from './testing';
 
 const initial = simulationStore.getInitialState();
@@ -105,5 +110,45 @@ describe('protocol filters', () => {
     expect(describeFrame(ospf(ospfLsr))).toBe('OSPF LS request, 2 LSAs');
     expect(describeFrame(ospf(ospfLsu))).toBe('OSPF LS update from 1.1.1.1, 2 LSAs');
     expect(describeFrame(ospf(ospfAck))).toBe('OSPF LS ack, 1 LSA');
+  });
+
+  it('classifies a segment that carries HTTP as HTTP, and a bare one as TCP', () => {
+    const web = (payload: Parameters<typeof webPacket>[0]) =>
+      hop({ id: 1, from: 'PC1', to: 'SW1', sentAt: 1, payload: webPacket(payload) });
+    expect(webSession.map((segment) => protocolOf(web(segment).frame))).toEqual([
+      'tcp',
+      'tcp',
+      'tcp',
+      'http',
+      'http',
+      'tcp',
+      'tcp',
+      'tcp',
+      'tcp',
+    ]);
+    // The GET is 58 bytes and the response 142, so the sequence numbers jump by those.
+    expect(webSession.map((segment) => describeFrame(web(segment)))).toEqual([
+      'TCP 49152 → 80 [SYN] Seq=4000000000',
+      'TCP 80 → 49152 [SYN, ACK] Seq=123456 Ack=4000000001',
+      'TCP 49152 → 80 [ACK] Seq=4000000001 Ack=123457',
+      'HTTP GET / (Host www.lab.local)',
+      'HTTP 200 OK, text/html, 59 bytes',
+      'TCP 80 → 49152 [FIN, ACK] Seq=123599 Ack=4000000059',
+      'TCP 49152 → 80 [ACK] Seq=4000000059 Ack=123599',
+      'TCP 49152 → 80 [FIN, ACK] Seq=4000000059 Ack=123600',
+      'TCP 80 → 49152 [ACK] Seq=123600 Ack=4000000060',
+    ]);
+  });
+
+  it('classifies DNS and says what was asked and what came back', () => {
+    const dns = (payload: Parameters<typeof webPacket>[0]) =>
+      hop({ id: 1, from: 'PC1', to: 'SW1', sentAt: 1, payload: webPacket(payload) });
+    expect(protocolOf(dns(dnsQuery).frame)).toBe('dns');
+    expect(describeFrame(dns(dnsQuery))).toBe('DNS query A www.lab.local');
+    expect(describeFrame(dns(dnsAnswer))).toBe('DNS response www.lab.local A 192.168.2.10');
+    expect(describeFrame(dns(dnsNoSuchName))).toBe('DNS response: no such name www.x.local');
+    expect(describeFrame(dns({ ...dnsAnswer, answers: [] }))).toBe(
+      'DNS response www.lab.local: no A record',
+    );
   });
 });
