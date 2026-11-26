@@ -1,7 +1,8 @@
 import { SlidersHorizontalIcon } from 'lucide-react';
 import { createStore, useStore } from 'zustand';
 import { useRegisterCommands, type Command } from '@/features/command/registry';
-import { labSettings, type StpTimers } from '@/model';
+import { RIP_TIMERS } from '@/engine/routing/timers';
+import { labSettings, type RoutingTimers, type StpTimers } from '@/model';
 import { useEditor } from '@/model/react';
 import { editorStore } from '@/model/store';
 import { Dialog, DialogContent } from '@/ui/dialog';
@@ -24,12 +25,33 @@ const STP_EXPLANATION: Record<StpTimers, string> = {
   ios: 'Hello 2 s, forward delay 15 s, max age 20 s: a new port forwards after 30 s, as on a real switch.',
 };
 
+const ROUTING_OPTIONS = [
+  { value: 'fast', label: 'Fast (default)' },
+  { value: 'ios', label: 'Real IOS (30 s updates)' },
+] as const satisfies readonly { value: RoutingTimers; label: string }[];
+
+const { fast, ios } = RIP_TIMERS;
+
+const ROUTING_EXPLANATION: Record<RoutingTimers, string> = {
+  fast: `RIP sends updates every ${fast.update} s and drops a silent route after ${fast.invalid} s, so a lab converges in seconds.`,
+  ios: `RIP sends updates every ${ios.update} s; a silent route is invalid after ${ios.invalid} s, held down ${ios.holddown} s and flushed after ${ios.flush} s, as on a real router.`,
+};
+
 const COMMANDS: readonly Command[] = [
   {
     id: 'lab.settings',
     title: TITLE,
     group: 'File',
-    keywords: ['preferences', 'options', 'spanning tree', 'stp', 'timers', 'convergence'],
+    keywords: [
+      'preferences',
+      'options',
+      'spanning tree',
+      'stp',
+      'rip',
+      'routing',
+      'timers',
+      'convergence',
+    ],
     icon: SlidersHorizontalIcon,
     run: () => setOpen(true),
   },
@@ -48,7 +70,7 @@ export function LabSettingsMenuItem() {
 /** Settings that belong to the lab and travel with its file, not to any one device. */
 export function LabSettingsDialog() {
   const open = useStore(dialog, (state) => state.open);
-  const stpTimers = useEditor((state) => labSettings(state.topology).stpTimers);
+  const { stpTimers, routingTimers } = useEditor((state) => labSettings(state.topology));
   useRegisterCommands(COMMANDS);
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -63,6 +85,19 @@ export function LabSettingsDialog() {
             className="self-start"
           />
           <p className="text-sm text-fg-2">{STP_EXPLANATION[stpTimers]}</p>
+        </section>
+        <section className="flex flex-col gap-2">
+          <h3 className="text-sm font-medium">Routing protocol timers</h3>
+          <Segmented
+            label="Routing protocol timers"
+            value={routingTimers}
+            onValueChange={(next) =>
+              editorStore.getState().updateLabSettings({ routingTimers: next })
+            }
+            options={ROUTING_OPTIONS}
+            className="self-start"
+          />
+          <p className="text-sm text-fg-2">{ROUTING_EXPLANATION[routingTimers]}</p>
         </section>
       </DialogContent>
     </Dialog>

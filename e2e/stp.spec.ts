@@ -146,11 +146,12 @@ test('a lab pings within seconds of loading, and Lab settings switches it to the
   await page.getByRole('button', { name: 'Tracer menu' }).click();
   await page.getByRole('menuitem', { name: 'Lab settings…' }).click();
   const settings = page.getByRole('dialog', { name: 'Lab settings' });
-  await expect(settings.getByRole('radio', { name: 'Fast (default)' })).toHaveAttribute(
+  const stpTimers = settings.getByLabel('Spanning tree timers');
+  await expect(stpTimers.getByRole('radio', { name: 'Fast (default)' })).toHaveAttribute(
     'aria-checked',
     'true',
   );
-  await settings.getByRole('radio', { name: 'Real IOS (30 s)' }).click();
+  await stpTimers.getByRole('radio', { name: 'Real IOS (30 s)' }).click();
   await expect(settings).toContainText('a new port forwards after 30 s');
   await page.keyboard.press('Escape');
   await expect(settings).toBeHidden();
