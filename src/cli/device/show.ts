@@ -439,7 +439,7 @@ export function runningConfig(device: IosDevice): string[] {
     out.push(`enable password ${passwordText(device, config.enablePassword)}`);
   const users = usernameLines(config);
   if (users.length > 0) out.push('!', ...users, '!');
-  if (device.kind === 'router' && device.config.dhcp) out.push(...dhcpLines(device.config.dhcp));
+  if (config.dhcp) out.push(...dhcpLines(config.dhcp));
   if (device.kind === 'switch' && device.config.ipRouting) out.push('ip routing');
   if (device.kind === 'router' && device.config.ipv6UnicastRouting) {
     out.push('ipv6 unicast-routing');
@@ -458,13 +458,9 @@ export function runningConfig(device: IosDevice): string[] {
     out.push(...transparentVlanLines(device.config));
   }
   for (const entry of interfaceEntries(device)) out.push(...interfaceBlock(entry), '!');
-  if (device.kind === 'router' && device.config.eigrp) {
-    out.push(...eigrpLines(device.config.eigrp), '!');
-  }
-  if (device.kind === 'router' && device.config.ospf) {
-    out.push(...ospfBlock(device.config.ospf), '!');
-  }
-  if (device.kind === 'router' && device.config.rip) out.push(...ripBlock(device.config.rip), '!');
+  if (config.eigrp) out.push(...eigrpLines(config.eigrp), '!');
+  if (config.ospf) out.push(...ospfBlock(config.ospf), '!');
+  if (config.rip) out.push(...ripBlock(config.rip), '!');
   if (device.kind === 'router' && device.config.nat) out.push(...natLines(device.config.nat), '!');
   const staticRoutes = config.staticRoutes ?? [];
   if (staticRoutes.length > 0) out.push(...staticRoutes.map(routeLine), '!');
@@ -616,7 +612,7 @@ const HARDWARE: Record<InterfaceType, Hardware> = {
     encapsulation: 'ARPA',
   },
   Serial: { name: 'HD64570', bandwidth: 1544, delay: 20000, encapsulation: 'HDLC' },
-  Vlan: { name: 'CPU Interface', bandwidth: 100000, delay: 10, encapsulation: 'ARPA' },
+  Vlan: { name: 'CPU Interface', bandwidth: 1000000, delay: 10, encapsulation: 'ARPA' },
 };
 
 /** `aa:bb:cc:dd:ee:ff` as IOS writes it, `aabb.ccdd.eeff`. */

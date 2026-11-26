@@ -10,11 +10,11 @@ import {
 import type { ModeOf } from '../modes';
 import { iface, ipv4, keyword, num } from '../params';
 import { defineCommand } from '../tree';
-import { INVALID_INPUT, type RouterContext } from './context';
+import { INVALID_INPUT, type DeviceContext } from './context';
 import { findInterface, interfaceEntries, isLayer2 } from './show';
 import { showIpOspfInterface, showIpOspfInterfaceBrief, showIpOspfNeighbor } from './showOspf';
 
-const routerCommand = defineCommand<RouterContext>();
+const routerCommand = defineCommand<DeviceContext>();
 
 const EXEC = ['user-exec', 'priv-exec'] as const;
 const GLOBAL = ['global-config'] as const;
@@ -41,7 +41,7 @@ const networkPath = [
 ] as const;
 
 /** The router's OSPF process. `router ospf` creates it, so it is there in `ospf-config` unless undone. */
-function ospfOf(ctx: RouterContext, mode: ModeOf<'ospf-config'>): Draft<OspfConfig> {
+function ospfOf(ctx: DeviceContext, mode: ModeOf<'ospf-config'>): Draft<OspfConfig> {
   return (ctx.device.config.ospf ??= {
     processId: mode.processId,
     networks: [],
@@ -56,7 +56,7 @@ function networkNumber(address: Ipv4Address, wildcard: Ipv4Address): Ipv4Address
 
 /** Applies `edit` to each routed interface or subinterface of the mode. */
 export function eachInterface(
-  ctx: RouterContext,
+  ctx: DeviceContext,
   mode: ModeOf<'interface-config' | 'subinterface-config'>,
   edit: (config: Draft<RoutedInterface> | Draft<Subinterface>) => void,
 ): readonly string[] {

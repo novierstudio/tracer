@@ -84,7 +84,6 @@ export function showIpProtocols(
   device: IosDevice,
 ): readonly string[] {
   if (!protocols) return NO_ENGINE;
-  if (device.kind !== 'router') return [];
   const { eigrp, ospf, rip } = device.config;
   const sections = [
     eigrp && protocols.eigrp ? eigrpSection(eigrp, protocols.eigrp) : undefined,

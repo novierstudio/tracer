@@ -13,10 +13,10 @@ import {
 import type { ModeOf } from '../modes';
 import { ipv4, keyword, mask, num, word, type Param } from '../params';
 import { defineCommand } from '../tree';
-import { INVALID_INPUT, type RouterContext } from './context';
+import { INVALID_INPUT, type DeviceContext } from './context';
 import { showIpDhcpBinding, showIpDhcpPool } from './showDhcp';
 
-const routerCommand = defineCommand<RouterContext>();
+const routerCommand = defineCommand<DeviceContext>();
 
 const GLOBAL = ['global-config'] as const;
 const DHCP = ['dhcp-config'] as const;
@@ -30,12 +30,12 @@ const globalIp = keyword('ip', 'Global IP configuration subcommands');
 const dhcpKw = keyword('dhcp', 'Configure DHCP server and relay parameters');
 
 /** The router's DHCP server config, created by its first command. */
-function serverOf(ctx: RouterContext): Draft<DhcpServerConfig> {
+function serverOf(ctx: DeviceContext): Draft<DhcpServerConfig> {
   return (ctx.device.config.dhcp ??= { pools: {}, excluded: [] });
 }
 
 /** Drops the DHCP server config once nothing is left in it, so it stays out of the file. */
-function tidy(ctx: RouterContext) {
+function tidy(ctx: DeviceContext) {
   const { dhcp } = ctx.device.config;
   if (dhcp && dhcp.excluded.length === 0 && Object.keys(dhcp.pools).length === 0) {
     delete ctx.device.config.dhcp;
@@ -43,7 +43,7 @@ function tidy(ctx: RouterContext) {
 }
 
 /** Edits the pool the mode is in. Refused when the pool is gone, as a GUI edit can make it. */
-function editPool(ctx: RouterContext, mode: PoolMode, edit: (pool: Draft<DhcpPool>) => void) {
+function editPool(ctx: DeviceContext, mode: PoolMode, edit: (pool: Draft<DhcpPool>) => void) {
   const pool = ctx.device.config.dhcp?.pools[mode.pool];
   if (!pool) return ctx.reject(INVALID_INPUT);
   edit(pool);
@@ -61,13 +61,13 @@ function excludedCommands() {
   const sameRange =
     (first: Ipv4Address, last: Ipv4Address) => (range: DhcpServerConfig['excluded'][number]) =>
       range.first === first && range.last === last;
-  const add = (ctx: RouterContext, first: Ipv4Address, last: Ipv4Address) => {
+  const add = (ctx: DeviceContext, first: Ipv4Address, last: Ipv4Address) => {
     if (ipv4ToUint32(first) > ipv4ToUint32(last)) return ctx.reject('% Invalid address range');
     const server = serverOf(ctx);
     if (!server.excluded.some(sameRange(first, last))) server.excluded.push({ first, last });
     return NOTHING;
   };
-  const remove = (args: { low?: Ipv4Address; high?: Ipv4Address }, ctx: RouterContext) => {
+  const remove = (args: { low?: Ipv4Address; high?: Ipv4Address }, ctx: DeviceContext) => {
     const { low, high: last = low } = args;
     if (low === undefined || last === undefined) return ctx.reject('% Incomplete command.');
     const server = ctx.device.config.dhcp;
@@ -126,7 +126,7 @@ function leaseCommands() {
   const days = num('days', 0, 365, 'Days');
   const hours = num('hours', 0, 23, 'Hours');
   const minutes = num('minutes', 0, 59, 'Minutes');
-  const set = (ctx: RouterContext, mode: PoolMode, lease: number | 'infinite') => {
+  const set = (ctx: DeviceContext, mode: PoolMode, lease: number | 'infinite') => {
     const parsed = DhcpLease.safeParse(lease);
     if (!parsed.success) return ctx.reject('% A lease must last at least 1 minute');
     return editPool(ctx, mode, (pool) => {
@@ -134,7 +134,7 @@ function leaseCommands() {
       else pool.lease = parsed.data;
     });
   };
-  const reset = (_a: unknown, ctx: RouterContext, mode: PoolMode) =>
+  const reset = (_a: unknown, ctx: DeviceContext, mode: PoolMode) =>
     editPool(ctx, mode, (pool) => void delete pool.lease);
   const minutesOf = (d: number, h = 0, m = 0) => d * 1440 + h * 60 + m;
   return [

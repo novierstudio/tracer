@@ -13,7 +13,7 @@ import { NO_ENGINE, routeAge } from './showRouting';
 
 /** The running OSPF process, when the router has `router ospf` and the simulation runs it. */
 function ospfOf(protocols: RoutingProtocols, device: IosDevice): OspfStatus | undefined {
-  return device.kind === 'router' && device.config.ospf ? protocols.ospf : undefined;
+  return device.config.ospf ? protocols.ospf : undefined;
 }
 
 /** How each interface state reads: in `show ip ospf interface brief`, and in the full block. */

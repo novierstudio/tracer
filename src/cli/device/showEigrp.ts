@@ -20,7 +20,7 @@ const INFINITE_METRIC = 0xffffffff;
 
 /** The running EIGRP process, when the router has `router eigrp` and the simulation runs it. */
 function eigrpOf(protocols: RoutingProtocols, device: IosDevice): EigrpStatus | undefined {
-  return device.kind === 'router' && device.config.eigrp ? protocols.eigrp : undefined;
+  return device.config.eigrp ? protocols.eigrp : undefined;
 }
 
 /** `show ip eigrp neighbors`: the title, then one line per neighbour in the order they came up. */

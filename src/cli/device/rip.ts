@@ -10,11 +10,11 @@ import {
 import { RIP_CONFIG } from '../modes';
 import { iface, ipv4, keyword, num } from '../params';
 import { defineCommand } from '../tree';
-import { INVALID_INPUT, type RouterContext } from './context';
+import { INVALID_INPUT, type DeviceContext } from './context';
 import { findInterface, interfaceEntries } from './show';
 import { showIpProtocols } from './showProtocols';
 
-const routerCommand = defineCommand<RouterContext>();
+const routerCommand = defineCommand<DeviceContext>();
 
 const EXEC = ['user-exec', 'priv-exec'] as const;
 const GLOBAL = ['global-config'] as const;
@@ -39,7 +39,7 @@ export function classfulNetwork(address: Ipv4Address): Ipv4Address | undefined {
 }
 
 /** The router's RIP process. `router rip` creates it, so it is there in `rip-config` unless undone. */
-function ripOf(ctx: RouterContext): Draft<RipConfig> {
+function ripOf(ctx: DeviceContext): Draft<RipConfig> {
   return (ctx.device.config.rip ??= {
     networks: [],
     autoSummary: true,
