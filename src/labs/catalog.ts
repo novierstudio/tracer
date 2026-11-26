@@ -80,6 +80,21 @@ export const SAMPLE_LABS: readonly SampleLab[] = [
     load: () => import('./router-on-a-stick.tracer.json?raw').then(text),
   },
   {
+    id: 'layer3-switch',
+    title: 'Layer 3 switch',
+    description:
+      'No router this time. A multilayer switch carries Sales and Staff in two VLANs and, with `ip routing` on, routes between them on its own VLAN interfaces.',
+    difficulty: 'intermediate',
+    devices: { switch: 1, pc: 4 },
+    tryThis: [
+      'Ping PC3 (192.168.20.10, VLAN 20) from PC1 (VLAN 10)',
+      'Run `tracert 192.168.20.10` on PC1: the one hop on the way is MLS1’s Vlan10',
+      'Run `show ip route` on MLS1: both VLANs are directly connected',
+      'Run `no ip routing` on MLS1, then ping PC3 again',
+    ],
+    load: () => import('./layer3-switch.tracer.json?raw').then(text),
+  },
+  {
     id: 'stp-triangle',
     title: 'Spanning tree triangle',
     description:

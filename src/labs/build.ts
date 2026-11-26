@@ -257,6 +257,47 @@ function routerOnAStick() {
   return lab.topology;
 }
 
+function layer3Switch() {
+  const lab = labBuilder('layer3-switch');
+  lab.ios('MLS1', 'switch-l3-24', 424, 280, [
+    'ip routing',
+    'vlan 10',
+    ' name Sales',
+    'vlan 20',
+    ' name Staff',
+    'interface range FastEthernet0/1 - 2',
+    ' switchport mode access',
+    ' switchport access vlan 10',
+    'interface range FastEthernet0/3 - 4',
+    ' switchport mode access',
+    ' switchport access vlan 20',
+    'interface Vlan10',
+    ' description Sales',
+    ' ip address 192.168.10.1 255.255.255.0',
+    'interface Vlan20',
+    ' description Staff',
+    ' ip address 192.168.20.1 255.255.255.0',
+  ]);
+  // Sales on the left of the switch, Staff on the right.
+  lab.pc('PC1', 136, 184, '192.168.10.10/24', '192.168.10.1');
+  lab.pc('PC2', 136, 376, '192.168.10.11/24', '192.168.10.1');
+  lab.pc('PC3', 712, 184, '192.168.20.10/24', '192.168.20.1');
+  lab.pc('PC4', 712, 376, '192.168.20.11/24', '192.168.20.1');
+  lab.cable(['PC1', 'FastEthernet0'], ['MLS1', 'FastEthernet0/1']);
+  lab.cable(['PC2', 'FastEthernet0'], ['MLS1', 'FastEthernet0/2']);
+  lab.cable(['PC3', 'FastEthernet0'], ['MLS1', 'FastEthernet0/3']);
+  lab.cable(['PC4', 'FastEthernet0'], ['MLS1', 'FastEthernet0/4']);
+  lab.note('sales', 48, 464, 'VLAN 10, Sales: 192.168.10.0/24, gateway Vlan10 at 192.168.10.1.');
+  lab.note('staff', 624, 464, 'VLAN 20, Staff: 192.168.20.0/24, gateway Vlan20 at 192.168.20.1.');
+  lab.note(
+    'svis',
+    336,
+    48,
+    'No router: with ip routing on, MLS1 routes between its two VLAN interfaces itself.',
+  );
+  return lab.topology;
+}
+
 function stpTriangle() {
   const lab = labBuilder('stp-triangle');
   lab.ios('SW1', 'switch-24', 424, 40, ['spanning-tree vlan 1 priority 4096']);
@@ -416,6 +457,7 @@ export const BUILDERS: Record<string, () => Topology> = {
   'two-lans-router': twoLansRouter,
   'static-routes-serial': staticRoutesSerial,
   'router-on-a-stick': routerOnAStick,
+  'layer3-switch': layer3Switch,
   'stp-triangle': stpTriangle,
   'dhcp-router': dhcpRouter,
   'ospf-three-routers': ospfThreeRouters,
