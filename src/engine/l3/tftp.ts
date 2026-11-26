@@ -1,7 +1,7 @@
 import type { Ipv4Address } from '@/model';
 import { serverServices } from '@/model/defaults';
 import { APP_PORT, TFTP_BLOCK, type TftpMessage } from '../apps';
-import { ms } from '../core/time';
+import { ms, type SimTime } from '../core/time';
 import { byteLength } from '../http';
 import type { Ipv4Packet, UdpDatagram } from '../pdu';
 import { freePort, serviceFiles, setServiceFiles, withFile } from './appState';
@@ -26,7 +26,13 @@ export type TftpRequest =
  */
 export type TftpEvent =
   | { readonly kind: 'block'; readonly block: number }
-  | { readonly kind: 'done'; readonly bytes: number; readonly content: string }
+  | {
+      readonly kind: 'done';
+      readonly bytes: number;
+      readonly content: string;
+      /** Simulated milliseconds from the request to the last block, for IOS's transfer rate. */
+      readonly elapsed: number;
+    }
   | { readonly kind: 'failed'; readonly why: TftpFailure };
 
 export type TftpFailure =
@@ -47,6 +53,7 @@ type ClientTransfer = {
   readonly op: 'put' | 'get';
   readonly port: number;
   readonly server: Ipv4Address;
+  readonly startedAt: SimTime;
   /** The port the server answers from, once it has. */
   serverPort?: number;
   readonly file: string;
@@ -106,6 +113,7 @@ export function startTftp(ctx: IpContext, request: TftpRequest, listener: TftpLi
     op: request.op,
     port,
     server: request.server,
+    startedAt: ctx.now,
     file: request.file,
     content: request.op === 'put' ? request.content : '',
     block: 0,
@@ -121,6 +129,13 @@ export function startTftp(ctx: IpContext, request: TftpRequest, listener: TftpLi
     mode: 'octet',
   });
 }
+
+const done = (ctx: IpContext, transfer: ClientTransfer): TftpEvent => ({
+  kind: 'done',
+  bytes: byteLength(transfer.content),
+  content: transfer.content,
+  elapsed: ctx.now - transfer.startedAt,
+});
 
 function end(ctx: IpContext, transfer: ClientTransfer, event: TftpEvent) {
   forget(ctx, transfer);
@@ -231,11 +246,7 @@ function onClientPacket(
     send({ kind: 'tftp', op: 'ack', block: message.block });
     transfer.listener({ kind: 'block', block: message.block });
     if (message.data.length < TFTP_BLOCK) {
-      end(ctx, transfer, {
-        kind: 'done',
-        bytes: byteLength(transfer.content),
-        content: transfer.content,
-      });
+      end(ctx, transfer, done(ctx, transfer));
     } else {
       touch(ctx, transfer);
     }
@@ -243,11 +254,7 @@ function onClientPacket(
   }
   if (message.op !== 'ack' || message.block !== transfer.block) return;
   if (transfer.block >= blockCount(transfer.content)) {
-    end(ctx, transfer, {
-      kind: 'done',
-      bytes: byteLength(transfer.content),
-      content: transfer.content,
-    });
+    end(ctx, transfer, done(ctx, transfer));
     return;
   }
   transfer.block += 1;
