@@ -25,6 +25,8 @@ const HEADLINE_PING: Record<string, string> = {
   // PC3's SLAAC address: LAN B's prefix and PC3's MAC, b2:1f:56:da:90:69, by EUI-64.
   'ipv6-slaac': '2001:db8:2:0:b01f:56ff:feda:9069',
   'remote-management': '192.168.1.1',
+  etherchannel: '192.168.1.11',
+  'port-security': '192.168.1.11',
 };
 
 async function load(id: string): Promise<Topology> {
