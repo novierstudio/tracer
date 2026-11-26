@@ -131,6 +131,9 @@ describe('replaying a Packet Tracer running-config', () => {
         ],
       },
     });
+    expect(config.users).toEqual({
+      admin: { credential: { kind: 'secret', hash: '$1$mERr$hx5rVt7rPNoS4wqbXKX7m0' } },
+    });
     expect(config.lines.console).toEqual({
       password: 'cisco',
       login: 'password',
@@ -150,7 +153,6 @@ describe('replaying a Packet Tracer running-config', () => {
       'no service timestamps debug datetime msec',
       'ip cef',
       'no ipv6 cef',
-      'username admin secret 5 $1$mERr$hx5rVt7rPNoS4wqbXKX7m0',
       'license udi pid CISCO2911/K9 sn FTX1524X8M2-',
       'spanning-tree mode pvst',
       'router ospf 1',

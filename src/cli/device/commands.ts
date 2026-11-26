@@ -70,6 +70,7 @@ import { dhcpCommands } from './dhcp';
 import { ipv6Commands } from './ipv6';
 import { natCommands } from './nat';
 import { ospfCommands } from './ospf';
+import { remoteCommands } from './remote';
 import { ripCommands } from './rip';
 
 const EXEC = ['user-exec', 'priv-exec'] as const;
@@ -311,22 +312,33 @@ const VTY_LAST = 15;
 
 export const commonCommands = [
   ...execCommands,
+  ...remoteCommands,
   // EXEC
   command({
     modes: EXEC,
     path: [keyword('enable', 'Turn on privileged commands')],
     to: PRIV_EXEC,
-    run: (_args, ctx, mode) =>
-      mode.kind === 'user-exec' && needsEnablePassword(ctx.device)
-        ? ctx.ask({ kind: 'enable-password', attempts: 0 })
-        : NOTHING,
+    run: (_args, ctx, mode) => {
+      if (mode.kind !== 'user-exec') return NOTHING;
+      if (needsEnablePassword(ctx.device)) return ctx.ask({ kind: 'enable-password', attempts: 0 });
+      // A console gets in without one; a vty line never does.
+      return ctx.line.kind === 'vty' ? ctx.reject('% No password set') : NOTHING;
+    },
   }),
   command({
     modes: PRIV,
     path: [keyword('disable', 'Turn off privileged commands')],
     to: USER_EXEC,
   }),
-  command({ modes: EXEC, path: [keyword('exit', 'Exit from the EXEC')], to: USER_EXEC }),
+  command({
+    modes: EXEC,
+    path: [keyword('exit', 'Exit from the EXEC')],
+    to: USER_EXEC,
+    run: (_a, ctx) => {
+      if (ctx.line.kind === 'vty') ctx.disconnect();
+      return NOTHING;
+    },
+  }),
   command({
     modes: PRIV,
     path: [

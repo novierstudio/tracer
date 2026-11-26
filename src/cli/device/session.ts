@@ -5,6 +5,7 @@ import {
   VlanId,
   VTY_LINE_COUNT,
   type ConfigUpdate,
+  type LineConfig,
   type RouterConfig,
   type SwitchConfig,
 } from '../../model';
@@ -15,17 +16,21 @@ import { verifySecret } from '../passwords';
 import { buildTree, type CommandTree } from '../tree';
 import { routerCommands, switchCommands } from './commands';
 import { multilayerCommands } from './layer3';
-import type {
-  DeviceContext,
-  IosDevice,
-  Pending,
-  RouterContext,
-  RouterDevice,
-  SwitchContext,
-  SwitchDevice,
+import {
+  CONSOLE_LINE,
+  type DeviceContext,
+  type IosDevice,
+  type Pending,
+  type RemoteRequest,
+  type RouterContext,
+  type RouterDevice,
+  type SessionLine,
+  type SwitchContext,
+  type SwitchDevice,
 } from './context';
 import { applyModifier, pipeComplete, pipeHelp, readPipe } from './pipe';
 import { bindQuery, mapQuery, type EngineQuery, type EngineStream } from './query';
+import { continueKeys, rsaPrompt, verifyUser } from './remote';
 import { blankLine } from './show';
 
 const ROUTER_TREE = buildTree<RouterContext>(routerCommands);
@@ -55,6 +60,10 @@ interface Step<D extends IosDevice> {
   readonly query?: EngineQuery;
   /** Set by a command whose output streams from the simulation. */
   readonly stream?: EngineStream;
+  /** Set by `telnet` and `ssh`: the session to open from this device. */
+  readonly connect?: RemoteRequest;
+  /** Set when this session ends: `exit` on a vty line, or a login that failed too often. */
+  readonly disconnect?: true;
 }
 
 const DONE: Outcome = { kind: 'done' };
@@ -100,21 +109,68 @@ function checkEnablePassword<D extends IosDevice>(
 
 const LOGIN_ATTEMPTS = 3;
 
-/** IOS asks again after three wrong passwords, as a console does after `% Bad passwords`. */
-function checkLoginPassword<D extends IosDevice>(
+function lineConfigOf(device: IosDevice, line: SessionLine): LineConfig {
+  return line.kind === 'console'
+    ? device.config.lines.console
+    : (device.config.lines.vty[line.index] ?? device.config.lines.console);
+}
+
+/**
+ * A login's password. A console asks again after three failures; a vty line hangs up. With
+ * `login local` the account's password counts, and a user with privilege 15 starts in privileged
+ * EXEC. SSH asks only for the password, since the client named the user.
+ */
+function checkLogin<D extends IosDevice>(
   device: D,
   state: SessionState,
   pending: Extract<Pending, { kind: 'login' }>,
-  line: string,
+  input: string,
+  line: SessionLine,
 ): Step<D> {
-  const { password } = device.config.lines.console;
-  if (password === undefined || line === password) {
-    return { device, state: { mode: state.mode }, output: [], outcome: DONE };
+  const config = lineConfigOf(device, line);
+  const local = config.login === 'local';
+  const user = local ? device.config.users?.[pending.user ?? ''] : undefined;
+  const accepted = local
+    ? verifyUser(user, input)
+    : config.password === undefined || input === config.password;
+  if (accepted) {
+    const mode = user?.privilege === 15 ? PRIV_EXEC : USER_EXEC;
+    return { device, state: { mode }, output: [], outcome: DONE };
   }
   const attempts = pending.attempts + 1;
-  const output = attempts >= LOGIN_ATTEMPTS ? ['% Bad passwords'] : [];
-  const next = { kind: 'login', attempts: attempts % LOGIN_ATTEMPTS } as const;
+  const spent = attempts >= LOGIN_ATTEMPTS;
+  const output = local ? ['% Login invalid', ''] : spent ? ['% Bad passwords'] : [];
+  if (spent && line.kind === 'vty') {
+    return { device, state, output, outcome: DONE, disconnect: true };
+  }
+  const left = attempts % LOGIN_ATTEMPTS;
+  const next: Pending =
+    local && !(line.kind === 'vty' && line.protocol === 'ssh')
+      ? { kind: 'username', attempts: left }
+      : { ...pending, attempts: left };
   return { device, state: { mode: state.mode, pending: next }, output, outcome: DONE };
+}
+
+function readUsername<D extends IosDevice>(
+  device: D,
+  state: SessionState,
+  pending: Extract<Pending, { kind: 'username' }>,
+  input: string,
+): Step<D> {
+  const user = input.trim();
+  const next: Pending = user ? { kind: 'login', attempts: pending.attempts, user } : pending;
+  return { device, state: { mode: state.mode, pending: next }, output: [], outcome: DONE };
+}
+
+function answerKeys<D extends IosDevice>(
+  device: D,
+  state: SessionState,
+  pending: Extract<Pending, { kind: 'rsa-replace' | 'rsa-modulus' }>,
+  input: string,
+): Step<D> {
+  const result = continueKeys(device, pending, input);
+  const next = { mode: state.mode, ...(result.pending && { pending: result.pending }) };
+  return { device: result.device, state: next, output: result.output, outcome: DONE };
 }
 
 const isComment = (line: string) => /^\s*!/.test(line);
@@ -125,11 +181,16 @@ function stepWith<D extends IosDevice>(
   state: SessionState,
   line: string,
   history: readonly string[],
+  terminal: SessionLine,
 ): Step<D> {
   const { pending } = state;
   if (pending?.kind === 'banner') return continueBanner(device, state, pending, line);
   if (pending?.kind === 'enable-password') return checkEnablePassword(device, state, pending, line);
-  if (pending?.kind === 'login') return checkLoginPassword(device, state, pending, line);
+  if (pending?.kind === 'login') return checkLogin(device, state, pending, line, terminal);
+  if (pending?.kind === 'username') return readUsername(device, state, pending, line);
+  if (pending?.kind === 'rsa-replace' || pending?.kind === 'rsa-modulus') {
+    return answerKeys(device, state, pending, line);
+  }
   if (isComment(line)) return { device, state, output: [], outcome: DONE };
 
   const parsed = parse(line, state.mode, tree);
@@ -143,12 +204,15 @@ function stepWith<D extends IosDevice>(
     asked?: Pending;
     query?: EngineQuery;
     stream?: EngineStream;
+    connect?: RemoteRequest;
+    disconnect?: true;
   } = {};
   let output: readonly string[] = [];
   const next = produce(device, (draft: Draft<D>) => {
     const context = {
       device: draft,
       history,
+      line: terminal,
       reject: (message: string) => {
         effects.rejected ??= message;
         return [];
@@ -165,6 +229,8 @@ function stepWith<D extends IosDevice>(
         return render(undefined, device);
       },
       stream: (stream) => void (effects.stream = stream),
+      connect: (request) => void (effects.connect = request),
+      disconnect: () => void (effects.disconnect = true),
     } satisfies DeviceContext;
     output = parsed.execute(context as ContextFor<D>);
   });
@@ -179,7 +245,7 @@ function stepWith<D extends IosDevice>(
       outcome: DONE,
     };
   }
-  const { query, stream } = effects;
+  const { query, stream, connect, disconnect } = effects;
   return {
     device: next,
     state: { mode: parsed.mode },
@@ -187,23 +253,26 @@ function stepWith<D extends IosDevice>(
     outcome: DONE,
     ...(query && { query }),
     ...(stream && { stream }),
+    ...(connect && { connect }),
+    ...(disconnect && { disconnect }),
   };
 }
 
 /**
  * Runs one line, as typed at the console or read from a config file. `history` is what
- * `show history` lists.
+ * `show history` lists, and `terminal` the line the session runs on.
  */
 export function step<D extends IosDevice>(
   device: D,
   state: SessionState,
   line: string,
   history: readonly string[] = [],
+  terminal: SessionLine = CONSOLE_LINE,
 ): Step<D> {
   const result =
     device.kind === 'router'
-      ? stepWith<RouterDevice>(ROUTER_TREE, device, state, line, history)
-      : stepWith<SwitchDevice>(SWITCH_TREE, device, state, line, history);
+      ? stepWith<RouterDevice>(ROUTER_TREE, device, state, line, history, terminal)
+      : stepWith<SwitchDevice>(SWITCH_TREE, device, state, line, history, terminal);
   return result as Step<D>;
 }
 
@@ -344,6 +413,10 @@ export interface SessionResult {
    * reach the simulation opens it and prints its pieces in place of `output`.
    */
   readonly stream?: EngineStream;
+  /** Set by `telnet` and `ssh`: a terminal that can reach the simulation opens the session. */
+  readonly connect?: RemoteRequest;
+  /** The session has ended. The terminal closes it and returns to where it came from. */
+  readonly disconnect?: true;
 }
 
 /**
@@ -352,6 +425,8 @@ export interface SessionResult {
  */
 export interface DeviceSession {
   readonly state: SessionState;
+  /** The terminal line it runs on. */
+  readonly line: SessionLine;
   /** The session is reading a password: the terminal must not echo the line. */
   readonly readingPassword: boolean;
   prompt(device: IosDevice): string;
@@ -367,7 +442,10 @@ const treeOf = (device: IosDevice): CommandTree<never> =>
 /** IOS keeps the last 10 lines of each history by default (`terminal history size 10`). */
 const HISTORY_SIZE = 10;
 
-export function createDeviceSession(start: SessionState = { mode: USER_EXEC }): DeviceSession {
+export function createDeviceSession(
+  start: SessionState = { mode: USER_EXEC },
+  line: SessionLine = CONSOLE_LINE,
+): DeviceSession {
   let state = start;
   // IOS keeps EXEC and config lines apart, so `show history` in EXEC lists only EXEC lines.
   const histories = { exec: [] as readonly string[], config: [] as readonly string[] };
@@ -381,8 +459,12 @@ export function createDeviceSession(start: SessionState = { mode: USER_EXEC }): 
   const readingPassword = () =>
     state.pending?.kind === 'enable-password' || state.pending?.kind === 'login';
   const promptOf = (device: IosDevice) => {
+    const { pending } = state;
     if (readingPassword()) return 'Password: ';
-    if (state.pending?.kind === 'banner') return '';
+    if (pending?.kind === 'username') return 'Username: ';
+    if (pending?.kind === 'rsa-replace' || pending?.kind === 'rsa-modulus')
+      return rsaPrompt(pending);
+    if (pending?.kind === 'banner') return '';
     return prompt(device.config.hostname, state.mode);
   };
   return {
@@ -392,22 +474,31 @@ export function createDeviceSession(start: SessionState = { mode: USER_EXEC }): 
     get readingPassword() {
       return readingPassword();
     },
+    line,
     prompt: promptOf,
-    run(device, line) {
+    run(device, text) {
       const width = promptOf(device).length;
-      const history = remember(line);
+      const history = remember(text);
       const piped = state.pending
         ? { kind: 'none' as const }
-        : readPipe(line, state.mode, treeOf(device), width);
+        : readPipe(text, state.mode, treeOf(device), width);
       if (piped.kind === 'error') return { output: piped.output, update: undefined };
-      const result = step(device, state, piped.kind === 'piped' ? piped.command : line, history);
+      const command = piped.kind === 'piped' ? piped.command : text;
+      const result = step(device, state, command, history, line);
       state = result.state;
       const update = result.device === device ? undefined : toConfigUpdate(result.device);
       switch (result.outcome.kind) {
         case 'done': {
           if (piped.kind === 'none') {
-            const { output, query, stream } = result;
-            return { output, update, ...(query && { query }), ...(stream && { stream }) };
+            const { output, query, stream, connect, disconnect } = result;
+            return {
+              output,
+              update,
+              ...(query && { query }),
+              ...(stream && { stream }),
+              ...(connect && { connect }),
+              ...(disconnect && { disconnect }),
+            };
           }
           const filter = (lines: readonly string[]) => applyModifier(piped.modifier, lines);
           const query = result.query && mapQuery(result.query, filter);
@@ -441,21 +532,57 @@ export interface Console {
   readonly greeting: readonly string[];
 }
 
+/** How a line's `login` setting starts a session: no check, or the first question it asks. */
+function loginStart(config: LineConfig, line: SessionLine): Pending | undefined {
+  if (config.login === 'local') {
+    return line.kind === 'vty' && line.protocol === 'ssh'
+      ? { kind: 'login', attempts: 0, user: line.user ?? '' }
+      : { kind: 'username', attempts: 0 };
+  }
+  if (config.login === 'password' && config.password !== undefined) {
+    return { kind: 'login', attempts: 0 };
+  }
+  return undefined;
+}
+
+const bannerOf = (device: IosDevice) =>
+  device.config.bannerMotd === undefined ? [] : device.config.bannerMotd.split('\n');
+
 /**
  * Connects to the device's console line, as plugging in a console cable does: the MOTD banner,
- * then the line password when the line has `login` and a password. `login local` lets the
- * console in, since the model has no usernames yet.
+ * then the line password when the line has `login` and a password, or a username and password
+ * with `login local`.
  */
 export function openConsole(device: IosDevice): Console {
-  const { bannerMotd, lines } = device.config;
-  const locked = lines.console.login === 'password' && lines.console.password !== undefined;
-  const greeting = [
-    ...(bannerMotd === undefined ? [] : bannerMotd.split('\n')),
-    ...(locked ? ['', 'User Access Verification', ''] : []),
-  ];
-  const session = createDeviceSession({
-    mode: USER_EXEC,
-    ...(locked && { pending: { kind: 'login', attempts: 0 } }),
-  });
+  const pending = loginStart(device.config.lines.console, CONSOLE_LINE);
+  const greeting = [...bannerOf(device), ...(pending ? ['', 'User Access Verification', ''] : [])];
+  const session = createDeviceSession({ mode: USER_EXEC, ...(pending && { pending }) });
+  return { session, greeting };
+}
+
+/** A vty session, or the lines the device sends before it hangs up. */
+export type VtyOpening = Console | { readonly refused: readonly string[] };
+
+/**
+ * Opens a Telnet or SSH session on vty line `line.index`, which the device accepted the connection
+ * on. A line with `login` but no password refuses it, as IOS does. SSH clients ask for the
+ * password themselves, so they get no "User Access Verification".
+ */
+export function openVty(
+  device: IosDevice,
+  line: Extract<SessionLine, { kind: 'vty' }>,
+): VtyOpening {
+  const config = lineConfigOf(device, line);
+  if (config.login === 'password' && config.password === undefined) {
+    return { refused: ['', 'Password required, but none set'] };
+  }
+  const pending = loginStart(config, line);
+  const verification = !pending
+    ? []
+    : line.protocol === 'ssh'
+      ? ['']
+      : ['', 'User Access Verification', ''];
+  const greeting = [...bannerOf(device), ...verification];
+  const session = createDeviceSession({ mode: USER_EXEC, ...(pending && { pending }) }, line);
   return { session, greeting };
 }

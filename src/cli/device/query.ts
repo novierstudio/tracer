@@ -15,7 +15,7 @@ import type {
   TraceListener,
   TraceOptions,
 } from '../../engine/api';
-import type { PortId, Result } from '../../model';
+import type { Ipv4Address, PortId, RemoteProtocol, Result } from '../../model';
 import type { IpAddress } from '../../model/ipv6';
 import type { IosDevice } from './context';
 import { pingOutput } from './ping';
@@ -23,6 +23,16 @@ import { tracerouteOutput } from './traceroute';
 
 /** Whether each port's link is up, as the simulation sees it. */
 export type PortStates = Readonly<Partial<Record<PortId, boolean>>>;
+
+/** A Telnet or SSH session open on one of a device's vty lines. */
+export type VtySession = {
+  /** 0 to 15, as in `line vty 0 15`. */
+  readonly line: number;
+  readonly protocol: RemoteProtocol;
+  readonly peer: Ipv4Address;
+  /** Who logged in, when the line asked for a username. */
+  readonly user?: string;
+};
 
 /** The live state a show command can ask the simulation for, by kind, and what it gets back. */
 export interface EngineAnswers {
@@ -41,6 +51,8 @@ export interface EngineAnswers {
   /** `clear ip nat translation *`: how many translations it cleared. Asking clears them. */
   readonly natCleared: number;
   readonly ipv6: Ipv6Status;
+  /** The Telnet and SSH sessions open on the device's vty lines, for `show users`. */
+  readonly sessions: readonly VtySession[];
 }
 
 export type EngineQueryKind = keyof EngineAnswers;
