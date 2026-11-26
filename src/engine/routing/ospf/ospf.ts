@@ -1,15 +1,6 @@
-import type {
-  Device,
-  InterfaceId,
-  Ipv4Address,
-  MacAddress,
-  OspfConfig,
-  PrefixLength,
-  RoutedInterface,
-  Subinterface,
-} from '@/model';
+import type { Device, Ipv4Address, MacAddress, OspfConfig, PrefixLength } from '@/model';
 import { ms, type SimDuration, type SimTime } from '../../core/time';
-import { ipInterfaces, type IpInterface } from '../../l3/interfaces';
+import { ipInterfaces } from '../../l3/interfaces';
 import { compareAddresses, inPrefix, matchesWildcard, networkOf } from '../../l3/ipv4';
 import { ADMINISTRATIVE_DISTANCE, type LearnedRoute } from '../../l3/routes';
 import type { DeviceContext, ModuleContext, SimModule } from '../../module';
@@ -31,6 +22,7 @@ import {
   type RouterLsa,
 } from '../../pdu';
 import { arrival, packetIn, sendOn } from '../link';
+import { bandwidthOf, pickRouterId, settingsOf } from '../interfaceMetrics';
 import { OSPF_TIMERS } from '../timers';
 import { elect } from './election';
 import { shortestPaths } from './spf';
@@ -106,34 +98,6 @@ const STATE_NAMES: Record<OspfNeighborState, string> = {
   full: 'FULL',
 };
 
-/** Bandwidth in kbit/s, as IOS gives each kind of interface by default. */
-function bandwidth(device: Router, ip: IpInterface): number {
-  switch (ip.medium.kind) {
-    case 'loopback':
-      return 8_000_000;
-    case 'serial':
-      return 1544;
-    case 'ethernet': {
-      const { port } = ip.medium;
-      const kind = device.ports.find((candidate) => candidate.id === port)?.kind;
-      const speed = device.config.interfaces[port]?.speed;
-      return (speed ?? (kind === 'gigabitEthernet' ? 1000 : 100)) * 1000;
-    }
-    case 'svi':
-      return 100_000;
-  }
-}
-
-/** The config an interface's own OSPF settings live in: its port, subinterface or loopback. */
-function settingsOf(device: Router, name: InterfaceId): RoutedInterface | Subinterface | undefined {
-  const { interfaces, subinterfaces, virtualInterfaces } = device.config;
-  return (
-    (interfaces as Partial<Record<string, RoutedInterface>>)[name] ??
-    (subinterfaces as Partial<Record<string, Subinterface>>)[name] ??
-    (virtualInterfaces as Partial<Record<string, RoutedInterface>>)[name]
-  );
-}
-
 type Plan = Pick<Iface, 'ip' | 'area' | 'type' | 'cost' | 'priority' | 'passive'>;
 
 /**
@@ -154,7 +118,7 @@ function plan(ctx: DeviceContext, device: Router, config: OspfConfig): Plan[] {
           : 'broadcast';
     const settings = settingsOf(device, ip.name);
     const cost =
-      settings?.ospfCost ?? Math.max(1, Math.floor(REFERENCE_BANDWIDTH / bandwidth(device, ip)));
+      settings?.ospfCost ?? Math.max(1, Math.floor(REFERENCE_BANDWIDTH / bandwidthOf(device, ip)));
     return [
       {
         ip,
@@ -168,19 +132,6 @@ function plan(ctx: DeviceContext, device: Router, config: OspfConfig): Plan[] {
   });
 }
 
-/** `router-id`, else the highest loopback address, else the highest interface address. */
-function pickRouterId(ctx: DeviceContext, config: OspfConfig): Ipv4Address | undefined {
-  if (config.routerId) return config.routerId;
-  const interfaces = ipInterfaces(ctx.device, ctx, undefined);
-  const highest = (list: readonly IpInterface[]) =>
-    list
-      .map((iface) => iface.cidr.address)
-      .sort(compareAddresses)
-      .at(-1);
-  return (
-    highest(interfaces.filter((iface) => iface.medium.kind === 'loopback')) ?? highest(interfaces)
-  );
-}
 
 // Sending
 
@@ -961,7 +912,7 @@ function reconcile(ctx: OspfContext) {
     process = undefined;
   }
   if (!process) {
-    const routerId = pickRouterId(ctx, config);
+    const routerId = pickRouterId(ctx, config.routerId);
     if (!routerId) return;
     process = {
       id: config.processId,
