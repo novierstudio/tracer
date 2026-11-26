@@ -1,7 +1,7 @@
 import { SlidersHorizontalIcon } from 'lucide-react';
 import { createStore, useStore } from 'zustand';
 import { useRegisterCommands, type Command } from '@/features/command/registry';
-import { OSPF_TIMERS, RIP_TIMERS } from '@/engine/routing/timers';
+import { EIGRP_TIMERS, OSPF_TIMERS, RIP_TIMERS } from '@/engine/routing/timers';
 import { labSettings, type RoutingTimers, type StpTimers } from '@/model';
 import { useEditor } from '@/model/react';
 import { editorStore } from '@/model/store';
@@ -32,10 +32,11 @@ const ROUTING_OPTIONS = [
 
 const { fast, ios } = RIP_TIMERS;
 const ospf = OSPF_TIMERS;
+const eigrp = EIGRP_TIMERS;
 
 const ROUTING_EXPLANATION: Record<RoutingTimers, string> = {
-  fast: `RIP sends updates every ${fast.update} s and drops a silent route after ${fast.invalid} s, so a lab converges in seconds. OSPF says hello every ${ospf.fast.hello} s and declares a silent neighbour dead after ${ospf.fast.dead} s.`,
-  ios: `RIP sends updates every ${ios.update} s; a silent route is invalid after ${ios.invalid} s, held down ${ios.holddown} s and flushed after ${ios.flush} s, as on a real router. OSPF hello ${ospf.ios.hello} s, dead ${ospf.ios.dead} s.`,
+  fast: `RIP sends updates every ${fast.update} s and drops a silent route after ${fast.invalid} s, so a lab converges in seconds. OSPF says hello every ${ospf.fast.hello} s and declares a silent neighbour dead after ${ospf.fast.dead} s. EIGRP says hello every ${eigrp.fast.hello} s, with a ${eigrp.fast.hold} s hold time.`,
+  ios: `RIP sends updates every ${ios.update} s; a silent route is invalid after ${ios.invalid} s, held down ${ios.holddown} s and flushed after ${ios.flush} s, as on a real router. OSPF hello ${ospf.ios.hello} s, dead ${ospf.ios.dead} s. EIGRP hello ${eigrp.ios.hello} s, hold ${eigrp.ios.hold} s.`,
 };
 
 const COMMANDS: readonly Command[] = [
@@ -50,6 +51,7 @@ const COMMANDS: readonly Command[] = [
       'stp',
       'rip',
       'ospf',
+      'eigrp',
       'routing',
       'timers',
       'convergence',

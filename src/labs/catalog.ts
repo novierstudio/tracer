@@ -141,6 +141,22 @@ export const SAMPLE_LABS: readonly SampleLab[] = [
     load: () => import('./ospf-three-routers.tracer.json?raw').then(text),
   },
   {
+    id: 'eigrp-feasible-successor',
+    title: 'EIGRP with a feasible successor',
+    description:
+      'Three routers in a triangle run EIGRP. R1 reaches R3’s LAN through R2, and keeps the slow serial link to R3 as a feasible successor: when R2’s link fails, R1 switches at once, without asking anyone.',
+    difficulty: 'intermediate',
+    devices: { router: 3, pc: 3 },
+    tryThis: [
+      'Run `show ip eigrp neighbors` on R1: R2 and R3 are its neighbours',
+      'Run `show ip route` on R1 and find the D routes, with their metric after 90/',
+      'Run `show ip eigrp topology` on R1: R3’s LAN has two paths, the successor and a feasible successor',
+      'Ping PC3 (192.168.3.10) from PC1’s Command Prompt',
+      'Shut down R1’s GigabitEthernet0/1, then run `show ip route` on R1 again: R3’s LAN is over the serial link',
+    ],
+    load: () => import('./eigrp-feasible-successor.tracer.json?raw').then(text),
+  },
+  {
     id: 'dns-web-server',
     title: 'DNS and a web server',
     description:
