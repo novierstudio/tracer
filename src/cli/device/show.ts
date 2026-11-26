@@ -304,6 +304,7 @@ export function runningConfig(device: IosDevice): string[] {
   if (config.enablePassword)
     out.push(`enable password ${passwordText(device, config.enablePassword)}`);
   if (device.kind === 'router' && device.config.dhcp) out.push(...dhcpLines(device.config.dhcp));
+  if (device.kind === 'switch' && device.config.ipRouting) out.push('ip routing');
   if (!config.domainLookup) out.push('no ip domain-lookup');
   out.push('!');
   if (device.kind === 'switch') out.push(...spanningTreeLines(device.config), '!');
@@ -312,9 +313,8 @@ export function runningConfig(device: IosDevice): string[] {
     out.push(...ospfBlock(device.config.ospf), '!');
   }
   if (device.kind === 'router' && device.config.rip) out.push(...ripBlock(device.config.rip), '!');
-  if (device.kind === 'router' && device.config.staticRoutes.length > 0) {
-    out.push(...device.config.staticRoutes.map(routeLine), '!');
-  }
+  const staticRoutes = config.staticRoutes ?? [];
+  if (staticRoutes.length > 0) out.push(...staticRoutes.map(routeLine), '!');
   if (device.kind === 'switch' && device.config.defaultGateway) {
     out.push(`ip default-gateway ${device.config.defaultGateway}`, '!');
   }
