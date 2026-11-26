@@ -40,5 +40,33 @@ export default defineConfig([
       ],
     },
   },
+  {
+    // The simulation worker must not bundle zod: value imports from the model may only come from
+    // its schema-free modules. Type imports are erased and always fine.
+    files: ['src/engine/**', 'src/workers/sim.worker.ts'],
+    ignores: ['src/engine/**/*.test.ts', 'src/engine/testing.ts', 'src/engine/client.ts'],
+    rules: {
+      '@typescript-eslint/no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            {
+              name: 'zod',
+              message: 'The simulation worker must not bundle zod.',
+              allowTypeImports: true,
+            },
+          ],
+          patterns: [
+            {
+              regex: '^@/model(?!/(vlans|defaults|result)$)(/.*)?$',
+              message:
+                'Value imports into the simulation worker must come from @/model/vlans, @/model/defaults or @/model/result, so zod stays out of the worker.',
+              allowTypeImports: true,
+            },
+          ],
+        },
+      ],
+    },
+  },
   prettier,
 ]);
