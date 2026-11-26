@@ -97,12 +97,13 @@ test('PCs lease addresses from R1, ping their gateway, and R1 lists the bindings
   );
   expect(await prompt.rows()).toEqual(
     expect.arrayContaining([
-      '   DHCP Enabled. . . . . . . . . . . : Yes',
+      '   IPv6 Address. . . . . . . . . . . : ::',
       expect.stringMatching(LEASED),
       '   Subnet Mask . . . . . . . . . . . : 255.255.255.0',
       expect.stringMatching(/^ {3}Lease Obtained(?:\. )+\. : \w+day, /),
       expect.stringMatching(/^ {3}Lease Expires(?: \.)+ : \w+day, /),
-      '   Default Gateway . . . . . . . . . : 192.168.1.1',
+      '   Default Gateway . . . . . . . . . : ::',
+      '                                       192.168.1.1',
       '   DHCP Server . . . . . . . . . . . : 192.168.1.1',
       '   DNS Servers . . . . . . . . . . . : 8.8.8.8',
     ]),
