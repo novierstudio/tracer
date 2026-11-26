@@ -12,10 +12,11 @@ import {
   type PortChannelInterface,
   type PortId,
   type SwitchedInterface,
+  type Switchport,
 } from '../../model';
 import type { ModeOf } from '../modes';
 import { choice, keyword, num } from '../params';
-import { shortInterfaceName } from '../interfaces';
+import { ptShortName, shortInterfaceName } from '../interfaces';
 import { defineCommand } from '../tree';
 import { INVALID_INPUT, type SwitchContext, type SwitchDevice } from './context';
 import { NO_ENGINE } from './showSwitching';
@@ -79,6 +80,15 @@ export function portChannelTargets(
   return [own as Draft<PortChannelInterface> as Draft<SwitchedInterface>, ...members];
 }
 
+/** A plain copy of a draft's switchport, for the port-channel it creates. */
+const copySwitchport = (switchport: Draft<Switchport>): Switchport =>
+  ({
+    ...switchport,
+    ...(switchport.allowedVlans && {
+      allowedVlans: switchport.allowedVlans.map((range) => ({ ...range })),
+    }),
+  }) as Switchport;
+
 const MODE_HELP: Record<ChannelMode, string> = {
   active: 'Enable LACP unconditionally',
   auto: 'Enable PAgP only if a PAgP device is detected',
@@ -125,7 +135,7 @@ function joinGroup(
     if (!device.config.portChannels[po]) {
       device.config.portChannels[po] = {
         shutdown: false,
-        switchport: structuredClone(config.switchport),
+        switchport: copySwitchport(config.switchport),
         ...(config.modeAccess && { modeAccess: true }),
       };
       out.push(`Creating a port-channel interface Port-channel ${group}`);
@@ -178,8 +188,7 @@ export const etherchannelCommands = [
   switchCommand({
     modes: EXEC,
     path: [show, etherchannel, keyword('port-channel', 'Port-channel information')],
-    run: (_a, ctx) =>
-      ctx.query('layer2', (status, device) => showEtherchannelPortChannel(status, device)),
+    run: (_a, ctx) => ctx.query('layer2', (status) => showEtherchannelPortChannel(status)),
   }),
   switchCommand({
     modes: EXEC,
@@ -212,12 +221,12 @@ const protocolName = (group: EtherChannelStatus) =>
 export function showEtherchannelSummary(status: Layer2Status | undefined): readonly string[] {
   if (!status) return NO_ENGINE;
   const groups = status.etherchannels;
+  // Each port is followed by a space, so a row with ports ends in one, as PT prints it.
   const rows = groups.map((group) => {
     const po = `Po${group.group}(S${group.inUse ? 'U' : 'D'})`;
-    const ports = group.members
-      .map((member) => `${shortInterfaceName(member.port)}(${member.flag})`)
-      .join(' ');
-    return `${String(group.group).padEnd(7)}${po.padEnd(14)}${protocolName(group).padStart(8)}   ${ports}`;
+    const ports = group.members.map((member) => `${ptShortName(member.port)}(${member.flag}) `);
+    const row = `${String(group.group).padEnd(7)}${po.padEnd(18)}${protocolName(group).padEnd(7)}`;
+    return ports.length > 0 ? row + ports.join('') : row.trimEnd();
   });
   return [
     ...SUMMARY_LEGEND,
@@ -231,15 +240,14 @@ export function showEtherchannelSummary(status: Layer2Status | undefined): reado
   ];
 }
 
-/** `0d:00h:05m:12s`, as IOS writes an age. */
+/** `00d:00h:05m:12s`, as Packet Tracer writes an age. */
 function age(ms: number): string {
-  const seconds = Math.floor(ms / 1000);
+  const seconds = Math.max(0, Math.floor(ms / 1000));
+  const two = (n: number) => String(n).padStart(2, '0');
   const d = Math.floor(seconds / 86400);
   const h = Math.floor((seconds % 86400) / 3600);
   const m = Math.floor((seconds % 3600) / 60);
-  const s = seconds % 60;
-  const two = (n: number) => String(n).padStart(2, '0');
-  return `${d}d:${two(h)}h:${two(m)}m:${two(s)}s`;
+  return `${two(d)}d:${two(h)}h:${two(m)}m:${two(seconds % 60)}s`;
 }
 
 const EC_STATE: Record<ChannelMode, string> = {
@@ -250,15 +258,14 @@ const EC_STATE: Record<ChannelMode, string> = {
   auto: 'Automatic-Sl',
 };
 
+const PROTOCOL_LINE = { lacp: 'LACP', pagp: 'PAGP' } as const;
+
 /** `show etherchannel port-channel`: each group's port-channel and the ports bundled in it. */
-export function showEtherchannelPortChannel(
-  status: Layer2Status | undefined,
-  device: SwitchDevice,
-): readonly string[] {
+export function showEtherchannelPortChannel(status: Layer2Status | undefined): readonly string[] {
   if (!status) return NO_ENGINE;
   const now = status.clock;
   const out = [
-    '                Channel-group listing: ',
+    '                Channel-group listing:',
     '                ----------------------',
     '',
   ];
@@ -271,66 +278,57 @@ export function showEtherchannelPortChannel(
           : latest,
       undefined,
     );
-    const protocol = group.protocol === 'lacp' ? 'LACP' : group.protocol === 'pagp' ? 'PAgP' : '-';
     out.push(
-      `Group: ${group.group} `,
+      `Group: ${group.group}`,
       '----------',
-      '                Port-channels in the group: ',
+      '                Port-channels in the group:',
       '                ---------------------------',
       '',
       `Port-channel: Po${group.group}${group.protocol === 'lacp' ? '    (Primary Aggregator)' : ''}`,
-      '',
       '------------',
       '',
       `Age of the Port-channel   = ${age(group.upSince === undefined ? 0 : now - group.upSince)}`,
-      `Logical slot/port   = 2/${group.group}          Number of ports = ${bundled.length}`,
-      ...(group.protocol === 'lacp'
-        ? ['HotStandBy port = null ']
-        : ['GC                  = 0x00000000      HotStandBy port = null']),
-      `Port state          = Port-channel${group.inUse ? ' Ag-Inuse' : ' Ag-Not-Inuse'} `,
-      `Protocol            =   ${protocol}`,
-      'Port security       = Disabled',
+      `Logical slot/port   = 2/${group.group}       Number of ports = ${bundled.length} `,
+      'GC                  = 0x00000000      HotStandBy port = null',
+      'Port state          = Port-channel ',
+      `Protocol            =   ${group.protocol ? PROTOCOL_LINE[group.protocol] : '-'}`,
+      'Port Security       = Disabled',
       '',
     );
-    if (bundled.length > 0) {
-      out.push(
-        'Ports in the Port-channel: ',
-        '',
-        'Index   Load   Port     EC state        No of bits',
-        '------+------+------+------------------+-----------',
-        ...bundled.map(
-          (member, index) =>
-            `  ${String(index).padEnd(6)}${'00'.padEnd(7)}${shortInterfaceName(member.port).padEnd(9)}${EC_STATE[member.mode].padEnd(19)}0`,
-        ),
-        '',
-      );
-    }
-    if (last) {
-      out.push(
-        `Time since last port bundled:    ${age(now - (last.bundledAt ?? now))}    ${shortInterfaceName(last.port)}`,
-        '',
-      );
-    }
+    if (bundled.length === 0) continue;
+    out.push(
+      'Ports in the Port-channel:',
+      '',
+      'Index   Load   Port     EC state        No of bits',
+      '------+------+------+------------------+-----------',
+      ...bundled.map(
+        (member) =>
+          `  0     00     ${ptShortName(member.port).padEnd(9)}${EC_STATE[member.mode].padEnd(19)}0`,
+      ),
+      `Time since last port bundled:    ${age(now - (last?.bundledAt ?? now))}    ${ptShortName(last!.port)}`,
+      '',
+    );
   }
-  void device;
   return out;
 }
+
+const LOAD_BALANCE_ADDRESSES: Record<LoadBalance, [nonIp: string, ip: string]> = {
+  'src-mac': ['Source MAC address', 'Source MAC address'],
+  'dst-mac': ['Destination MAC address', 'Destination MAC address'],
+  'src-dst-mac': ['Source XOR Destination MAC address', 'Source XOR Destination MAC address'],
+  'src-ip': ['Source MAC address', 'Source IP address'],
+  'dst-ip': ['Destination MAC address', 'Destination IP address'],
+  'src-dst-ip': ['Source XOR Destination MAC address', 'Source XOR Destination IP address'],
+};
 
 /** `show etherchannel load-balance`: the hashing scheme `port-channel load-balance` sets. */
 export function showEtherchannelLoadBalance(device: SwitchDevice): readonly string[] {
   const method = device.config.loadBalance ?? DEFAULT_LOAD_BALANCE;
+  const [nonIp, ip] = LOAD_BALANCE_ADDRESSES[method];
   return [
-    'EtherChannel Load-Balancing Configuration:',
-    `        ${method}`,
-    '',
-    'EtherChannel Load-Balancing Addresses Used Per-Protocol:',
-    `Non-IP: ${describeAddresses(method, false)}`,
-    `  IPv4: ${describeAddresses(method, true)}`,
+    `EtherChannel Load-Balancing Operational State (${method}):`,
+    `  Non-IP: ${nonIp}`,
+    `  IPv4: ${ip}`,
+    `  IPv6: ${ip}`,
   ];
-}
-
-function describeAddresses(method: LoadBalance, ip: boolean): string {
-  const field = method.endsWith('ip') && ip ? 'IP address' : 'MAC address';
-  if (method.startsWith('src-dst')) return `Source XOR Destination ${field}`;
-  return `${method.startsWith('src') ? 'Source' : 'Destination'} ${field}`;
 }

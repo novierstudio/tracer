@@ -8,7 +8,7 @@ import { drawRandom } from './core/random';
 import { after, ms, START, type SimDuration, type SimTime } from './core/time';
 import type { EventId, SentFrame, SimEvent } from './events';
 import type { Frame } from './frame';
-import { endUp } from './l1';
+import { endUp, linkSyslog } from './l1';
 import type { DeviceUnavailable, ModuleContext, SimModule, Stacks } from './module';
 import type { TopologyPatch } from './patch';
 
@@ -120,6 +120,8 @@ export function createEngine({
   let now = START;
   let generations = 0;
   let settings = DEFAULT_LAB_SETTINGS;
+  // Set while a lab loads, when links coming up are not news.
+  let loading = false;
   // What the device handling an arriving frame sends, while it handles it.
   let handling: SentFrame[] | undefined;
 
@@ -229,6 +231,14 @@ export function createEngine({
 
   function linkChanged(link: Link, up: boolean) {
     log.append({ kind: 'link', time: now, link: link.id, up });
+    // Devices booting with a lab print nothing: their consoles open on a running network.
+    if (!loading) {
+      for (const end of [link.a, link.b]) {
+        for (const text of linkSyslog(devices.get(end.device), end.port, up, disabled(end))) {
+          log.append({ kind: 'syslog', time: now, device: end.device, text });
+        }
+      }
+    }
     for (const end of [link.a, link.b]) {
       for (const slot of running.get(end.device) ?? []) {
         slot.module.onLinkChange?.(slot.ctx, end.port, up);
@@ -330,7 +340,12 @@ export function createEngine({
     now = START;
     generations = 0;
     settings = labSettings(topology);
-    applyPatch({ devices: topology.devices, links: topology.links });
+    loading = true;
+    try {
+      applyPatch({ devices: topology.devices, links: topology.links });
+    } finally {
+      loading = false;
+    }
   }
 
   function process(item: Scheduled) {

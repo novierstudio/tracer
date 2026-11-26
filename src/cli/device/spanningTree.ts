@@ -3,6 +3,7 @@ import {
   BridgePriority,
   DEFAULT_BRIDGE_PRIORITY,
   PathCost,
+  type PortChannelId,
   type PortId,
   type SwitchInterface,
   type VlanId,
@@ -69,7 +70,10 @@ function setPriority(ctx: SwitchContext, ranges: readonly VlanRange[], priority:
 function switchportsOf(ctx: SwitchContext, mode: ModeOf<'interface-config'>) {
   const found: [PortId, Draft<SwitchInterface>][] = [];
   for (const id of mode.interfaces) {
-    const port = ctx.device.config.interfaces[id as PortId];
+    // A port-channel takes spanning tree settings as one port.
+    const port =
+      ctx.device.config.interfaces[id as PortId] ??
+      (ctx.device.config.portChannels?.[id as PortChannelId] as Draft<SwitchInterface> | undefined);
     if (!port) return undefined;
     found.push([id as PortId, port]);
   }

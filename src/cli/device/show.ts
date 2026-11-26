@@ -169,7 +169,7 @@ function switchportLines(switchport: Switchport, modeAccess: boolean | undefined
   return lines;
 }
 
-/** Port security's lines, in IOS's order. The settings print even while it is off. */
+/** Port security's lines, in Packet Tracer's order. The settings print even while it is off. */
 function portSecurityLines(security: PortSecurity | undefined): string[] {
   if (!security) return [];
   const lines: string[] = [];
@@ -181,11 +181,13 @@ function portSecurityLines(security: PortSecurity | undefined): string[] {
     lines.push(` switchport port-security aging time ${security.agingTime}`);
   }
   if (security.sticky) lines.push(' switchport port-security mac-address sticky');
-  for (const { mac, sticky } of security.addresses) {
-    lines.push(` switchport port-security mac-address ${sticky ? 'sticky ' : ''}${ciscoMac(mac)}`);
-  }
   if (security.violation !== undefined && security.violation !== 'shutdown') {
     lines.push(` switchport port-security violation ${security.violation}`);
+  }
+  // Packet Tracer writes secure addresses in upper case.
+  for (const { mac, sticky } of security.addresses) {
+    const text = ciscoMac(mac).toUpperCase();
+    lines.push(` switchport port-security mac-address ${sticky ? 'sticky ' : ''}${text}`);
   }
   return lines;
 }
