@@ -14,7 +14,7 @@ export type Mode =
   | { readonly kind: 'subinterface-config'; readonly interface: SubinterfaceId }
   | { readonly kind: 'line-config'; readonly line: LineRef }
   | { readonly kind: 'vlan-config'; readonly vlan: VlanId }
-  | { readonly kind: 'router-config'; readonly protocol: string }
+  | { readonly kind: 'rip-config' }
   /** `ip dhcp pool NAME`. */
   | { readonly kind: 'dhcp-config'; readonly pool: string };
 
@@ -24,6 +24,7 @@ export type ModeOf<K extends ModeKind> = Extract<Mode, { kind: K }>;
 export const USER_EXEC: ModeOf<'user-exec'> = { kind: 'user-exec' };
 export const PRIV_EXEC: ModeOf<'priv-exec'> = { kind: 'priv-exec' };
 export const GLOBAL_CONFIG: ModeOf<'global-config'> = { kind: 'global-config' };
+export const RIP_CONFIG: ModeOf<'rip-config'> = { kind: 'rip-config' };
 
 interface ModeSpec<K extends ModeKind> {
   readonly suffix: (mode: ModeOf<K>) => string;
@@ -45,7 +46,7 @@ const MODES: { readonly [K in ModeKind]: ModeSpec<K> } = {
   'subinterface-config': { suffix: () => '(config-subif)#', exit: GLOBAL_CONFIG, config: true },
   'line-config': { suffix: () => '(config-line)#', exit: GLOBAL_CONFIG, config: true },
   'vlan-config': { suffix: () => '(config-vlan)#', exit: GLOBAL_CONFIG, config: true },
-  'router-config': { suffix: () => '(config-router)#', exit: GLOBAL_CONFIG, config: true },
+  'rip-config': { suffix: () => '(config-router)#', exit: GLOBAL_CONFIG, config: true },
   'dhcp-config': { suffix: () => '(dhcp-config)#', exit: GLOBAL_CONFIG, config: true },
 };
 

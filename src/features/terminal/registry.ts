@@ -43,6 +43,7 @@ function linkTo({ sim, onBatch, ping, traceroute }: SimClient): SimLink {
     portStates: (device) => sim.portStates(device),
     spanningTree: (device) => sim.spanningTree(device),
     dhcpBindings: (device) => sim.dhcpBindings(device),
+    routingProtocols: (device) => sim.routingProtocols(device),
     now: () => now,
     ping,
     traceroute,

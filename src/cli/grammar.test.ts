@@ -17,7 +17,7 @@ const DEFAULT_HOSTNAME = 'Router';
 
 // A small IOS command set, shaped like the device commands, to pin down how the parser reads them.
 const EXEC = ['user-exec', 'priv-exec'] as const;
-const CONFIG = ['global-config', 'interface-config', 'line-config', 'router-config'] as const;
+const CONFIG = ['global-config', 'interface-config', 'line-config', 'rip-config'] as const;
 
 const command = defineCommand<Context>();
 const show = keyword('show', 'Show running system information');
@@ -115,7 +115,7 @@ const tree = buildTree(commands);
 const g00 = 'GigabitEthernet0/0' as InterfaceId;
 const IF: Mode = { kind: 'interface-config', interfaces: [g00] };
 const LINE: Mode = { kind: 'line-config', line: { kind: 'console' } };
-const ROUTER: Mode = { kind: 'router-config', protocol: 'rip' };
+const ROUTER: Mode = { kind: 'rip-config' };
 
 describe('grammar: abbreviation', () => {
   it.each<[string, Mode, string]>([

@@ -66,6 +66,7 @@ import {
 } from './showSwitching';
 import { execCommands } from './exec';
 import { dhcpCommands } from './dhcp';
+import { ripCommands } from './rip';
 
 const EXEC = ['user-exec', 'priv-exec'] as const;
 const PRIV = ['priv-exec'] as const;
@@ -75,7 +76,7 @@ const CONFIG = [
   'subinterface-config',
   'line-config',
   'vlan-config',
-  'router-config',
+  'rip-config',
   'dhcp-config',
 ] as const;
 const GLOBAL = ['global-config'] as const;
@@ -533,10 +534,14 @@ export const commonCommands = [
       const { device } = ctx;
       if (isSubinterface(name) && device.kind === 'router') {
         delete device.config.subinterfaces[name];
-        return NOTHING;
+      } else if (isVirtual(name)) {
+        delete device.config.virtualInterfaces[name];
+      } else {
+        return ctx.reject('% Removal of physical interfaces is not permitted');
       }
-      if (!isVirtual(name)) return ctx.reject('% Removal of physical interfaces is not permitted');
-      delete device.config.virtualInterfaces[name];
+      // IOS drops the config that names a deleted interface.
+      const rip = device.kind === 'router' ? device.config.rip : undefined;
+      if (rip) rip.passiveInterfaces = rip.passiveInterfaces.filter((id) => id !== name);
       return NOTHING;
     },
   }),
@@ -790,6 +795,7 @@ export const routerCommands = [
   ...encapsulationCommands(),
   ...helperAddressCommands(),
   ...dhcpCommands,
+  ...ripCommands,
 ];
 
 /** `ip helper-address`: relay the DHCP broadcasts heard on an interface to a server elsewhere. */

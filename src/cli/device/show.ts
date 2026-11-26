@@ -12,6 +12,7 @@ import {
   type InterfaceType,
   type LineConfig,
   type Port,
+  type RipConfig,
   type RoutedInterface,
   type StaticRoute,
   type Subinterface,
@@ -163,6 +164,18 @@ function spanningTreeLines(config: SwitchConfig): string[] {
   ];
 }
 
+/** `router rip` and the settings that differ from its defaults, in IOS's order. */
+function ripBlock(rip: RipConfig): string[] {
+  return [
+    'router rip',
+    ...(rip.version === undefined ? [] : [` version ${rip.version}`]),
+    ...rip.passiveInterfaces.map((id) => ` passive-interface ${id}`),
+    ...rip.networks.map((network) => ` network ${network}`),
+    ...(rip.defaultOriginate ? [' default-information originate'] : []),
+    ...(rip.autoSummary ? [] : [' no auto-summary']),
+  ];
+}
+
 function routeLine({ prefix, nextHop, distance }: StaticRoute): string {
   const via = nextHop.kind === 'address' ? nextHop.address : nextHop.interface;
   const suffix = distance === undefined ? '' : ` ${distance}`;
@@ -272,6 +285,7 @@ export function runningConfig(device: IosDevice): string[] {
   out.push('!');
   if (device.kind === 'switch') out.push(...spanningTreeLines(device.config), '!');
   for (const entry of interfaceEntries(device)) out.push(...interfaceBlock(entry), '!');
+  if (device.kind === 'router' && device.config.rip) out.push(...ripBlock(device.config.rip), '!');
   if (device.kind === 'router' && device.config.staticRoutes.length > 0) {
     out.push(...device.config.staticRoutes.map(routeLine), '!');
   }
