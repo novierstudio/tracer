@@ -19,7 +19,6 @@
 }
 
 .tracer-canvas .react-flow {
-  --xy-background-pattern-dots-color: var(--grid-dot);
   --xy-selection-background-color: color-mix(in oklab, var(--accent) 8%, transparent);
   --xy-selection-border: 1px solid color-mix(in oklab, var(--accent) 55%, transparent);
   --xy-minimap-background-color: var(--surface-1);

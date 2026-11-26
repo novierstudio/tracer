@@ -32,7 +32,7 @@ import { Tooltip } from '@/ui/tooltip';
 
 const TOKEN_GROUPS: { title: string; tokens: string[] }[] = [
   { title: 'Surfaces', tokens: ['surface-0', 'surface-1', 'surface-2', 'surface-3'] },
-  { title: 'Lines', tokens: ['line', 'line-strong', 'grid-dot'] },
+  { title: 'Lines', tokens: ['line', 'line-strong'] },
   { title: 'Text', tokens: ['text-1', 'text-2', 'text-3'] },
   { title: 'Accent', tokens: ['accent', 'accent-fg', 'accent-text'] },
   { title: 'Status', tokens: ['ok', 'warn', 'err'] },

@@ -31,16 +31,8 @@ function onCanvasKeyDown(event: KeyboardEvent<HTMLElement>) {
   cableTool.getState().clickDevice(id as DeviceId);
 }
 
-// React Flow's dot grid at 100% zoom, drawn in CSS while React Flow loads.
-const GRID_DOTS = {
-  backgroundImage: 'radial-gradient(circle, var(--grid-dot) 0.75px, transparent 1.25px)',
-  backgroundSize: '16px 16px',
-};
-
 function CanvasSkeleton() {
-  return (
-    <div aria-busy aria-label="Loading canvas" className="absolute inset-0" style={GRID_DOTS} />
-  );
+  return <div aria-busy aria-label="Loading canvas" className="absolute inset-0" />;
 }
 
 type CanvasProps = { fullscreen: boolean; children?: ReactNode };

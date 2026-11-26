@@ -1,8 +1,6 @@
 import '@xyflow/react/dist/base.css';
 import './canvas.css';
 import {
-  Background,
-  BackgroundVariant,
   ConnectionLineType,
   MiniMap,
   Panel,
@@ -270,7 +268,6 @@ function Flow({ element }: { element: RefObject<HTMLElement | null> }) {
   const storeApi = useStoreApi<CanvasNode, CableFlowEdge>();
   const portLabels = usePortLabels();
   const zoomedOut = useStore((state) => state.transform[2] < 0.5);
-  const sparseGrid = useStore((state) => state.transform[2] < 0.6);
   const connecting = useStore((state) => state.connection.inProgress);
   const altHeld = useKeyPress('Alt');
   const colorMode = useSyncExternalStore(subscribeTheme, themeClass);
@@ -420,11 +417,6 @@ function Flow({ element }: { element: RefObject<HTMLElement | null> }) {
             !portLabels && 'hide-port-labels',
           )}
         >
-          <Background
-            variant={BackgroundVariant.Dots}
-            gap={sparseGrid ? GRID * 4 : GRID}
-            size={1.25}
-          />
           <TrafficOverlay />
           <DrawLayer />
           <Panel position="top-center">
