@@ -79,6 +79,7 @@ import {
   type Part,
 } from './encode';
 import { controlSection, type ControlSection } from './control';
+import { hsrpParts, hsrpSummary } from './hsrp';
 import { describeIpv6GroupMac, ipv6Sections } from './ipv6';
 import {
   describeDns,
@@ -124,6 +125,8 @@ export type LayerId =
   | 'lldp'
   | 'lacp'
   | 'pagp'
+  | 'vtp'
+  | 'hsrp'
   | 'hello';
 
 export type OsiLayer = 1 | 2 | 3 | 4 | 7;
@@ -462,6 +465,8 @@ function applicationParts(payload: UdpPayload): Part[] {
       return ripParts(payload);
     case 'dns':
       return dnsParts(payload);
+    case 'hsrp':
+      return hsrpParts(payload);
   }
 }
 
@@ -473,6 +478,14 @@ function applicationLayer(payload: UdpPayload, fields: readonly Field[]): Layer 
       return ripLayer(payload, fields);
     case 'dns':
       return { id: 'dns', osi: 7, name: 'DNS', summary: capitalize(describeDns(payload)), fields };
+    case 'hsrp':
+      return {
+        id: 'hsrp',
+        osi: 7,
+        name: `HSRPv${payload.version}`,
+        summary: hsrpSummary(payload),
+        fields,
+      };
   }
 }
 
@@ -2225,6 +2238,11 @@ const SNAP: Record<SnapPayload['kind'], { name: string; pid: number; explain: st
     pid: 0x0104,
     explain: 'Names Cisco’s Port Aggregation Protocol as the protocol inside.',
   },
+  vtp: {
+    name: 'VTP',
+    pid: 0x2003,
+    explain: 'Names Cisco’s VLAN Trunking Protocol as the protocol inside.',
+  },
 };
 
 const placeSection = (wire: Wire, { parts, ...section }: ControlSection): Layer => ({
@@ -2248,7 +2266,8 @@ function ethernetPayloadLayers(
   switch (payload.kind) {
     case 'bpdu':
     case 'cdp':
-    case 'pagp': {
+    case 'pagp':
+    case 'vtp': {
       // A configuration BPDU is 35 bytes and a notification 4.
       const pdu =
         payload.kind === 'bpdu'

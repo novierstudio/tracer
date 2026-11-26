@@ -1,4 +1,4 @@
-import type { DeviceId, Endpoint, LinkId, MacAddress, PortId } from '@/model';
+import type { DeviceId, Endpoint, LinkId, MacAddress, PortId, VlanDatabase } from '@/model';
 import type { SimTime } from './core/time';
 import type { Frame } from './frame';
 
@@ -62,7 +62,22 @@ export type StickyMacEvent = {
   mac: MacAddress;
 };
 
-export type SimEvent = FrameEvent | LinkEvent | NoteEvent | SyslogEvent | StickyMacEvent;
+/** A switch took a VTP update, whose VLANs and revision belong in its config. */
+export type VlanDatabaseEvent = {
+  kind: 'vlan-database';
+  id: EventId;
+  time: SimTime;
+  device: DeviceId;
+  database: VlanDatabase;
+};
+
+export type SimEvent =
+  | FrameEvent
+  | LinkEvent
+  | NoteEvent
+  | SyslogEvent
+  | StickyMacEvent
+  | VlanDatabaseEvent;
 
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
 

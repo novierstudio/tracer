@@ -15,6 +15,7 @@ import type {
   PagpPdu,
   RipMessage,
   UdpDatagram,
+  VtpPdu,
 } from '@/engine/pdu';
 import { isNdp, type Ipv6Packet } from '@/engine/pdu6';
 import type { TcpSegment } from '@/engine/tcp';
@@ -44,6 +45,8 @@ export type ProtocolId =
   | 'lldp'
   | 'lacp'
   | 'pagp'
+  | 'vtp'
+  | 'hsrp'
   | 'hello';
 
 /** Each protocol's short label and colour token. The label means colour is never the only cue. */
@@ -68,6 +71,9 @@ export const PROTOCOLS: Record<ProtocolId, { label: string; token: `--proto-${st
   lldp: { label: 'LLDP', token: '--proto-stp' },
   lacp: { label: 'LACP', token: '--proto-stp' },
   pagp: { label: 'PAgP', token: '--proto-stp' },
+  vtp: { label: 'VTP', token: '--proto-stp' },
+  // HSRP keeps a LAN's gateway up, so it shares the routing protocols' colour.
+  hsrp: { label: 'HSRP', token: '--proto-routing' },
   hello: { label: 'Hello', token: '--proto-stp' },
 };
 
@@ -116,6 +122,7 @@ export function protocolOf(frame: Frame): ProtocolId {
         case 'lldp':
         case 'lacp':
         case 'pagp':
+        case 'vtp':
           return frame.payload.kind;
       }
   }
@@ -130,6 +137,7 @@ const LINK_CONTROL: ReadonlySet<EthernetPayload['kind']> = new Set<LinkControl['
   'lldp',
   'lacp',
   'pagp',
+  'vtp',
 ]);
 
 export const isLinkControl = (payload: EthernetPayload): payload is LinkControl =>
@@ -197,6 +205,17 @@ function describePagp(pagp: PagpPdu): string {
   return `PAgP from ${pagp.device} port ${pagp.port}: ${pagp.desirable ? 'desirable' : 'auto'}, group ${pagp.group}, ${heard}`;
 }
 
+function describeVtp(vtp: VtpPdu): string {
+  switch (vtp.code) {
+    case 'summary':
+      return `VTP summary, domain ${vtp.domain}, revision ${vtp.revision}`;
+    case 'subset':
+      return `VTP subset, domain ${vtp.domain}, revision ${vtp.revision}, ${count(vtp.vlans.length, 'VLAN')}`;
+    case 'request':
+      return `VTP request, domain ${vtp.domain}`;
+  }
+}
+
 function describeEthernetPayload(payload: EthernetPayload): string {
   switch (payload.kind) {
     case 'arp':
@@ -215,6 +234,8 @@ function describeEthernetPayload(payload: EthernetPayload): string {
       return describeLacp(payload);
     case 'pagp':
       return describePagp(payload);
+    case 'vtp':
+      return describeVtp(payload);
   }
 }
 
@@ -279,6 +300,10 @@ function describeUdp(packet: Ipv4Packet, datagram: UdpDatagram): string {
       return describeRip(packet, datagram.payload);
     case 'dns':
       return `DNS ${describeDns(datagram.payload)}`;
+    case 'hsrp': {
+      const { opcode, group, state, priority } = datagram.payload;
+      return `HSRP ${opcode} from ${packet.src}, group ${group}, ${state}, priority ${priority}`;
+    }
   }
 }
 

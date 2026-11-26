@@ -18,12 +18,14 @@ import {
   type OspfPacket,
   type RipMessage,
   type RipVersion,
+  type VtpPdu,
 } from '@/engine/pdu';
 import { isNdp, type Ipv6Packet, type RouterAdvertisement } from '@/engine/pdu6';
 import type { TcpSegment } from '@/engine/tcp';
 import { shortPortName } from '@/features/canvas/cables';
 import {
   channelProtocol,
+  vtpMode,
   type Device,
   type Ipv4Address,
   type MacAddress,
@@ -72,6 +74,7 @@ export type Decision =
     }
   /** A port in a channel group of LACP or PAgP's mode read a packet of that protocol. */
   | { kind: 'channel'; protocol: 'lacp' | 'pagp'; group: number; port: PortId }
+  | { kind: 'vtp'; code: VtpPdu['code']; transparent: boolean; out: readonly PortId[] }
   | { kind: 'routed'; out: PortId; ttl: readonly [number, number] }
   /** IPv6 has a hop limit where IPv4 has a TTL. */
   | { kind: 'routed'; out: PortId; hopLimit: readonly [number, number] }
@@ -174,6 +177,7 @@ export type IgnoreReason =
   | { kind: 'host-control'; protocol: ControlPdu['kind'] }
   /** CDP or LLDP is off on the port, or the port is in no channel group of the protocol. */
   | { kind: 'control-off'; protocol: ControlPdu['kind']; port: PortId }
+  | { kind: 'no-vtp' }
   | { kind: 'dhcp-for-other'; client: MacAddress }
   | { kind: 'dhcp-not-server'; message: DhcpMessage['type'] }
   | { kind: 'no-rip' }
@@ -894,6 +898,15 @@ function decideLinkControl(
         ? { kind: 'channel', protocol: payload.kind, group: group.group, port }
         : off;
     }
+    case 'vtp':
+      return device.kind === 'switch'
+        ? {
+            kind: 'vtp',
+            code: payload.code,
+            transparent: vtpMode(device.config) === 'transparent',
+            out: sent.map((s) => s.port),
+          }
+        : { kind: 'ignored', reason: { kind: 'no-vtp' } };
   }
 }
 
@@ -1139,6 +1152,8 @@ function describeIgnore(name: string, reason: IgnoreReason) {
       return `${name} ignored it: only switches run spanning tree.`;
     case 'host-control':
       return `${name} ignored it: hosts do not run ${PROTOCOLS[reason.protocol].label}.`;
+    case 'no-vtp':
+      return `${name} ignored it: only switches run VTP.`;
     case 'control-off': {
       const protocol = PROTOCOLS[reason.protocol].label;
       const port = shortPortName(reason.port);
@@ -1243,6 +1258,24 @@ function describeEigrp(
   return `${read} and sent ${what.join(' and ')}.`;
 }
 
+const VTP_MESSAGES: Record<VtpPdu['code'], string> = {
+  summary: 'summary advertisement',
+  subset: 'subset advertisement',
+  request: 'advertisement request',
+};
+
+function describeVtp(name: string, { code, transparent, out }: Extract<Decision, { kind: 'vtp' }>) {
+  const message = `VTP ${VTP_MESSAGES[code]}`;
+  if (transparent) {
+    return out.length > 0
+      ? `${name} is in VTP transparent mode: it passed the ${message} on out ${list(out)} without taking its VLANs.`
+      : `${name} is in VTP transparent mode, so it keeps its own VLANs and did not take the ${message}.`;
+  }
+  return out.length > 0
+    ? `${name} read the ${message} and sent VTP messages out ${list(out)}.`
+    : `${name} read the ${message}.`;
+}
+
 /** The decision as one sentence a student can read, with `name` the device's hostname. */
 export function describeDecision(decision: Decision, name: string): string {
   switch (decision.kind) {
@@ -1264,6 +1297,8 @@ export function describeDecision(decision: Decision, name: string): string {
       return `${name} read the ${PROTOCOLS[decision.protocol].label} advertisement on ${shortPortName(decision.port)} and keeps ${decision.neighbor} as a neighbour for ${decision.holdtime} s.`;
     case 'channel':
       return `${name} read the ${PROTOCOLS[decision.protocol].label} packet on ${shortPortName(decision.port)} and uses it to bundle the port into Port-channel${decision.group}.`;
+    case 'vtp':
+      return describeVtp(name, decision);
     case 'routed': {
       const [counter, [before, after]] =
         'hopLimit' in decision ? ['hop limit', decision.hopLimit] : ['TTL', decision.ttl];

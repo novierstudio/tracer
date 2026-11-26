@@ -230,8 +230,14 @@ export function createEngine({
         learnSticky: (port, mac) =>
           log.append({ kind: 'sticky-mac', time: now, device: id, port, mac }),
         relink: () => relink((link) => link.a.device === id || link.b.device === id),
+        storeVlans: (database) =>
+          log.append({ kind: 'vlan-database', time: now, device: id, database }),
         learnedRoutes: () =>
           (running.get(id) ?? []).flatMap((other) => other.module.routes?.(other.ctx) ?? []),
+        virtualAddresses: () =>
+          (running.get(id) ?? []).flatMap(
+            (other) => other.module.virtualAddresses?.(other.ctx) ?? [],
+          ),
       },
     };
     return slot;
