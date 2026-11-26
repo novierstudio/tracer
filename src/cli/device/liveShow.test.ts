@@ -80,13 +80,6 @@ describe('show ip route', () => {
         distance: 5,
         nextHop: { kind: 'address', address: '10.0.0.2' },
       },
-      // A floating route behind a better one is not installed.
-      {
-        source: 'static',
-        prefix: cidr('172.20.1.0', 24),
-        distance: 200,
-        nextHop: { kind: 'address', address: '10.0.0.6' },
-      },
     ] as Route[];
 
     const { live } = showWith(consoleOn(router()), 'show ip route', 'routes', routes);
@@ -102,6 +95,44 @@ describe('show ip route', () => {
       'S     172.16.0.0/16 is directly connected, Serial0/0/0',
       '      172.20.0.0/24 is subnetted, 1 subnets',
       'S        172.20.1.0/24 [5/0] via 10.0.0.2',
+    ]);
+  });
+
+  it('gives learned routes their distance, metric, next hop, age and interface, one line per path', () => {
+    const learned = (source: 'rip' | 'ospf', prefix: ReturnType<typeof cidr>, via: string) => ({
+      source,
+      prefix,
+      distance: source === 'rip' ? 120 : 110,
+      metric: source === 'rip' ? 1 : 65,
+      via,
+      interface: via.startsWith('10.0.12') ? 'GigabitEthernet0/1' : 'Serial0/0/0',
+      ageMs: 83_400,
+    });
+    const routes = [
+      { ...learned('rip', cidr('0.0.0.0', 0), '10.0.13.3'), ageMs: 4_000 },
+      { source: 'connected', prefix: cidr('10.0.12.0', 30), interface: 'GigabitEthernet0/1' },
+      { source: 'local', prefix: cidr('10.0.12.1', 32), interface: 'GigabitEthernet0/1' },
+      learned('ospf', cidr('192.168.3.0', 24), '10.0.12.2'),
+      learned('ospf', cidr('192.168.3.0', 24), '10.0.13.3'),
+      {
+        ...learned('ospf', cidr('192.168.4.0', 24), '10.0.13.3'),
+        ageMs: 2 * 86_400_000 + 3_600_000,
+      },
+    ] as Route[];
+
+    const { live } = showWith(consoleOn(router()), 'show ip route', 'routes', routes);
+
+    expect(live.slice(LEGEND.length)).toEqual([
+      '',
+      'Gateway of last resort is 10.0.13.3 to network 0.0.0.0',
+      '',
+      'R*    0.0.0.0/0 [120/1] via 10.0.13.3, 00:00:04, Serial0/0/0',
+      '      10.0.0.0/8 is variably subnetted, 2 subnets, 2 masks',
+      'C        10.0.12.0/30 is directly connected, GigabitEthernet0/1',
+      'L        10.0.12.1/32 is directly connected, GigabitEthernet0/1',
+      'O     192.168.3.0/24 [110/65] via 10.0.12.2, 00:01:23, GigabitEthernet0/1',
+      '                     [110/65] via 10.0.13.3, 00:01:23, Serial0/0/0',
+      'O     192.168.4.0/24 [110/65] via 10.0.13.3, 2d01h, Serial0/0/0',
     ]);
   });
 

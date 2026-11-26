@@ -1,6 +1,7 @@
 import type { Device, DeviceKind, LabSettings, PortId } from '@/model';
 import type { SimDuration, SimTime } from './core/time';
 import type { Frame } from './frame';
+import type { LearnedRoute } from './l3/routes';
 
 /** What a module can see and do on the device it runs on. */
 export interface DeviceContext {
@@ -18,6 +19,8 @@ export interface DeviceContext {
   /** The run's seeded random stream, in [0, 1). Modules must not use Math.random. */
   random(): number;
   note(text: string): void;
+  /** The routes every module on the device offers now, for its routing table. See `routes`. */
+  learnedRoutes(): readonly LearnedRoute[];
 }
 
 export interface ModuleContext<S> extends DeviceContext {
@@ -56,6 +59,12 @@ export interface SimModule<S = unknown> {
    * the port forwards. The port's end of its link shows as held while any module says so.
    */
   holdsPort?(ctx: ModuleContext<S>, port: PortId): boolean;
+  /**
+   * The routes the module has learned and offers the device's routing table now, as a routing
+   * protocol does. The table weighs them against connected and static routes, and against each
+   * other, by administrative distance then metric. It must not call `learnedRoutes`.
+   */
+  routes?(ctx: ModuleContext<S>): readonly LearnedRoute[];
 }
 
 /** Why a module cannot run on a device: no such device, it is off, or its kind does not run the module. */

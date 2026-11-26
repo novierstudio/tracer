@@ -94,5 +94,6 @@ export const interfacesOf = (ctx: IpContext): IpInterface[] =>
 export function routesOf(ctx: IpContext): { interfaces: IpInterface[]; routes: Route[] } {
   const host = hostAddressingOf(ctx);
   const interfaces = ipInterfaces(ctx.device, (port) => ctx.portUp(port), host);
-  return { interfaces, routes: routingTable(ctx.device, interfaces, host) };
+  const routes = routingTable(ctx.device, interfaces, host, ctx.learnedRoutes());
+  return { interfaces, routes };
 }
