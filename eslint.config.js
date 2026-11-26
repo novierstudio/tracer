@@ -58,9 +58,9 @@ export default defineConfig([
           ],
           patterns: [
             {
-              regex: '^@/model(?!/(vlans|defaults|result)$)(/.*)?$',
+              regex: '^@/model(?!/(vlans|defaults|result|ipv6)$)(/.*)?$',
               message:
-                'Value imports into the simulation worker must come from @/model/vlans, @/model/defaults or @/model/result, so zod stays out of the worker.',
+                'Value imports into the simulation worker must come from @/model/vlans, @/model/defaults, @/model/result or @/model/ipv6, so zod stays out of the worker.',
               allowTypeImports: true,
             },
           ],

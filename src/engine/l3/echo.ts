@@ -1,4 +1,5 @@
 import type { Ipv4Address } from '@/model';
+import type { IpAddress } from '@/model/ipv6';
 import type { SimDuration, SimTime } from '../core/time';
 import type { IcmpEcho, IcmpMessage, Ipv4Packet, UnreachableCode } from '../pdu';
 import { timerKey, type IpContext, type Probe } from './context';
@@ -21,17 +22,17 @@ export type EchoProbe = {
 export type EchoAnswer =
   | {
       readonly kind: 'reply';
-      readonly from: Ipv4Address;
+      readonly from: IpAddress;
       readonly timeMs: number;
       readonly ttl: number;
     }
   | {
       readonly kind: 'unreachable';
-      readonly from: Ipv4Address;
+      readonly from: IpAddress;
       readonly code: UnreachableCode;
       readonly timeMs: number;
     }
-  | { readonly kind: 'ttl-expired'; readonly from: Ipv4Address; readonly timeMs: number }
+  | { readonly kind: 'ttl-expired'; readonly from: IpAddress; readonly timeMs: number }
   /** No answer in time. Also what a request the device had no route for comes to, as on IOS. */
   | { readonly kind: 'timeout' };
 

@@ -171,7 +171,8 @@ export const ipModule: SimModule<IpState> = {
     switch (frame.kind) {
       case 'hdlc': {
         const iface = serialOn(interfacesOf(ctx), port);
-        if (iface) receive(ctx, frame.payload, iface);
+        // IPv6 runs in a module of its own.
+        if (iface && frame.payload.kind === 'ipv4') receive(ctx, frame.payload, iface);
         return;
       }
       case 'ethernet': {

@@ -37,6 +37,8 @@ const palette: Palette = {
   protocols: {
     arp: colour,
     icmp: colour,
+    icmpv6: colour,
+    ndp: colour,
     dhcp: colour,
     dns: colour,
     tcp: colour,

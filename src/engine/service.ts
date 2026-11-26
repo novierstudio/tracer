@@ -1,4 +1,5 @@
 import type { DeviceId } from '@/model';
+import { isIpv6 } from '@/model/ipv6';
 import { err, ok, type Result } from '@/model/result';
 import type {
   DeviceUnavailable,
@@ -6,10 +7,12 @@ import type {
   DnsLookup,
   FetchEvent,
   PingEvent,
+  PingListener,
   ProbeHandle,
   SimAPI,
   SimEventBatch,
   TraceEvent,
+  TraceListener,
 } from './api';
 import { after, ms } from './core/time';
 import type { Engine } from './engine';
@@ -27,8 +30,27 @@ import { ipModule, stopProbe } from './l3/ip';
 import { clearNat, natTranslations } from './l3/nat';
 import { pingSummary, startPing } from './l3/ping';
 import { startTrace } from './l3/traceroute';
+import { ipv6Module, ipv6Status, startPing6, startTrace6, stopProbe6 } from './l3v6/ipv6';
+import type { ModuleContext, SimModule } from './module';
 import { ospfModule, ospfStatus } from './routing/ospf/ospf';
 import { ripModule, ripStatus } from './routing/rip';
+
+/** The module a ping or traceroute runs in, IPv4's or IPv6's, and how it starts and stops there. */
+type ProbeStack<S, E> = {
+  readonly module: SimModule<S>;
+  readonly start: (ctx: ModuleContext<S>, listener: (event: E) => void) => number;
+  readonly stop: (ctx: ModuleContext<S>, id: number) => void;
+};
+
+/**
+ * Binds a probe to its module. The result forgets the module's state type, which only the module
+ * and its own `start` and `stop` read.
+ */
+const probeStack = <S, E>(
+  module: SimModule<S>,
+  stop: ProbeStack<S, E>['stop'],
+  start: ProbeStack<S, E>['start'],
+) => ({ module, start, stop }) as unknown as ProbeStack<unknown, E>;
 
 /** The wall clock and frame timer that drive playback. The worker passes the real ones. */
 export type FrameClock = {
@@ -194,14 +216,15 @@ export function createSimService({
 
   /**
    * Starts a ping or traceroute on `device` as an input, so a replay starts it again, and returns
-   * the handle that cancels it. `start` returns the run's id in the device's IP stack.
+   * the handle that cancels it. `stack` is the IPv4 or IPv6 module that runs it: its `start`
+   * returns the run's id there, and its `stop` ends it.
    */
   function startProbe<E>(
     device: DeviceId,
+    { module, start, stop }: ProbeStack<unknown, E>,
     listener: (event: E) => void,
     order: (event: E) => number,
     ending: (heard: readonly E[]) => E,
-    start: (ctx: IpContext, listener: (event: E) => void) => number,
   ): Result<ProbeHandle, DeviceUnavailable> {
     const handle = nextHandle++ as ProbeHandle;
     const once = hearOnce(
@@ -216,18 +239,14 @@ export function createSimService({
     let started: Result<void, DeviceUnavailable> | undefined;
     input({
       apply: () => {
-        started = engine.withModule(
-          device,
-          ipModule,
-          (ctx) => void (id = start(ctx, once.listener)),
-        );
+        started = engine.withModule(device, module, (ctx) => void (id = start(ctx, once.listener)));
       },
       forget: once.forget,
     });
     requestFrame();
     if (!started!.ok) return started!;
     cancels.set(handle, () => {
-      input({ apply: () => void engine.withModule(device, ipModule, (ctx) => stopProbe(ctx, id)) });
+      input({ apply: () => void engine.withModule(device, module, (ctx) => stop(ctx, id)) });
       requestFrame();
     });
     return ok(handle);
@@ -312,29 +331,38 @@ export function createSimService({
     ping(device, target, options, listener) {
       if (options.count !== Infinity) checkCount('Count', options.count);
       checkTimeout(options.timeoutMs);
-      return startProbe(
-        device,
-        listener,
-        pingOrder,
-        (heard) =>
-          pingSummary(
-            target,
-            heard.length,
-            heard.flatMap((event) => (event.kind === 'reply' ? [event.timeMs] : [])),
-          ),
-        (ctx, once) => startPing(ctx, target, options, once),
+      const stack = isIpv6(target)
+        ? probeStack(ipv6Module, stopProbe6, (ctx, once: PingListener) =>
+            startPing6(ctx, target, options, once),
+          )
+        : probeStack(ipModule, stopProbe, (ctx, once: PingListener) =>
+            startPing(ctx, target, options, once),
+          );
+      return startProbe(device, stack, listener, pingOrder, (heard) =>
+        pingSummary(
+          target,
+          heard.length,
+          heard.flatMap((event) => (event.kind === 'reply' ? [event.timeMs] : [])),
+        ),
       );
     },
     traceroute(device, target, options, listener) {
       checkCount('Max hops', options.maxHops);
       checkCount('Probes per hop', options.probesPerHop);
       checkTimeout(options.timeoutMs);
+      const stack = isIpv6(target)
+        ? probeStack(ipv6Module, stopProbe6, (ctx, once: TraceListener) =>
+            startTrace6(ctx, target, options, once),
+          )
+        : probeStack(ipModule, stopProbe, (ctx, once: TraceListener) =>
+            startTrace(ctx, target, options, once),
+          );
       return startProbe(
         device,
+        stack,
         listener,
         traceOrder(options.probesPerHop),
         (): TraceEvent => ({ kind: 'done' }),
-        (ctx, once) => startTrace(ctx, target, options, once),
       );
     },
     cancel(handle) {
@@ -405,6 +433,7 @@ export function createSimService({
         () => ({ kind: 'failed', failure: { kind: 'cancelled' } }),
         (ctx, once) => startFetch(ctx, target, once),
       ),
+    ipv6Status: (device) => engine.withModule(device, ipv6Module, ipv6Status),
     aclHits: (device) => engine.withModule(device, ipModule, aclHits),
     natTranslations: (device) => engine.withModule(device, ipModule, natTranslations),
     clearNatTranslations(device) {

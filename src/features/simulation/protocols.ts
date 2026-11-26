@@ -10,17 +10,32 @@ import type {
   RipMessage,
   UdpDatagram,
 } from '@/engine/pdu';
+import { isNdp, type Ipv6Packet } from '@/engine/pdu6';
 import type { TcpSegment } from '@/engine/tcp';
 import { describeDns, describeHttp, describeTcp } from './pdu/web';
 
 /** The protocol a frame shows as: the innermost one the engine models. */
 export type ProtocolId =
-  'arp' | 'icmp' | 'dhcp' | 'dns' | 'tcp' | 'http' | 'rip' | 'ospf' | 'stp' | 'hello';
+  | 'arp'
+  | 'icmp'
+  | 'icmpv6'
+  | 'ndp'
+  | 'dhcp'
+  | 'dns'
+  | 'tcp'
+  | 'http'
+  | 'rip'
+  | 'ospf'
+  | 'stp'
+  | 'hello';
 
 /** Each protocol's short label and colour token. The label means colour is never the only cue. */
 export const PROTOCOLS: Record<ProtocolId, { label: string; token: `--proto-${string}` }> = {
   arp: { label: 'ARP', token: '--proto-arp' },
   icmp: { label: 'ICMP', token: '--proto-icmp' },
+  icmpv6: { label: 'ICMPv6', token: '--proto-icmp' },
+  // Neighbor Discovery is IPv6's ARP, so it shares ARP's colour.
+  ndp: { label: 'NDP', token: '--proto-arp' },
   dhcp: { label: 'DHCP', token: '--proto-dhcp' },
   dns: { label: 'DNS', token: '--proto-dns' },
   tcp: { label: 'TCP', token: '--proto-tcp' },
@@ -48,12 +63,17 @@ function ipProtocol(packet: Ipv4Packet): ProtocolId {
   }
 }
 
+/** ICMPv6 is the only payload IPv6 carries here. Neighbor Discovery shows as a protocol of its own. */
+const ipv6Protocol = (packet: Ipv6Packet): ProtocolId => (isNdp(packet.payload) ? 'ndp' : 'icmpv6');
+
 export function protocolOf(frame: Frame): ProtocolId {
   switch (frame.kind) {
     case 'hello':
       return 'hello';
     case 'hdlc':
-      return ipProtocol(frame.payload);
+      return frame.payload.kind === 'ipv6'
+        ? ipv6Protocol(frame.payload)
+        : ipProtocol(frame.payload);
     case 'ethernet':
       switch (frame.payload.kind) {
         case 'arp':
@@ -62,6 +82,8 @@ export function protocolOf(frame: Frame): ProtocolId {
           return 'stp';
         case 'ipv4':
           return ipProtocol(frame.payload);
+        case 'ipv6':
+          return ipv6Protocol(frame.payload);
       }
   }
 }
@@ -181,6 +203,10 @@ function describePacket(packet: Ipv4Packet): string {
   }
 }
 
+function describeIpv6(packet: Ipv6Packet): string {
+  return `IPv6 ${packet.src} → ${packet.dst}, ${packet.payload.type}`;
+}
+
 /** The Info column: what the frame says, in a line a student can read. */
 export function describeFrame({ frame, outcome }: Pick<FrameEvent, 'frame' | 'outcome'>): string {
   let text: string;
@@ -189,7 +215,8 @@ export function describeFrame({ frame, outcome }: Pick<FrameEvent, 'frame' | 'ou
       text = `Link test ${frame.seq}`;
       break;
     case 'hdlc':
-      text = describePacket(frame.payload);
+      text =
+        frame.payload.kind === 'ipv6' ? describeIpv6(frame.payload) : describePacket(frame.payload);
       break;
     case 'ethernet': {
       const { payload } = frame;
@@ -198,7 +225,9 @@ export function describeFrame({ frame, outcome }: Pick<FrameEvent, 'frame' | 'ou
           ? describeArp(payload)
           : payload.kind === 'bpdu'
             ? describeBpdu(payload)
-            : describePacket(payload);
+            : payload.kind === 'ipv6'
+              ? describeIpv6(payload)
+              : describePacket(payload);
       text = frame.tag ? `${body} · VLAN ${frame.tag.vlan}` : body;
       break;
     }

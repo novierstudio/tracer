@@ -1,4 +1,5 @@
 import type { DeviceId, Ipv4Address, LinkId, PortId, Result, Topology } from '@/model';
+import type { IpAddress } from '@/model/ipv6';
 import type { SimTime } from './core/time';
 import type { LinkEnd, LinkStatus } from './engine';
 import type { EventId, SimEvent } from './events';
@@ -15,6 +16,15 @@ import type { NatEndpoint, NatTranslationEntry } from './l3/nat';
 import type { PingEvent, PingListener, PingOptions, PingReply, PingSummary } from './l3/ping';
 import type { LearnedRoute, Route } from './l3/routes';
 import type { TraceEvent, TraceListener, TraceOptions, TraceProbe } from './l3/traceroute';
+import type {
+  Ipv6AddressEntry,
+  Ipv6AddressOrigin,
+  Ipv6InterfaceStatus,
+  Ipv6NeighborEntry,
+  Ipv6Route,
+  Ipv6Status,
+  NeighborState,
+} from './l3v6/status';
 import type { DeviceUnavailable } from './module';
 import type {
   OspfDesignated,
@@ -45,6 +55,12 @@ export type {
   FetchListener,
   HostAddressing,
   HttpResponse,
+  Ipv6AddressEntry,
+  Ipv6AddressOrigin,
+  Ipv6InterfaceStatus,
+  Ipv6NeighborEntry,
+  Ipv6Route,
+  Ipv6Status,
   LearnedRoute,
   Lease,
   LinkEnd,
@@ -52,6 +68,7 @@ export type {
   MacTableEntry,
   NatEndpoint,
   NatTranslationEntry,
+  NeighborState,
   OspfDesignated,
   OspfInterfaceState,
   OspfInterfaceStatus,
@@ -142,7 +159,7 @@ export interface SimAPI {
   pause(): void;
   runCommand(device: DeviceId, line: string): CliResult;
   /**
-   * Pings `target` from a router or host in simulated time: `count` echo requests about a second
+   * Pings `target`, over IPv4 or IPv6 by its family, from a router or host in simulated time: `count` echo requests about a second
    * apart, each waiting up to `timeoutMs`. Each request's fate, then a summary, goes to `listener`
    * as the simulation runs; nothing arrives while it is paused. The listener hears each fate once
    * even when stepping back replays it, and a ping that a step back un-starts ends with a summary
@@ -151,7 +168,7 @@ export interface SimAPI {
    */
   ping(
     device: DeviceId,
-    target: Ipv4Address,
+    target: IpAddress,
     options: PingOptions,
     listener: PingListener,
   ): Result<ProbeHandle, DeviceUnavailable>;
@@ -163,7 +180,7 @@ export interface SimAPI {
    */
   traceroute(
     device: DeviceId,
-    target: Ipv4Address,
+    target: IpAddress,
     options: TraceOptions,
     listener: TraceListener,
   ): Result<ProbeHandle, DeviceUnavailable>;
@@ -229,6 +246,11 @@ export interface SimAPI {
   natTranslations(device: DeviceId): Result<NatTranslationEntry[], DeviceUnavailable>;
   /** `clear ip nat translation *`: a router forgets its dynamic translations. Returns how many went. */
   clearNatTranslations(device: DeviceId): Result<number, DeviceUnavailable>;
+  /**
+   * A router or host's IPv6 as it runs now: its interfaces and their addresses, including the
+   * ones SLAAC formed, its routing table and its neighbour cache. `unsupported` for a switch.
+   */
+  ipv6Status(device: DeviceId): Result<Ipv6Status, DeviceUnavailable>;
   /** Sets the one batch listener. Calling it again replaces the previous listener. */
   subscribe(listener: (batch: SimEventBatch) => void): void;
 }

@@ -1783,7 +1783,9 @@ function ethernetLayers(wire: Wire, frame: EthernetFrame): Layer[] {
       'Names what the frame carries, so the receiver hands it to the right protocol.',
       u16(ETHER_TYPE[payload.kind]),
     );
-    inner.push(...(payload.kind === 'arp' ? arpLayers(wire, payload) : ipv4Layers(wire, payload)));
+    // TODO(NOV-238): decode IPv6.
+    if (payload.kind === 'arp') inner.push(...arpLayers(wire, payload));
+    else if (payload.kind === 'ipv4') inner.push(...ipv4Layers(wire, payload));
   }
 
   const trailer: Field[] = [];
@@ -1870,7 +1872,8 @@ export function dissect(frame: Frame): Dissection {
       layers = ethernetLayers(wire, frame);
       break;
     case 'hdlc':
-      layers = hdlcLayers(wire, frame.payload);
+      // TODO(NOV-238): decode IPv6.
+      layers = frame.payload.kind === 'ipv4' ? hdlcLayers(wire, frame.payload) : [];
       break;
     case 'hello':
       layers = [
