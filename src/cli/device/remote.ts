@@ -7,6 +7,7 @@ import {
   Md5CryptHash,
   sshEnabled,
   Username,
+  type Ipv4Address,
   type LocalUser,
   type RouterConfig,
   type SwitchConfig,
@@ -28,8 +29,8 @@ const ipSsh = keyword('ssh', 'Configure ssh options');
 
 type IosConfig = RouterConfig | SwitchConfig;
 
-export const DEFAULT_SSH_TIMEOUT = 120;
-export const DEFAULT_SSH_RETRIES = 3;
+const DEFAULT_SSH_TIMEOUT = 120;
+const DEFAULT_SSH_RETRIES = 3;
 const DEFAULT_MODULUS = 512;
 const MODULUS = { min: 360, max: 2048 } as const;
 
@@ -388,7 +389,7 @@ function sessionCommands() {
         modes: EXEC,
         path: [ssh, ...v, ...login, remoteHost] as readonly Segment[],
         run: (args, ctx) => {
-          const { target, user } = args as { target: never; user: string };
+          const { target, user } = args as { target: Ipv4Address; user: string };
           ctx.connect({ protocol: 'ssh', target, user });
           return NOTHING;
         },
@@ -478,7 +479,7 @@ export function showUsers(
   ];
 }
 
-export function showSsh(device: IosDevice, sessions: readonly VtySession[]): readonly string[] {
+function showSsh(device: IosDevice, sessions: readonly VtySession[]): readonly string[] {
   const ssh = sessions.filter((session) => session.protocol === 'ssh');
   const v1 = device.config.sshVersion === 1;
   const none = (version: 1 | 2) => `%No SSHv${version} server connections running.`;
@@ -512,7 +513,7 @@ export function showSsh(device: IosDevice, sessions: readonly VtySession[]): rea
   ];
 }
 
-export function showIpSsh(config: IosConfig): readonly string[] {
+function showIpSsh(config: IosConfig): readonly string[] {
   const enabled = sshEnabled(config);
   return [
     `SSH ${enabled ? 'Enabled' : 'Disabled'} - version ${sshVersionText(config)}`,

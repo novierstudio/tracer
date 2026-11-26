@@ -77,9 +77,3 @@ export function vtyLineFor(
   const index = lines.findIndex((line, n) => !busy.has(n) && line.transportInput[protocol]);
   return index === -1 ? undefined : index;
 }
-
-/** Whether the device listens for `protocol` at all, with every vty line free. */
-export function acceptsRemote(config: IosConfig, protocol: RemoteProtocol): boolean {
-  if (protocol === 'ssh' && !sshEnabled(config)) return false;
-  return config.lines.vty.some((line) => line.transportInput[protocol]);
-}
