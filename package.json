@@ -12,7 +12,8 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "test:e2e": "playwright test",
-    "icons": "node scripts/pwa-icons.js"
+    "icons": "node scripts/pwa-icons.js",
+    "labs": "node scripts/build-labs.js"
   },
   "dependencies": {
     "@fontsource-variable/inter": "^5.3.0",

@@ -1,6 +1,6 @@
 /**
  * Builds each sample lab the way a student would: real catalog devices, IOS config typed line by
- * line, cables and notes. The committed `.tracer.json` files were written from it; the app never
+ * line, cables and notes. `pnpm labs` rewrites every `.tracer.json` file from it; the app never
  * imports it.
  */
 import { applyLines, toConfigUpdate, type IosDevice } from '@/cli';
