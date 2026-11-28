@@ -86,6 +86,7 @@ import { ospfCommands } from './ospf';
 import { remoteCommands } from './remote';
 import { ripCommands } from './rip';
 import { servicesCommands } from './services';
+import { copyCommands } from './copy';
 
 const EXEC = ['user-exec', 'priv-exec'] as const;
 const PRIV = ['priv-exec'] as const;
@@ -398,6 +399,7 @@ export const commonCommands = [
     ],
     run: (_a, ctx) => ['Destination filename [startup-config]?', ...save(ctx)],
   }),
+  ...copyCommands,
   command({
     modes: PRIV,
     path: [show, keyword('running-config', 'Current operating configuration')],

@@ -1,7 +1,9 @@
 import {
   answerQuery,
+  applyLines,
   isConfigMode,
   openStream,
+  toConfigUpdate,
   type CompleteResult,
   type DeviceSession,
   type EngineQuery,
@@ -67,6 +69,7 @@ export type SimLink = SimQueries & {
   ) => Promise<ReturnType<SimAPI['traceroute']>>;
   readonly cancel: Remote<SimAPI['cancel']>;
   readonly logMessage: Remote<SimAPI['logMessage']>;
+  readonly tftp: (...args: Parameters<SimAPI['tftp']>) => Promise<ReturnType<SimAPI['tftp']>>;
   readonly openTerminal: (
     ...args: Parameters<SimAPI['openTerminal']>
   ) => Promise<ReturnType<SimAPI['openTerminal']>>;
@@ -104,12 +107,32 @@ export function engineSource(sim: SimLink, device: DeviceId, remote?: RemoteHook
   };
 }
 
-/** Streams opened on the simulation for one device. */
-function streamSource(sim: SimLink, device: DeviceId): StreamSource {
+/** The router or switch as the store has it now. It can vanish between a change and a view. */
+function iosDevice(store: EditorStore, id: DeviceId): IosDevice | undefined {
+  const current = store.getState().topology.devices[id];
+  return current?.kind === 'router' || current?.kind === 'switch' ? current : undefined;
+}
+
+/**
+ * Streams opened on the simulation for one device. A config a copy fetches commits to `store` as
+ * one undo step, as a typed line's edit does.
+ */
+function streamSource(sim: SimLink, device: DeviceId, store: EditorStore): StreamSource {
   return {
     ping: (target, options, listener) => sim.ping(device, target, options, listener),
     traceroute: (target, options, listener) => sim.traceroute(device, target, options, listener),
     cancel: (handle) => sim.cancel(handle),
+    tftp: (request, listener) => sim.tftp(device, request, listener),
+    load(into, lines) {
+      const current = iosDevice(store, device);
+      if (!current) return;
+      const config =
+        into === 'running-config'
+          ? applyLines(current, lines).config
+          : { ...current.config, startupConfig: [...lines] };
+      store.getState().updateConfig(toConfigUpdate({ ...current, config } as IosDevice));
+    },
+    log: (text) => void logOn(async () => sim, device, text),
   };
 }
 
@@ -153,11 +176,7 @@ export function deviceTerminal(
   engine?: EngineLink,
   remote?: RemoteHooks,
 ): TerminalSession {
-  // The device can vanish between a store change and the view unmounting.
-  const device = (): IosDevice | undefined => {
-    const current = store.getState().topology.devices[id];
-    return current?.kind === 'router' || current?.kind === 'switch' ? current : undefined;
-  };
+  const device = () => iosDevice(store, id);
   const run = (line: string): Reply => {
     const current = device();
     if (!current) return [];
@@ -173,7 +192,11 @@ export function deviceTerminal(
     if (!engine) return printed;
     if (query) return answerLive(engine, id, query, printed, remote);
     if (stream)
-      return openStream(stream, () => engine().then((sim) => streamSource(sim, id)), printed);
+      return openStream(
+        stream,
+        () => engine().then((sim) => streamSource(sim, id, store)),
+        printed,
+      );
     return printed;
   };
   return {

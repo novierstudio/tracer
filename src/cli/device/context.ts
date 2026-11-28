@@ -22,7 +22,29 @@ export type Pending =
   /** `crypto key generate rsa` on a device that has keys: replace them? */
   | { readonly kind: 'rsa-replace'; readonly modulus?: number }
   /** `crypto key generate rsa` without `modulus`: how many bits. */
-  | { readonly kind: 'rsa-modulus' };
+  | { readonly kind: 'rsa-modulus' }
+  /** `copy ... tftp:` or `copy tftp: ...`, asking where the file goes or comes from. */
+  | TftpCopyPending;
+
+/** A config file `copy` reads or writes. */
+export type ConfigFile = 'running-config' | 'startup-config';
+
+/** Which way a TFTP copy goes: a config file to the server, or a file from it into one. */
+export type TftpCopy =
+  | { readonly op: 'put'; readonly from: ConfigFile }
+  | { readonly op: 'get'; readonly into: ConfigFile };
+
+/**
+ * A TFTP copy's questions, in turn: the server, then for a get the file to fetch, then the name
+ * the file gets. Each answer so far is kept.
+ */
+export type TftpCopyPending = {
+  readonly kind: 'tftp-copy';
+  readonly copy: TftpCopy;
+  readonly asking: 'host' | 'source' | 'destination';
+  readonly server?: Ipv4Address;
+  readonly source?: string;
+};
 
 /** The terminal line a session runs on: the console, or a vty line Telnet or SSH opened. */
 export type SessionLine =

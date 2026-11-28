@@ -58,7 +58,7 @@ export function trackSyslog(client: Pick<SimClient, 'onBatch'>, registry: Consol
 }
 
 /** The client's calls a console makes. */
-function linkTo({ sim, ping, traceroute, openTerminal }: SimClient): SimLink {
+function linkTo({ sim, ping, traceroute, openTerminal, tftp }: SimClient): SimLink {
   return {
     routes: (device) => sim.routes(device),
     arpTable: (device) => sim.arpTable(device),
@@ -79,6 +79,7 @@ function linkTo({ sim, ping, traceroute, openTerminal }: SimClient): SimLink {
     traceroute,
     cancel: (handle) => sim.cancel(handle),
     logMessage: (device, text) => sim.logMessage(device, text),
+    tftp,
     openTerminal,
     terminalSend: (handle, text) => sim.terminalSend(handle, text),
     terminalClose: (handle, server) => sim.terminalClose(handle, server),

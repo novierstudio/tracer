@@ -15,13 +15,16 @@ import type {
   Route,
   RoutingProtocols,
   SpanningTreeVlan,
+  TftpListener,
+  TftpRequest,
   TraceListener,
   TraceOptions,
 } from '../../engine/api';
-import type { Ipv4Address, PortId, RemoteProtocol, Result } from '../../model';
+import { ok, type Ipv4Address, type PortId, type RemoteProtocol, type Result } from '../../model';
 import type { IpAddress } from '../../model/ipv6';
-import type { IosDevice } from './context';
+import type { ConfigFile, IosDevice } from './context';
 import { pingOutput } from './ping';
+import { tftpOutput } from './tftp';
 import { tracerouteOutput } from './traceroute';
 
 /** Whether each port's link is up, as the simulation sees it. */
@@ -132,11 +135,21 @@ export interface TraceStream {
   readonly options: TraceOptions;
 }
 
+/** `copy` to or from a TFTP server: blocks whose acknowledgements arrive as the simulation runs. */
+export interface TftpStream {
+  readonly kind: 'tftp';
+  readonly request: TftpRequest;
+  /** The config file a put copies from, or the one a get loads into. */
+  readonly file: ConfigFile;
+  /** What the device logs once a get has loaded into the running-config. */
+  readonly log?: string;
+}
+
 /**
  * A command whose output arrives a piece at a time as the simulation runs, rather than in one
  * answer as a show command's does.
  */
-export type EngineStream = PingStream | TraceStream;
+export type EngineStream = PingStream | TraceStream | TftpStream;
 
 type Started = Promise<Result<ProbeHandle, DeviceUnavailable>>;
 
@@ -148,6 +161,15 @@ export interface StreamSource {
   traceroute(target: IpAddress, options: TraceOptions, listener: TraceListener): Started;
   /** Stops a ping or traceroute, so no more requests go out. */
   cancel(handle: ProbeHandle): Promise<void>;
+  /** Starts a TFTP transfer. Its events go to `listener` as simulated time passes. */
+  tftp(request: TftpRequest, listener: TftpListener): Promise<Result<void, DeviceUnavailable>>;
+  /**
+   * Loads a config file a copy fetched: merged into the running-config line by line, or saved as
+   * the startup-config. It commits as one edit.
+   */
+  load(into: ConfigFile, lines: readonly string[]): void;
+  /** The device logs a message, such as `%SYS-5-CONFIG_I`. */
+  log(text: string): void;
 }
 
 /** Output that arrives in pieces. Pieces are text that breaks lines with `\n`. */
@@ -169,8 +191,14 @@ const asText = (lines: readonly string[]) => lines.map((line) => `${line}\n`).jo
 /** A stream's text, and how to start it on the simulation. */
 interface Opened {
   readonly head: string;
-  /** Starts it. `emit` gets each event's text, with `last` set for the event that ends it. */
-  start(sim: StreamSource, emit: (text: string, last: boolean) => void): Started;
+  /**
+   * Starts it, with the handle that cancels it, if it has one. `emit` gets each event's text, with
+   * `last` set for the event that ends it, and `effect` to run once that text is shown.
+   */
+  start(
+    sim: StreamSource,
+    emit: (text: string, last: boolean, effect?: () => void) => void,
+  ): Promise<Result<ProbeHandle | undefined, DeviceUnavailable>>;
   /** The text that ends the output when it is aborted. */
   abort(): string;
 }
@@ -199,7 +227,30 @@ function opened(stream: EngineStream): Opened {
           ),
       };
     }
+    case 'tftp': {
+      const output = tftpOutput(stream);
+      return {
+        head: output.head,
+        abort: output.abort,
+        start: async (sim, emit) => {
+          const started = await sim.tftp(stream.request, (event) => {
+            const text = output.next(event);
+            if (event.kind === 'block') return emit(text, false);
+            const loaded = event.kind === 'done' && stream.request.op === 'get';
+            emit(text, true, loaded ? () => loadInto(sim, stream, event.content) : undefined);
+          });
+          // A transfer cannot be cancelled: it has no handle.
+          return started.ok ? ok(undefined) : started;
+        },
+      };
+    }
   }
+}
+
+/** Loads a fetched file, and logs that the running-config changed, as IOS does. */
+function loadInto(sim: StreamSource, stream: TftpStream, content: string) {
+  sim.load(stream.file, content.split('\n'));
+  if (stream.log) sim.log(stream.log);
 }
 
 /**
@@ -236,13 +287,15 @@ export function openStream(
           if (!open) return;
           started = true;
           write(output.head);
-          const result = await output.start(sim, (text, last) => {
+          const result = await output.start(sim, (text, last, effect) => {
             if (!open) return;
             if (last) end(text);
             else write(text);
+            effect?.();
           });
           if (!result.ok) return end(asText([UNAVAILABLE[result.error]]));
-          cancel = () => void sim.cancel(result.value).catch(() => {});
+          const handle = result.value;
+          if (handle !== undefined) cancel = () => void sim.cancel(handle).catch(() => {});
           // Aborted while the simulation was starting it.
           if (!open) cancel();
         };
