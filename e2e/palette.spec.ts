@@ -6,14 +6,15 @@ test('the device palette lists the catalog by category and filters it', async ({
   await page.goto('./');
   const palette = page.getByRole('complementary', { name: 'Device palette' });
   const groups = palette.getByRole('heading', { level: 3 });
+  const categories = palette.getByRole('heading', { level: 4 });
 
-  await expect(groups).toHaveText([
+  await expect(groups).toHaveText(['Network Devices', 'End Devices']);
+  await expect(categories).toHaveText([
     'Routers',
     'Switches',
     'Hubs',
-    'Wireless devices',
-    'End devices',
-    'Servers',
+    'Wireless Devices',
+    'End Devices',
   ]);
   await expect(palette.getByRole('list', { name: 'Routers' }).getByRole('listitem')).toHaveText([
     /Branch Router\s*2× Gi, 2× Serial/,
@@ -21,7 +22,8 @@ test('the device palette lists the catalog by category and filters it', async ({
   ]);
 
   await palette.getByRole('searchbox', { name: 'Search devices' }).fill('laptop');
-  await expect(groups).toHaveText(['End devices']);
+  await expect(groups).toHaveText(['End Devices']);
+  await expect(categories).toHaveText(['End Devices']);
   await expect(palette.getByRole('listitem')).toHaveText([/Laptop/]);
 
   await palette.getByRole('searchbox', { name: 'Search devices' }).fill('nothing like this');

@@ -9,7 +9,7 @@ import {
 } from 'react';
 import {
   CATEGORY_LABELS,
-  DEVICE_CATEGORIES,
+  DEVICE_GROUPS,
   DEVICE_MODELS,
   portSummary,
   type DeviceCategory,
@@ -60,20 +60,40 @@ export const SECTION_INFO: Record<
 
 type Entry = { model: DeviceModel; summary: string; haystack: string };
 
+const GROUP_LABELS = new Map<DeviceCategory, string>(
+  DEVICE_GROUPS.flatMap((group) => group.categories.map((category) => [category, group.label])),
+);
+
 const ENTRIES: Entry[] = DEVICE_MODELS.map((model) => {
   const summary = portSummary(model);
-  const words = [model.name, CATEGORY_LABELS[model.category], model.hostnamePrefix, summary];
+  const words = [
+    model.name,
+    GROUP_LABELS.get(model.category),
+    CATEGORY_LABELS[model.category],
+    model.hostnamePrefix,
+    summary,
+  ];
   return { model, summary, haystack: words.join(' ').toLowerCase() };
 });
 
-/** Catalog groups in category order, keeping only entries that match every word of the query. */
-export function filterCatalog(query: string): { category: DeviceCategory; entries: Entry[] }[] {
+type CategoryMatches = { category: DeviceCategory; entries: Entry[] };
+
+/**
+ * Palette groups in order, each with its categories that have an entry matching every word of
+ * the query. Empty categories and groups are left out.
+ */
+export function filterCatalog(query: string): { label: string; categories: CategoryMatches[] }[] {
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);
   const matches = ENTRIES.filter((entry) => words.every((word) => entry.haystack.includes(word)));
-  return DEVICE_CATEGORIES.map((category) => ({
-    category,
-    entries: matches.filter((entry) => entry.model.category === category),
-  })).filter((group) => group.entries.length > 0);
+  return DEVICE_GROUPS.map((group) => ({
+    label: group.label,
+    categories: group.categories
+      .map((category) => ({
+        category,
+        entries: matches.filter((entry) => entry.model.category === category),
+      }))
+      .filter((matches) => matches.entries.length > 0),
+  })).filter((group) => group.categories.length > 0);
 }
 
 function SearchField({ label, ...props }: { label: string } & ComponentProps<'input'>) {
@@ -187,18 +207,29 @@ function Annotations() {
   );
 }
 
-function DeviceGroup({ category, entries }: { category: DeviceCategory; entries: Entry[] }) {
+function CategoryList({ category, entries }: CategoryMatches) {
   const id = useId();
   return (
     <section className="flex flex-col gap-0.5 px-1.5 pb-3">
-      <h3 id={id} className="px-2 pb-1 text-2xs font-semibold tracking-wide text-fg-3 uppercase">
+      <h4 id={id} className="px-2 pb-1 text-2xs font-semibold tracking-wide text-fg-3 uppercase">
         {CATEGORY_LABELS[category]}
-      </h3>
+      </h4>
       <ul aria-labelledby={id} className="flex flex-col gap-0.5">
         {entries.map((entry) => (
           <DeviceItem key={entry.model.id} entry={entry} />
         ))}
       </ul>
+    </section>
+  );
+}
+
+function DeviceGroup({ label, categories }: { label: string; categories: CategoryMatches[] }) {
+  return (
+    <section className="flex flex-col pb-1">
+      <h3 className="px-3.5 pb-1.5 text-xs font-semibold text-fg-2">{label}</h3>
+      {categories.map((matches) => (
+        <CategoryList key={matches.category} {...matches} />
+      ))}
     </section>
   );
 }
@@ -217,7 +248,7 @@ function DeviceCatalog() {
       />
       <div className="min-h-0 flex-1 overflow-y-auto pt-1">
         {groups.length > 0 ? (
-          groups.map((group) => <DeviceGroup key={group.category} {...group} />)
+          groups.map((group) => <DeviceGroup key={group.label} {...group} />)
         ) : (
           <EmptyState icon={SearchIcon} title={info.empty}>
             {info.hint}

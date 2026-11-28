@@ -1,23 +1,38 @@
-import { PortId, type DeviceKind, type PortKind } from '@/model';
-import type { PortSpec } from '@/model';
+import { PortId, type DeviceKind, type PortKind, type PortSpec } from '@/model';
+import { fiber, numbered, ports, radio, single } from './ports';
 
-export const DEVICE_CATEGORIES = [
-  'routers',
-  'switches',
-  'hubs',
-  'wireless',
-  'end-devices',
-  'servers',
+export { WIRELESS_NIC } from './ports';
+
+/** Packet Tracer's palette groups, each with its categories in palette order. */
+export const DEVICE_GROUPS = [
+  {
+    label: 'Network Devices',
+    categories: ['routers', 'switches', 'hubs', 'wireless', 'security', 'wan-emulation'],
+  },
+  {
+    label: 'End Devices',
+    categories: ['end-devices', 'home', 'smart-city', 'industrial', 'power-grid'],
+  },
+  { label: 'Components', categories: ['components'] },
 ] as const;
-export type DeviceCategory = (typeof DEVICE_CATEGORIES)[number];
+export type DeviceGroup = (typeof DEVICE_GROUPS)[number];
+
+export const DEVICE_CATEGORIES = DEVICE_GROUPS.flatMap((group) => group.categories);
+export type DeviceCategory = DeviceGroup['categories'][number];
 
 export const CATEGORY_LABELS: Record<DeviceCategory, string> = {
   routers: 'Routers',
   switches: 'Switches',
   hubs: 'Hubs',
-  wireless: 'Wireless devices',
-  'end-devices': 'End devices',
-  servers: 'Servers',
+  wireless: 'Wireless Devices',
+  security: 'Security',
+  'wan-emulation': 'WAN Emulation',
+  'end-devices': 'End Devices',
+  home: 'Home',
+  'smart-city': 'Smart City',
+  industrial: 'Industrial',
+  'power-grid': 'Power Grid',
+  components: 'Components',
 };
 
 export type DeviceIconName =
@@ -54,39 +69,6 @@ export type DeviceModel = {
   /** A multilayer switch: it takes `ip routing`, routed ports and static routes. */
   readonly multilayer?: true;
 };
-
-const PORT_PREFIX: Record<PortKind, string> = {
-  fastEthernet: 'FastEthernet',
-  gigabitEthernet: 'GigabitEthernet',
-  serial: 'Serial',
-  wireless: 'Wireless',
-};
-
-/** `ports('gigabitEthernet', '0/', 0, 2)` is GigabitEthernet0/0 and GigabitEthernet0/1. */
-function ports(kind: PortKind, slot: string, first: number, count: number): PortSpec[] {
-  return Array.from({ length: count }, (_, i) => ({
-    kind,
-    id: PortId.parse(`${PORT_PREFIX[kind]}${slot}${first + i}`),
-  }));
-}
-
-const fiber = (specs: PortSpec[]): PortSpec[] => specs.map((spec) => ({ ...spec, fiber: true }));
-
-/** Packet Tracer's `Port 0`, `Port 1`, …: how a hub names its ports. */
-const numbered = (count: number): PortSpec[] =>
-  Array.from({ length: count }, (_, i) => ({
-    kind: 'fastEthernet',
-    id: PortId.parse(`Port${i}`),
-  }));
-
-const radio = (name: string): PortSpec => ({ kind: 'wireless', id: PortId.parse(name) });
-
-/** The radio a PC or laptop takes in place of its Ethernet card, as Packet Tracer's WMP300N. */
-export const WIRELESS_NIC: PortSpec = radio('Wireless0');
-
-const single = (kind: PortKind): PortSpec[] => [
-  { kind, id: PortId.parse(`${PORT_PREFIX[kind]}0`) },
-];
 
 export const DEVICE_MODELS = [
   {
@@ -202,7 +184,7 @@ export const DEVICE_MODELS = [
   {
     id: 'server',
     name: 'Server',
-    category: 'servers',
+    category: 'end-devices',
     kind: 'server',
     hostnamePrefix: 'Server',
     icon: 'server',
