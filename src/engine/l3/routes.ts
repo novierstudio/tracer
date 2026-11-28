@@ -102,7 +102,10 @@ function configuredRoutes(
       return device.config.staticRoutes;
     case 'pc':
     case 'server':
-    case 'wirelessRouter': {
+    case 'wirelessRouter':
+    case 'centralOffice':
+    case 'lightweightAp':
+    case 'wlc': {
       const gateway = host && gatewayOf(host);
       return gateway
         ? [{ prefix: DEFAULT_ROUTE, nextHop: { kind: 'address', address: gateway } }]
@@ -117,6 +120,7 @@ function configuredRoutes(
     }
     case 'hub':
     case 'accessPoint':
+    case 'cellTower':
       return [];
     default: {
       const exhaustive: never = device;

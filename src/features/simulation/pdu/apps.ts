@@ -1,6 +1,9 @@
 import {
   APP_PORT,
+  CAPWAP_TYPE,
   NTP_MODE,
+  type CapwapMessage,
+  type IotMessage,
   TFTP_OPCODE,
   type AppTcpPayload,
   type AppUdpPayload,
@@ -23,6 +26,8 @@ export const APP_PORT_NAMES: Record<number, string> = {
   [APP_PORT.ftp]: 'FTP',
   [APP_PORT.smtp]: 'SMTP',
   [APP_PORT.pop3]: 'POP3',
+  [APP_PORT.capwap]: 'CAPWAP',
+  [APP_PORT.iot]: 'IoT',
 };
 
 /** Each service's name as the inspector shows it. */
@@ -34,7 +39,162 @@ export const APP_NAMES: Record<AppPayload['kind'], string> = {
   'ftp-data': 'FTP-DATA',
   smtp: 'SMTP',
   pop3: 'POP3',
+  capwap: 'CAPWAP',
+  iot: 'IoT',
 };
+
+const CAPWAP_NAMES: Record<CapwapMessage['type'], string> = {
+  'discovery-request': 'Discovery Request',
+  'discovery-response': 'Discovery Response',
+  'join-request': 'Join Request',
+  'join-response': 'Join Response',
+  'configuration-update': 'Configuration Update Request',
+  'echo-request': 'Echo Request',
+  'echo-response': 'Echo Response',
+};
+
+const CAPWAP_EXPLAIN: Record<CapwapMessage['type'], string> = {
+  'discovery-request':
+    'A lightweight AP asks for wireless LAN controllers: the ones its DHCP option 43 named, or every controller on its subnet by broadcast.',
+  'discovery-response': 'A controller answers an AP looking for one, with its name.',
+  'join-request': 'The AP asks to join the controller that answered first.',
+  'join-response': 'The controller takes the AP, and lists it among its APs.',
+  'configuration-update':
+    'The controller pushes its enabled WLANs. The AP broadcasts them, and its clients can associate.',
+  'echo-request': 'The AP checks every 30 seconds that its controller is still there.',
+  'echo-response': 'The controller answers the AP’s keepalive.',
+};
+
+function describeIot(message: IotMessage): string {
+  switch (message.type) {
+    case 'register':
+      return `IoT register ${message.name}`;
+    case 'registered':
+      return message.ok ? 'IoT registered' : 'IoT registration refused';
+    case 'report':
+      return `IoT report ${message.name}`;
+    case 'set':
+      return `IoT set ${message.key} to ${message.value}`;
+  }
+}
+
+const stateText = (state: Readonly<Record<string, string>>) =>
+  Object.entries(state)
+    .map(([key, value]) => `${key}=${value}`)
+    .join(', ');
+
+function iotParts(message: IotMessage): Part[] {
+  const type: Part = {
+    id: 'iot.type',
+    label: 'Message',
+    value: message.type,
+    explain:
+      'A thing registers with its server, then reports its state; the server orders it to change an actuator.',
+    bytes: utf8(message.type),
+  };
+  switch (message.type) {
+    case 'register':
+      return [
+        type,
+        {
+          id: 'iot.name',
+          label: 'Device',
+          value: `${message.name} (${message.thing})`,
+          explain: 'The thing’s name and kind, as the server’s page lists it.',
+          bytes: utf8(message.name),
+        },
+        {
+          id: 'iot.account',
+          label: 'Account',
+          value: message.username || '(none)',
+          explain:
+            'A remote IoT server registers a thing under an account. A Home Gateway takes any.',
+          bytes: utf8(message.username),
+        },
+        {
+          id: 'iot.state',
+          label: 'State',
+          value: stateText(message.state),
+          explain: 'Each attribute’s state now.',
+          bytes: utf8(stateText(message.state)),
+        },
+      ];
+    case 'registered':
+      return [
+        type,
+        {
+          id: 'iot.result',
+          label: 'Result',
+          value: message.ok ? 'OK' : (message.reason ?? 'Not registered'),
+          explain: 'Whether the server took the thing. A thing it refused registers again.',
+          bytes: [message.ok ? 1 : 0],
+        },
+      ];
+    case 'report':
+      return [
+        type,
+        {
+          id: 'iot.state',
+          label: 'State',
+          value: stateText(message.state),
+          explain: 'The thing’s state, sent when it changes and every 30 seconds.',
+          bytes: utf8(stateText(message.state)),
+        },
+      ];
+    case 'set':
+      return [
+        type,
+        {
+          id: 'iot.set',
+          label: 'Order',
+          value: `${message.key} = ${message.value}`,
+          explain: 'The server tells the thing to change an actuator, as its web page asked.',
+          bytes: utf8(`${message.key}=${message.value}`),
+        },
+      ];
+  }
+}
+
+function capwapParts(message: CapwapMessage): Part[] {
+  const parts: Part[] = [
+    {
+      id: 'capwap.type',
+      label: 'Message type',
+      value: `${CAPWAP_TYPE[message.type]} (${CAPWAP_NAMES[message.type]})`,
+      explain: CAPWAP_EXPLAIN[message.type],
+      bytes: u32(CAPWAP_TYPE[message.type]),
+    },
+  ];
+  if (message.type === 'discovery-response') {
+    parts.push({
+      id: 'capwap.controller',
+      label: 'AC name',
+      value: message.controller,
+      explain: 'The controller’s name.',
+      bytes: utf8(message.controller),
+    });
+  }
+  if (message.type === 'join-request') {
+    parts.push({
+      id: 'capwap.ap',
+      label: 'WTP name',
+      value: `${message.ap} (${message.model})`,
+      explain: 'The AP’s name and model, as the controller lists it.',
+      bytes: utf8(message.ap),
+    });
+  }
+  if (message.type === 'configuration-update') {
+    const ssids = message.wlans.map((wlan) => wlan.ssid).join(', ') || 'none';
+    parts.push({
+      id: 'capwap.wlans',
+      label: 'WLANs',
+      value: ssids,
+      explain: 'The SSIDs the AP broadcasts from now on, with their security.',
+      bytes: utf8(ssids),
+    });
+  }
+  return parts;
+}
 
 const encoder = new TextEncoder();
 const utf8 = (text: string) => [...encoder.encode(text)];
@@ -90,6 +250,10 @@ export function describeApp(payload: AppPayload): string {
       return `${APP_NAMES[payload.kind]}: ${firstLine(payload.text)}`;
     case 'ftp-data':
       return `FTP-DATA: ${utf8(payload.text).length} bytes`;
+    case 'capwap':
+      return `CAPWAP ${CAPWAP_NAMES[payload.type]}`;
+    case 'iot':
+      return describeIot(payload);
   }
 }
 
@@ -311,6 +475,10 @@ export function appParts(payload: AppPayload): Part[] {
     case 'smtp':
     case 'pop3':
       return lineParts(payload);
+    case 'capwap':
+      return capwapParts(payload);
+    case 'iot':
+      return iotParts(payload);
     case 'ftp-data':
       return [
         {

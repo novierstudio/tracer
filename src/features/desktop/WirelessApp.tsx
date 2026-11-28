@@ -8,16 +8,23 @@ import {
   WirelessSecurity,
   type Device,
   type DeviceId,
+  type ApBroadcasts,
   type PortSpec,
-  type WirelessRadio,
+  type WirelessProfile,
 } from '@/model';
+import { useApBroadcasts } from '@/features/simulation/wirelessStatus';
 import { useEditor } from '@/model/react';
 import { editorStore } from '@/model/store';
 import { Button } from '@/ui/button';
 import { cn } from '@/ui/cn';
 import { addressPort, type HostDevice } from './format';
 
-type Network = { device: DeviceId; name: string; radio: WirelessRadio };
+/** A network in range: its SSID and security, and the channel when its radio has a fixed one. */
+type Network = {
+  device: DeviceId;
+  name: string;
+  radio: WirelessProfile & { readonly channel?: number };
+};
 
 /** The card a host goes back to: its model's Ethernet port, or FastEthernet0. */
 function wiredCard(device: HostDevice): PortSpec {
@@ -25,13 +32,15 @@ function wiredCard(device: HostDevice): PortSpec {
   return port ?? { kind: 'fastEthernet', id: PortId.parse('FastEthernet0') };
 }
 
-/** Every radio on a powered device, by SSID: the networks a PC Wireless app lists. */
-function networksOf(devices: Record<DeviceId, Device>): Network[] {
+/** Every network a powered radio offers: the networks a PC Wireless app lists. */
+function networksOf(devices: Record<DeviceId, Device>, broadcasts: ApBroadcasts): Network[] {
   return Object.values(devices).flatMap((device) => {
-    const offered = device.powered ? radioOf(device) : undefined;
-    return offered
-      ? [{ device: device.id, name: device.config.hostname, radio: offered.radio }]
-      : [];
+    const offered = device.powered ? radioOf(device, broadcasts) : undefined;
+    return (offered?.networks ?? []).map((radio) => ({
+      device: device.id,
+      name: device.config.hostname,
+      radio,
+    }));
   });
 }
 
@@ -48,6 +57,7 @@ const SECURITY_LABELS: Record<WirelessSecurity['mode'], string> = {
 export function WirelessApp({ device }: { device: HostDevice }) {
   const port = addressPort(device);
   const devices = useEditor((state) => state.topology.devices);
+  const broadcasts = useApBroadcasts();
   const swap = (spec: PortSpec) =>
     editorStore.getState().swapNic({ device: device.id, port: spec });
 
@@ -65,7 +75,7 @@ export function WirelessApp({ device }: { device: HostDevice }) {
     );
   }
 
-  const association = associations(Object.values(devices)).find(
+  const association = associations(Object.values(devices), broadcasts).find(
     (link) => link.a.device === device.id,
   );
   const ap = association && devices[association.b.device];
@@ -105,7 +115,7 @@ export function WirelessApp({ device }: { device: HostDevice }) {
       </section>
       <section aria-label="Networks" className="flex flex-col gap-1.5 border-t border-line pt-3">
         <h4 className="text-2xs font-medium text-fg-3">Networks in range</h4>
-        <NetworkList device={device} networks={networksOf(devices)} />
+        <NetworkList device={device} networks={networksOf(devices, broadcasts)} />
       </section>
       <div className="border-t border-line pt-3">
         <Button size="sm" variant="ghost" onClick={() => swap(wiredCard(device))}>
@@ -124,7 +134,7 @@ function NetworkList({ device, networks }: { device: HostDevice; networks: Netwo
   return (
     <ul className="flex flex-col gap-1.5">
       {networks.map((network) => {
-        const key = `${network.device}`;
+        const key = `${network.device} ${network.radio.ssid}`;
         const { ssid, security, channel } = network.radio;
         return (
           <li key={key} className="rounded-lg border border-line bg-surface-1">
@@ -138,7 +148,8 @@ function NetworkList({ device, networks }: { device: HostDevice; networks: Netwo
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-xs font-medium text-fg-1">{ssid}</span>
                 <span className="block text-2xs text-fg-3">
-                  {SECURITY_LABELS[security.mode]} · channel {channel} · {network.name}
+                  {SECURITY_LABELS[security.mode]}
+                  {channel === undefined ? '' : ` · channel ${channel}`} · {network.name}
                 </span>
               </span>
               {security.mode !== 'none' && <LockIcon aria-hidden className="size-3.5 text-fg-3" />}

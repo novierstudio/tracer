@@ -74,12 +74,17 @@ const KIND_NAME: Record<DeviceKind, string> = {
   hub: 'hub',
   accessPoint: 'access point',
   wirelessRouter: 'wireless router',
+  lightweightAp: 'lightweight AP',
+  wlc: 'wireless LAN controller',
+  cellTower: 'cell tower',
+  centralOffice: 'central office server',
 };
 
 const CABLE_NAME: Record<Cable, string> = {
   straight: 'straight-through',
   crossover: 'crossover',
   fiber: 'fiber',
+  coaxial: 'coaxial',
   serial: 'serial',
   console: 'console',
 };

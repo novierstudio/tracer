@@ -174,6 +174,10 @@ export function ipv6Interfaces(device: Device, links: Links, state: Ipv6State): 
     case 'hub':
     case 'accessPoint':
     case 'wirelessRouter':
+    case 'lightweightAp':
+    case 'wlc':
+    case 'cellTower':
+    case 'centralOffice':
       return [];
     default: {
       const exhaustive: never = device;

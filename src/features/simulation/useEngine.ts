@@ -7,6 +7,8 @@ import { trackLinkStates } from './linkState';
 import { trackServerFiles } from './serverFiles';
 import { trackServerStatus } from './serverStatus';
 import { trackStickyMacs } from './stickyMacs';
+import { trackThingState } from './thingState';
+import { trackWirelessStatus } from './wirelessStatus';
 import { trackVlanDatabases } from './vlanDatabase';
 import { consoles, trackSyslog } from '@/features/terminal/registry';
 
@@ -29,6 +31,8 @@ export function useEngine(): EngineState {
     let stopVlans: (() => void) | undefined;
     let stopFiles: (() => void) | undefined;
     let stopSyslog: (() => void) | undefined;
+    let stopWireless: (() => void) | undefined;
+    let stopThings: (() => void) | undefined;
     let disconnect: (() => void) | undefined;
     import('@/engine/client')
       .then(({ startEngine }) => startEngine(editorStore))
@@ -42,6 +46,8 @@ export function useEngine(): EngineState {
           stopVlans = trackVlanDatabases(client, editorStore);
           stopFiles = trackServerFiles(client, editorStore);
           stopSyslog = trackSyslog(client, consoles);
+          stopWireless = trackWirelessStatus(client, editorStore);
+          stopThings = trackThingState(client, editorStore);
           disconnect = connectSimulation(client);
           exposeSimClient(client);
           setState('ready');
@@ -60,6 +66,8 @@ export function useEngine(): EngineState {
       stopVlans?.();
       stopFiles?.();
       stopSyslog?.();
+      stopWireless?.();
+      stopThings?.();
       disconnect?.();
     };
   }, []);

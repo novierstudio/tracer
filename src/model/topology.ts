@@ -27,13 +27,15 @@ export type Point = z.infer<typeof Point>;
  * How each kind of port may be named. IOS devices number theirs by slot, such as
  * `FastEthernet0/1`. Packet Tracer names a hub's and an access point's ports `Port 0`, a home
  * router's `Internet`, `Ethernet 1` and `Wireless`, and a host's radio `Wireless0`; Tracer drops
- * the spaces.
+ * the spaces. A lightweight AP's radios are `Dot11Radio0` and `Dot11Radio1`, a cell tower's and a
+ * phone's 3G/4G radios `Cell0` and `Cell1`, and a central office server's ports `Backbone` and
+ * `Coaxial0` to `Coaxial5`.
  */
 const PORT_NAMES = {
-  fastEthernet: String.raw`FastEthernet\d+(?:/\d+)*|Port\d+|Ethernet\d+|Internet`,
+  fastEthernet: String.raw`FastEthernet\d+(?:/\d+)*|Port\d+|Ethernet\d+|Internet|Backbone|Coaxial\d+`,
   gigabitEthernet: String.raw`GigabitEthernet\d+(?:/\d+)*`,
   serial: String.raw`Serial\d+(?:/\d+)*`,
-  wireless: String.raw`Wireless\d*|Port\d+`,
+  wireless: String.raw`Wireless\d*|Port\d+|Dot11Radio\d+|Cell\d+`,
 } as const;
 
 const PORT_NAME_PATTERNS = Object.fromEntries(
@@ -117,10 +119,18 @@ export const Port = z.discriminatedUnion('kind', [
     mac: MacAddress,
     /** A fiber port, which takes a fiber cable only. Absent means copper. */
     fiber: z.literal(true).optional(),
+    /** A coaxial port, as a cell tower's, which takes a coaxial cable only. */
+    coaxial: z.literal(true).optional(),
   }),
   z.object({ kind: z.literal('serial'), id: PortId }),
   /** A radio: a host's wireless NIC, or an access point's or home router's. It takes no cable. */
-  z.object({ kind: z.literal('wireless'), id: PortId, mac: MacAddress }),
+  z.object({
+    kind: z.literal('wireless'),
+    id: PortId,
+    mac: MacAddress,
+    /** A 3G/4G radio, a phone's or a cell tower's, in place of Wi-Fi. */
+    cellular: z.literal(true).optional(),
+  }),
 ]);
 export type Port = z.infer<typeof Port>;
 export type PortKind = Port['kind'];
@@ -528,6 +538,8 @@ export const DhcpPool = z.object({
   dnsServers: optionAddresses,
   /** Absent means DEFAULT_DHCP_LEASE. */
   lease: DhcpLease.optional(),
+  /** `option 43 ip`: the wireless LAN controllers a lightweight AP that leases here joins. */
+  option43: optionAddresses,
 });
 export type DhcpPool = z.infer<typeof DhcpPool>;
 
@@ -991,11 +1003,14 @@ export const WirelessSecurity = z.discriminatedUnion('mode', [
 ]);
 export type WirelessSecurity = z.infer<typeof WirelessSecurity>;
 
-/** An access point's or home router's radio: the network it offers, on a 2.4 GHz channel. */
+/**
+ * An access point's or home router's radio: the network it offers, on a 2.4 GHz channel (1 to 11)
+ * or a 5 GHz one (36 to 165), as the model's band allows.
+ */
 export const WirelessRadio = z.object({
   ssid: Ssid,
   security: WirelessSecurity,
-  channel: z.int().min(1).max(11),
+  channel: z.int().min(1).max(165),
 });
 export type WirelessRadio = z.infer<typeof WirelessRadio>;
 
@@ -1031,9 +1046,51 @@ export const MailAccount = z.object({
 });
 export type MailAccount = z.infer<typeof MailAccount>;
 
+/** The kinds of IoT thing, each with the attributes `THING_TYPES` gives it. */
+export const THING_KINDS = [
+  'lamp',
+  'fan',
+  'door',
+  'window',
+  'motion',
+  'smoke',
+  'siren',
+  'thermostat',
+  'webcam',
+  'mcu',
+  'sbc',
+  'thing',
+] as const;
+export const ThingKind = z.enum(THING_KINDS);
+export type ThingKind = z.infer<typeof ThingKind>;
+
+/**
+ * Where an IoT thing registers, as its Config tab's IoT Server sets it: nowhere, the Home Gateway
+ * that is its default gateway, or a remote server running the IoT service, with an account there.
+ */
+export const IotServer = z.discriminatedUnion('mode', [
+  z.object({ mode: z.literal('none') }),
+  z.object({ mode: z.literal('gateway') }),
+  z.object({
+    mode: z.literal('remote'),
+    address: Ipv4Address,
+    username: z.string(),
+    password: z.string(),
+  }),
+]);
+export type IotServer = z.infer<typeof IotServer>;
+
+/** An IoT thing's settings, and the state of each of its attributes, such as `{ status: 'on' }`. */
+export const IotConfig = z.object({
+  thing: ThingKind,
+  server: IotServer,
+  state: z.record(z.string(), z.string()),
+});
+export type IotConfig = z.infer<typeof IotConfig>;
+
 /**
  * Absent `ipv6` means static with no address: the host has its link-local address only. Absent
- * `wireless` means a wireless NIC joins no network.
+ * `wireless` means a wireless NIC joins no network. `iot` makes the host an IoT thing.
  */
 export const HostConfig = z.object({
   hostname: Hostname,
@@ -1044,6 +1101,7 @@ export const HostConfig = z.object({
   files: z.array(StoredFile).optional(),
   /** The Email app's account. Absent until it is configured. */
   mail: MailAccount.optional(),
+  iot: IotConfig.optional(),
 });
 export type HostConfig = z.infer<typeof HostConfig>;
 
@@ -1114,6 +1172,8 @@ export const ServerServices = z.object({
    */
   ntp: z.object({ enabled: z.boolean(), epoch: z.number() }).optional(),
   syslog: z.object({ enabled: z.boolean() }).optional(),
+  /** The IoT registration server, with the accounts things register under. */
+  iot: z.object({ enabled: z.boolean(), users: z.array(MailUser) }).optional(),
 });
 export type ServerServices = z.infer<typeof ServerServices>;
 
@@ -1148,6 +1208,43 @@ export const WirelessRouterConfig = z.object({
 });
 export type WirelessRouterConfig = z.infer<typeof WirelessRouterConfig>;
 
+/**
+ * A WLAN a wireless LAN controller serves: its lightweight APs broadcast it once they join.
+ * Absent `vlan` means the controller's management interface.
+ */
+export const Wlan = z.object({
+  ssid: Ssid,
+  security: WirelessSecurity,
+  vlan: VlanId.optional(),
+  enabled: z.boolean(),
+});
+export type Wlan = z.infer<typeof Wlan>;
+
+/** A wireless LAN controller's settings, as its web GUI sets them. */
+export const WlcConfig = z.object({
+  hostname: Hostname,
+  /** The management interface, which lightweight APs join over CAPWAP. */
+  management: HostIpv4,
+  wlans: z.array(Wlan),
+});
+export type WlcConfig = z.infer<typeof WlcConfig>;
+
+/** A lightweight AP takes its address by DHCP and the rest from the controller it joins. */
+export const LightweightApConfig = z.object({ hostname: Hostname });
+export type LightweightApConfig = z.infer<typeof LightweightApConfig>;
+
+/** A cell tower relays its 3G/4G clients to the central office over coaxial cable. */
+export const CellTowerConfig = z.object({ hostname: Hostname });
+export type CellTowerConfig = z.infer<typeof CellTowerConfig>;
+
+/**
+ * A central office server's settings. `wan` is its Backbone port's address; `lan` its address on
+ * the cell network its coaxial ports share, which its DHCP server serves from `start`. It routes
+ * between them without translating.
+ */
+export const CentralOfficeConfig = WirelessRouterConfig.omit({ radio: true });
+export type CentralOfficeConfig = z.infer<typeof CentralOfficeConfig>;
+
 const deviceFields = {
   id: DeviceId,
   model: z.string().min(1),
@@ -1169,6 +1266,10 @@ const DeviceShape = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('hub'), ...deviceFields, config: HubConfig }),
   z.object({ kind: z.literal('accessPoint'), ...deviceFields, config: AccessPointConfig }),
   z.object({ kind: z.literal('wirelessRouter'), ...deviceFields, config: WirelessRouterConfig }),
+  z.object({ kind: z.literal('lightweightAp'), ...deviceFields, config: LightweightApConfig }),
+  z.object({ kind: z.literal('wlc'), ...deviceFields, config: WlcConfig }),
+  z.object({ kind: z.literal('cellTower'), ...deviceFields, config: CellTowerConfig }),
+  z.object({ kind: z.literal('centralOffice'), ...deviceFields, config: CentralOfficeConfig }),
 ]);
 export type Device = z.infer<typeof DeviceShape>;
 export type DeviceKind = Device['kind'];
@@ -1185,7 +1286,7 @@ export type Endpoint = z.infer<typeof Endpoint>;
 export const Link = z.discriminatedUnion('cable', [
   z.object({
     id: LinkId,
-    cable: z.enum(['straight', 'crossover', 'fiber']),
+    cable: z.enum(['straight', 'crossover', 'fiber', 'coaxial']),
     a: Endpoint,
     b: Endpoint,
   }),

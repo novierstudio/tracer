@@ -23,7 +23,7 @@ import {
   type TopologyError,
 } from './topology';
 import { VlanId, type Hostname, type MacAddress } from './values';
-import { DEFAULT_HOME_ROUTER, DEFAULT_RADIO } from './wireless';
+import { DEFAULT_CENTRAL_OFFICE, DEFAULT_HOME_ROUTER, DEFAULT_RADIO } from './wireless';
 
 export type CommandResult = Result<Topology, TopologyError>;
 
@@ -153,10 +153,7 @@ export function swapNic(
   if (!old || old.kind === 'serial' || port.kind === 'serial') return ok(topology);
   if (old.id === port.id && old.kind === port.kind) return ok(topology);
   const mac = old.mac;
-  const fresh: Port =
-    port.kind === 'wireless'
-      ? { kind: 'wireless', id: port.id, mac }
-      : { kind: port.kind, id: port.id, mac, ...(port.fiber && { fiber: true }) };
+  const fresh = buildPort(port, () => mac);
   const next: Device = { ...current, ports: [fresh] };
   const problem = findDeviceProblem(next);
   if (problem) return err(problem);
@@ -255,8 +252,21 @@ function macAllocator(topology: Topology, ids: IdSource): () => MacAddress {
 
 function buildPort(port: PortSpec, freshMac: () => MacAddress): Port {
   if (port.kind === 'serial') return { kind: 'serial', id: port.id };
-  if (port.kind === 'wireless') return { kind: 'wireless', id: port.id, mac: freshMac() };
-  return { kind: port.kind, id: port.id, mac: freshMac(), ...(port.fiber && { fiber: true }) };
+  if (port.kind === 'wireless') {
+    return {
+      kind: 'wireless',
+      id: port.id,
+      mac: freshMac(),
+      ...(port.cellular && { cellular: true }),
+    };
+  }
+  return {
+    kind: port.kind,
+    id: port.id,
+    mac: freshMac(),
+    ...(port.fiber && { fiber: true }),
+    ...(port.coaxial && { coaxial: true }),
+  };
 }
 
 export function removeLinks(topology: Topology, ids: readonly LinkId[]): Topology {
@@ -369,8 +379,17 @@ export function updateLabSettings(topology: Topology, update: Partial<LabSetting
   });
 }
 
-/** A port as a model lists it: its kind and name, and whether an Ethernet port is fiber. */
-export type PortSpec = { kind: Port['kind']; id: PortId; fiber?: true };
+/**
+ * A port as a model lists it: its kind and name, whether an Ethernet port is fiber or coaxial,
+ * and whether a radio is 3G/4G.
+ */
+export type PortSpec = {
+  kind: Port['kind'];
+  id: PortId;
+  fiber?: true;
+  coaxial?: true;
+  cellular?: true;
+};
 
 type ConfigOf<K extends DeviceKind> = Extract<Device, { kind: K }>['config'];
 
@@ -477,6 +496,22 @@ export function createDevice(
         kind: 'wirelessRouter',
         config: { ...DEFAULT_HOME_ROUTER, ...spec.config, hostname },
       };
+    case 'lightweightAp':
+      return { ...fields, kind: 'lightweightAp', config: { ...spec.config, hostname } };
+    case 'wlc':
+      return {
+        ...fields,
+        kind: 'wlc',
+        config: { management: { mode: 'static' }, wlans: [], ...spec.config, hostname },
+      };
+    case 'cellTower':
+      return { ...fields, kind: 'cellTower', config: { ...spec.config, hostname } };
+    case 'centralOffice':
+      return {
+        ...fields,
+        kind: 'centralOffice',
+        config: { ...DEFAULT_CENTRAL_OFFICE, ...spec.config, hostname },
+      };
     default: {
       const exhaustive: never = spec;
       return exhaustive;
@@ -529,6 +564,14 @@ function withConfig(device: Device, update: ConfigUpdate): Device | undefined {
       return device.kind === 'accessPoint' ? { ...device, config: update.config } : undefined;
     case 'wirelessRouter':
       return device.kind === 'wirelessRouter' ? { ...device, config: update.config } : undefined;
+    case 'lightweightAp':
+      return device.kind === 'lightweightAp' ? { ...device, config: update.config } : undefined;
+    case 'wlc':
+      return device.kind === 'wlc' ? { ...device, config: update.config } : undefined;
+    case 'cellTower':
+      return device.kind === 'cellTower' ? { ...device, config: update.config } : undefined;
+    case 'centralOffice':
+      return device.kind === 'centralOffice' ? { ...device, config: update.config } : undefined;
     default: {
       const exhaustive: never = update;
       return exhaustive;

@@ -1,0 +1,255 @@
+{
+  "version": 2,
+  "meta": {
+    "name": "Smart home",
+    "createdAt": "2026-11-25T00:00:00.000Z",
+    "updatedAt": "2026-11-25T00:00:00.000Z"
+  },
+  "devices": {
+    "dev_shHomeGateway": {
+      "id": "dev_shHomeGateway",
+      "model": "home-gateway",
+      "position": {
+        "x": 424,
+        "y": 232
+      },
+      "powered": true,
+      "ports": [
+        {
+          "kind": "fastEthernet",
+          "id": "Internet",
+          "mac": "5a:14:b9:f8:ef:0d"
+        },
+        {
+          "kind": "fastEthernet",
+          "id": "Ethernet1",
+          "mac": "ae:69:4e:8c:0a:9f"
+        },
+        {
+          "kind": "fastEthernet",
+          "id": "Ethernet2",
+          "mac": "1e:01:9b:e2:6a:a0"
+        },
+        {
+          "kind": "fastEthernet",
+          "id": "Ethernet3",
+          "mac": "1a:6d:0e:7d:d4:cd"
+        },
+        {
+          "kind": "fastEthernet",
+          "id": "Ethernet4",
+          "mac": "ce:1d:a4:71:63:76"
+        },
+        {
+          "kind": "wireless",
+          "id": "Wireless",
+          "mac": "22:32:40:a5:22:15"
+        }
+      ],
+      "kind": "wirelessRouter",
+      "config": {
+        "wan": {
+          "mode": "dhcp"
+        },
+        "lan": {
+          "address": "192.168.25.1",
+          "prefixLength": 24
+        },
+        "dhcp": {
+          "enabled": true,
+          "start": "192.168.25.100",
+          "maxUsers": 50
+        },
+        "radio": {
+          "ssid": "HomeGateway",
+          "security": {
+            "mode": "none"
+          },
+          "channel": 6
+        },
+        "hostname": "HomeGateway"
+      }
+    },
+    "dev_shLamp": {
+      "id": "dev_shLamp",
+      "model": "iot-lamp",
+      "position": {
+        "x": 136,
+        "y": 424
+      },
+      "powered": true,
+      "ports": [
+        {
+          "kind": "fastEthernet",
+          "id": "FastEthernet0",
+          "mac": "46:78:77:6e:42:f5"
+        }
+      ],
+      "kind": "pc",
+      "config": {
+        "ipv4": {
+          "mode": "dhcp"
+        },
+        "iot": {
+          "thing": "lamp",
+          "server": {
+            "mode": "gateway"
+          },
+          "state": {}
+        },
+        "hostname": "Lamp"
+      }
+    },
+    "dev_shDoor": {
+      "id": "dev_shDoor",
+      "model": "iot-door",
+      "position": {
+        "x": 424,
+        "y": 488
+      },
+      "powered": true,
+      "ports": [
+        {
+          "kind": "fastEthernet",
+          "id": "FastEthernet0",
+          "mac": "76:22:7d:f9:f8:da"
+        }
+      ],
+      "kind": "pc",
+      "config": {
+        "ipv4": {
+          "mode": "dhcp"
+        },
+        "iot": {
+          "thing": "door",
+          "server": {
+            "mode": "gateway"
+          },
+          "state": {}
+        },
+        "hostname": "Door"
+      }
+    },
+    "dev_shMotion": {
+      "id": "dev_shMotion",
+      "model": "iot-motion",
+      "position": {
+        "x": 712,
+        "y": 424
+      },
+      "powered": true,
+      "ports": [
+        {
+          "kind": "fastEthernet",
+          "id": "FastEthernet0",
+          "mac": "62:aa:9a:2c:c5:e2"
+        }
+      ],
+      "kind": "pc",
+      "config": {
+        "ipv4": {
+          "mode": "dhcp"
+        },
+        "iot": {
+          "thing": "motion",
+          "server": {
+            "mode": "gateway"
+          },
+          "state": {}
+        },
+        "hostname": "Motion"
+      }
+    },
+    "dev_shLaptop": {
+      "id": "dev_shLaptop",
+      "model": "laptop",
+      "position": {
+        "x": 712,
+        "y": 88
+      },
+      "powered": true,
+      "ports": [
+        {
+          "kind": "wireless",
+          "id": "Wireless0",
+          "mac": "e6:02:1d:29:21:fb"
+        }
+      ],
+      "kind": "pc",
+      "config": {
+        "ipv4": {
+          "mode": "dhcp"
+        },
+        "hostname": "Laptop",
+        "wireless": {
+          "ssid": "HomeGateway",
+          "security": {
+            "mode": "none"
+          }
+        }
+      }
+    }
+  },
+  "links": {
+    "lnk_shLampHomeGateway": {
+      "id": "lnk_shLampHomeGateway",
+      "a": {
+        "device": "dev_shLamp",
+        "port": "FastEthernet0"
+      },
+      "b": {
+        "device": "dev_shHomeGateway",
+        "port": "Ethernet1"
+      },
+      "cable": "straight"
+    },
+    "lnk_shDoorHomeGateway": {
+      "id": "lnk_shDoorHomeGateway",
+      "a": {
+        "device": "dev_shDoor",
+        "port": "FastEthernet0"
+      },
+      "b": {
+        "device": "dev_shHomeGateway",
+        "port": "Ethernet2"
+      },
+      "cable": "straight"
+    },
+    "lnk_shMotionHomeGateway": {
+      "id": "lnk_shMotionHomeGateway",
+      "a": {
+        "device": "dev_shMotion",
+        "port": "FastEthernet0"
+      },
+      "b": {
+        "device": "dev_shHomeGateway",
+        "port": "Ethernet3"
+      },
+      "cable": "straight"
+    }
+  },
+  "annotations": {
+    "ann_shthings": {
+      "id": "ann_shthings",
+      "kind": "note",
+      "position": {
+        "x": 136,
+        "y": 600
+      },
+      "text": "The lamp, door and motion detector lease addresses from HomeGateway and register with its IoT server.",
+      "width": 192,
+      "color": "amber"
+    },
+    "ann_shbrowse": {
+      "id": "ann_shbrowse",
+      "kind": "note",
+      "position": {
+        "x": 840,
+        "y": 168
+      },
+      "text": "Open the laptop’s Web Browser at 192.168.25.1, sign in as admin with password admin, and turn the lamp on.",
+      "width": 192,
+      "color": "amber"
+    }
+  }
+}

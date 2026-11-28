@@ -1,0 +1,934 @@
+{
+  "version": 2,
+  "meta": {
+    "name": "Wireless LAN controller",
+    "createdAt": "2026-11-25T00:00:00.000Z",
+    "updatedAt": "2026-11-25T00:00:00.000Z"
+  },
+  "devices": {
+    "dev_wlaR1": {
+      "id": "dev_wlaR1",
+      "model": "router-2g2s",
+      "position": {
+        "x": 424,
+        "y": 40
+      },
+      "powered": true,
+      "ports": [
+        {
+          "kind": "gigabitEthernet",
+          "id": "GigabitEthernet0/0",
+          "mac": "5a:14:b9:f8:ef:0d"
+        },
+        {
+          "kind": "gigabitEthernet",
+          "id": "GigabitEthernet0/1",
+          "mac": "ae:69:4e:8c:0a:9f"
+        },
+        {
+          "kind": "serial",
+          "id": "Serial0/0/0"
+        },
+        {
+          "kind": "serial",
+          "id": "Serial0/0/1"
+        }
+      ],
+      "modules": {
+        "0/0": "HWIC-2T"
+      },
+      "kind": "router",
+      "config": {
+        "hostname": "R1",
+        "virtualInterfaces": {},
+        "servicePasswordEncryption": false,
+        "domainLookup": true,
+        "unknownLines": [],
+        "interfaces": {
+          "GigabitEthernet0/0": {
+            "shutdown": false,
+            "ipv4": {
+              "address": "192.168.10.1",
+              "prefixLength": 24
+            }
+          },
+          "GigabitEthernet0/1": {
+            "shutdown": true
+          },
+          "Serial0/0/0": {
+            "shutdown": true
+          },
+          "Serial0/0/1": {
+            "shutdown": true
+          }
+        },
+        "subinterfaces": {},
+        "lines": {
+          "console": {
+            "login": "none",
+            "transportInput": {
+              "ssh": true,
+              "telnet": true
+            }
+          },
+          "aux": {
+            "login": "none",
+            "transportInput": {
+              "ssh": true,
+              "telnet": true
+            }
+          },
+          "vty": [
+            {
+              "login": "password",
+              "transportInput": {
+                "ssh": true,
+                "telnet": true
+              }
+            },
+            {
+              "login": "password",
+              "transportInput": {
+                "ssh": true,
+                "telnet": true
+              }
+            },
+            {
+              "login": "password",
+              "transportInput": {
+                "ssh": true,
+                "telnet": true
+              }
+            },
+            {
+              "login": "password",
+              "transportInput": {
+                "ssh": true,
+                "telnet": true
+              }
+            },
+            {
+              "login": "password",
+              "transportInput": {
+                "ssh": true,
+                "telnet": true
+              }
+            },
+            {
+              "login": "password",
+              "transportInput": {
+                "ssh": true,
+                "telnet": true
+              }
+            },
+            {
+              "login": "password",
+              "transportInput": {
+                "ssh": true,
+                "telnet": true
+              }
+            },
+            {
+              "login": "password",
+              "transportInput": {
+                "ssh": true,
+                "telnet": true
+              }
+            },
+            {
+              "login": "password",
+              "transportInput": {
+                "ssh": true,
+                "telnet": true
+              }
+            },
+            {
+              "login": "password",
+              "transportInput": {
+                "ssh": true,
+                "telnet": true
+              }
+            },
+            {
+              "login": "password",
+              "transportInput": {
+                "ssh": true,
+                "telnet": true
+              }
+            },
+            {
+              "login": "password",
+              "transportInput": {
+                "ssh": true,
+                "telnet": true
+              }
+            },
+            {
+              "login": "password",
+              "transportInput": {
+                "ssh": true,
+                "telnet": true
+              }
+            },
+            {
+              "login": "password",
+              "transportInput": {
+                "ssh": true,
+                "telnet": true
+              }
+            },
+            {
+              "login": "password",
+              "transportInput": {
+                "ssh": true,
+                "telnet": true
+              }
+            },
+            {
+              "login": "password",
+              "transportInput": {
+                "ssh": true,
+                "telnet": true
+              }
+            }
+          ]
+        },
+        "staticRoutes": [],
+        "dhcp": {
+          "pools": {
+            "WLAN": {
+              "network": {
+                "address": "192.168.10.0",
+                "prefixLength": 24
+              },
+              "defaultRouters": [
+                "192.168.10.1"
+              ],
+              "option43": [
+                "192.168.10.2"
+              ]
+            }
+          },
+          "excluded": [
+            {
+              "first": "192.168.10.1",
+              "last": "192.168.10.10"
+            }
+          ]
+        }
+      }
+    },
+    "dev_wlaSW1": {
+      "id": "dev_wlaSW1",
+      "model": "switch-24",
+      "position": {
+        "x": 424,
+        "y": 232
+      },
+      "powered": true,
+      "ports": [
+        {
+          "kind": "fastEthernet",
+          "id": "FastEthernet0/1",
+          "mac": "46:78:77:6e:42:f5"
+        },
+        {
+          "kind": "fastEthernet",
+          "id": "FastEthernet0/2",
+          "mac": "b2:ad:da:84:d3:40"
+        },
+        {
+          "kind": "fastEthernet",
+          "id": "FastEthernet0/3",
+          "mac": "06:ab:aa:04:d3:05"
+        },
+        {
+          "kind": "fastEthernet",
+          "id": "FastEthernet0/4",
+          "mac": "1e:82:32:bf:fd:52"
+        },
+        {
+          "kind": "fastEthernet",
+          "id": "FastEthernet0/5",
+          "mac": "5e:3b:6b:32:87:cc"
+        },
+        {
+          "kind": "fastEthernet",
+          "id": "FastEthernet0/6",
+          "mac": "96:43:da:1f:aa:5e"
+        },
+        {
+          "kind": "fastEthernet",
+          "id": "FastEthernet0/7",
+          "mac": "ca:40:d0:6b:a1:d4"
+        },
+        {
+          "kind": "fastEthernet",
+          "id": "FastEthernet0/8",
+          "mac": "46:ea:17:9c:c3:1d"
+        },
+        {
+          "kind": "fastEthernet",
+          "id": "FastEthernet0/9",
+          "mac": "b6:75:5c:3b:7b:43"
+        },
+        {
+          "kind": "fastEthernet",
+          "id": "FastEthernet0/10",
+          "mac": "56:7c:d3:ba:dc:7b"
+        },
+        {
+          "kind": "fastEthernet",
+          "id": "FastEthernet0/11",
+          "mac": "f2:87:91:5e:6b:99"
+        },
+        {
+          "kind": "fastEthernet",
+          "id": "FastEthernet0/12",
+          "mac": "9a:de:a6:96:99:9c"
+        },
+        {
+          "kind": "fastEthernet",
+          "id": "FastEthernet0/13",
+          "mac": "6a:72:b9:46:3d:8d"
+        },
+        {
+          "kind": "fastEthernet",
+          "id": "FastEthernet0/14",
+          "mac": "4a:c9:fa:eb:a6:de"
+        },
+        {
+          "kind": "fastEthernet",
+          "id": "FastEthernet0/15",
+          "mac": "8a:a6:f4:28:9d:0f"
+        },
+        {
+          "kind": "fastEthernet",
+          "id": "FastEthernet0/16",
+          "mac": "fa:d8:cf:bd:97:e1"
+        },
+        {
+          "kind": "fastEthernet",
+          "id": "FastEthernet0/17",
+          "mac": "a2:17:32:af:c5:70"
+        },
+        {
+          "kind": "fastEthernet",
+          "id": "FastEthernet0/18",
+          "mac": "2e:e5:c6:27:73:c5"
+        },
+        {
+          "kind": "fastEthernet",
+          "id": "FastEthernet0/19",
+          "mac": "3e:b0:e7:0e:95:fb"
+        },
+        {
+          "kind": "fastEthernet",
+          "id": "FastEthernet0/20",
+          "mac": "a6:f4:02:b3:4d:dd"
+        },
+        {
+          "kind": "fastEthernet",
+          "id": "FastEthernet0/21",
+          "mac": "22:89:20:2f:d7:7a"
+        },
+        {
+          "kind": "fastEthernet",
+          "id": "FastEthernet0/22",
+          "mac": "ce:67:5a:33:20:5a"
+        },
+        {
+          "kind": "fastEthernet",
+          "id": "FastEthernet0/23",
+          "mac": "1e:55:1e:b9:41:ec"
+        },
+        {
+          "kind": "fastEthernet",
+          "id": "FastEthernet0/24",
+          "mac": "12:38:7c:2a:52:1a"
+        },
+        {
+          "kind": "gigabitEthernet",
+          "id": "GigabitEthernet0/1",
+          "mac": "12:a9:6e:3b:e1:8a"
+        },
+        {
+          "kind": "gigabitEthernet",
+          "id": "GigabitEthernet0/2",
+          "mac": "4e:aa:85:f1:bd:9e"
+        }
+      ],
+      "kind": "switch",
+      "config": {
+        "interfaces": {
+          "FastEthernet0/1": {
+            "shutdown": false,
+            "switchport": {
+              "mode": "access",
+              "vlan": 1
+            }
+          },
+          "FastEthernet0/2": {
+            "shutdown": false,
+            "switchport": {
+              "mode": "access",
+              "vlan": 1
+            }
+          },
+          "FastEthernet0/3": {
+            "shutdown": false,
+            "switchport": {
+              "mode": "access",
+              "vlan": 1
+            }
+          },
+          "FastEthernet0/4": {
+            "shutdown": false,
+            "switchport": {
+              "mode": "access",
+              "vlan": 1
+            }
+          },
+          "FastEthernet0/5": {
+            "shutdown": false,
+            "switchport": {
+              "mode": "access",
+              "vlan": 1
+            }
+          },
+          "FastEthernet0/6": {
+            "shutdown": false,
+            "switchport": {
+              "mode": "access",
+              "vlan": 1
+            }
+          },
+          "FastEthernet0/7": {
+            "shutdown": false,
+            "switchport": {
+              "mode": "access",
+              "vlan": 1
+            }
+          },
+          "FastEthernet0/8": {
+            "shutdown": false,
+            "switchport": {
+              "mode": "access",
+              "vlan": 1
+            }
+          },
+          "FastEthernet0/9": {
+            "shutdown": false,
+            "switchport": {
+              "mode": "access",
+              "vlan": 1
+            }
+          },
+          "FastEthernet0/10": {
+            "shutdown": false,
+            "switchport": {
+              "mode": "access",
+              "vlan": 1
+            }
+          },
+          "FastEthernet0/11": {
+            "shutdown": false,
+            "switchport": {
+              "mode": "access",
+              "vlan": 1
+            }
+          },
+          "FastEthernet0/12": {
+            "shutdown": false,
+            "switchport": {
+              "mode": "access",
+              "vlan": 1
+            }
+          },
+          "FastEthernet0/13": {
+            "shutdown": false,
+            "switchport": {
+              "mode": "access",
+              "vlan": 1
+            }
+          },
+          "FastEthernet0/14": {
+            "shutdown": false,
+            "switchport": {
+              "mode": "access",
+              "vlan": 1
+            }
+          },
+          "FastEthernet0/15": {
+            "shutdown": false,
+            "switchport": {
+              "mode": "access",
+              "vlan": 1
+            }
+          },
+          "FastEthernet0/16": {
+            "shutdown": false,
+            "switchport": {
+              "mode": "access",
+              "vlan": 1
+            }
+          },
+          "FastEthernet0/17": {
+            "shutdown": false,
+            "switchport": {
+              "mode": "access",
+              "vlan": 1
+            }
+          },
+          "FastEthernet0/18": {
+            "shutdown": false,
+            "switchport": {
+              "mode": "access",
+              "vlan": 1
+            }
+          },
+          "FastEthernet0/19": {
+            "shutdown": false,
+            "switchport": {
+              "mode": "access",
+              "vlan": 1
+            }
+          },
+          "FastEthernet0/20": {
+            "shutdown": false,
+            "switchport": {
+              "mode": "access",
+              "vlan": 1
+            }
+          },
+          "FastEthernet0/21": {
+            "shutdown": false,
+            "switchport": {
+              "mode": "access",
+              "vlan": 1
+            }
+          },
+          "FastEthernet0/22": {
+            "shutdown": false,
+            "switchport": {
+              "mode": "access",
+              "vlan": 1
+            }
+          },
+          "FastEthernet0/23": {
+            "shutdown": false,
+            "switchport": {
+              "mode": "access",
+              "vlan": 1
+            }
+          },
+          "FastEthernet0/24": {
+            "shutdown": false,
+            "switchport": {
+              "mode": "access",
+              "vlan": 1
+            }
+          },
+          "GigabitEthernet0/1": {
+            "shutdown": false,
+            "switchport": {
+              "mode": "access",
+              "vlan": 1
+            }
+          },
+          "GigabitEthernet0/2": {
+            "shutdown": false,
+            "switchport": {
+              "mode": "access",
+              "vlan": 1
+            }
+          }
+        },
+        "vlans": {
+          "1": {
+            "name": "default"
+          }
+        },
+        "hostname": "SW1",
+        "virtualInterfaces": {
+          "Vlan1": {
+            "shutdown": true
+          }
+        },
+        "servicePasswordEncryption": false,
+        "domainLookup": true,
+        "unknownLines": [],
+        "lines": {
+          "console": {
+            "login": "none",
+            "transportInput": {
+              "ssh": true,
+              "telnet": true
+            }
+          },
+          "vty": [
+            {
+              "login": "password",
+              "transportInput": {
+                "ssh": true,
+                "telnet": true
+              }
+            },
+            {
+              "login": "password",
+              "transportInput": {
+                "ssh": true,
+                "telnet": true
+              }
+            },
+            {
+              "login": "password",
+              "transportInput": {
+                "ssh": true,
+                "telnet": true
+              }
+            },
+            {
+              "login": "password",
+              "transportInput": {
+                "ssh": true,
+                "telnet": true
+              }
+            },
+            {
+              "login": "password",
+              "transportInput": {
+                "ssh": true,
+                "telnet": true
+              }
+            },
+            {
+              "login": "password",
+              "transportInput": {
+                "ssh": true,
+                "telnet": true
+              }
+            },
+            {
+              "login": "password",
+              "transportInput": {
+                "ssh": true,
+                "telnet": true
+              }
+            },
+            {
+              "login": "password",
+              "transportInput": {
+                "ssh": true,
+                "telnet": true
+              }
+            },
+            {
+              "login": "password",
+              "transportInput": {
+                "ssh": true,
+                "telnet": true
+              }
+            },
+            {
+              "login": "password",
+              "transportInput": {
+                "ssh": true,
+                "telnet": true
+              }
+            },
+            {
+              "login": "password",
+              "transportInput": {
+                "ssh": true,
+                "telnet": true
+              }
+            },
+            {
+              "login": "password",
+              "transportInput": {
+                "ssh": true,
+                "telnet": true
+              }
+            },
+            {
+              "login": "password",
+              "transportInput": {
+                "ssh": true,
+                "telnet": true
+              }
+            },
+            {
+              "login": "password",
+              "transportInput": {
+                "ssh": true,
+                "telnet": true
+              }
+            },
+            {
+              "login": "password",
+              "transportInput": {
+                "ssh": true,
+                "telnet": true
+              }
+            },
+            {
+              "login": "password",
+              "transportInput": {
+                "ssh": true,
+                "telnet": true
+              }
+            }
+          ]
+        }
+      }
+    },
+    "dev_wlaWLC1": {
+      "id": "dev_wlaWLC1",
+      "model": "wlc-2504",
+      "position": {
+        "x": 744,
+        "y": 232
+      },
+      "powered": true,
+      "ports": [
+        {
+          "kind": "gigabitEthernet",
+          "id": "GigabitEthernet1",
+          "mac": "76:22:7d:f9:f8:da"
+        },
+        {
+          "kind": "gigabitEthernet",
+          "id": "GigabitEthernet2",
+          "mac": "ee:09:e0:fa:1e:fa"
+        },
+        {
+          "kind": "gigabitEthernet",
+          "id": "GigabitEthernet3",
+          "mac": "b6:f1:08:f7:ab:2a"
+        },
+        {
+          "kind": "gigabitEthernet",
+          "id": "GigabitEthernet4",
+          "mac": "6a:0d:95:77:83:0d"
+        }
+      ],
+      "kind": "wlc",
+      "config": {
+        "management": {
+          "mode": "static",
+          "address": {
+            "address": "192.168.10.2",
+            "prefixLength": 24
+          },
+          "gateway": "192.168.10.1"
+        },
+        "wlans": [
+          {
+            "ssid": "Corp",
+            "security": {
+              "mode": "wpa2-psk",
+              "passphrase": "tracer123"
+            },
+            "enabled": true
+          }
+        ],
+        "hostname": "WLC1"
+      }
+    },
+    "dev_wlaLAP1": {
+      "id": "dev_wlaLAP1",
+      "model": "lap-pt",
+      "position": {
+        "x": 232,
+        "y": 424
+      },
+      "powered": true,
+      "ports": [
+        {
+          "kind": "gigabitEthernet",
+          "id": "GigabitEthernet0",
+          "mac": "62:aa:9a:2c:c5:e2"
+        },
+        {
+          "kind": "wireless",
+          "id": "Dot11Radio0",
+          "mac": "7e:c7:72:cc:e7:e6"
+        },
+        {
+          "kind": "wireless",
+          "id": "Dot11Radio1",
+          "mac": "4e:1e:ff:97:21:09"
+        }
+      ],
+      "kind": "lightweightAp",
+      "config": {
+        "hostname": "LAP1"
+      }
+    },
+    "dev_wlaLAP2": {
+      "id": "dev_wlaLAP2",
+      "model": "lap-3702i",
+      "position": {
+        "x": 616,
+        "y": 424
+      },
+      "powered": true,
+      "ports": [
+        {
+          "kind": "gigabitEthernet",
+          "id": "GigabitEthernet0",
+          "mac": "e6:02:1d:29:21:fb"
+        },
+        {
+          "kind": "wireless",
+          "id": "Dot11Radio0",
+          "mac": "4a:95:81:2d:80:b9"
+        },
+        {
+          "kind": "wireless",
+          "id": "Dot11Radio1",
+          "mac": "42:06:b4:05:7c:8a"
+        }
+      ],
+      "kind": "lightweightAp",
+      "config": {
+        "hostname": "LAP2"
+      }
+    },
+    "dev_wlaLaptop1": {
+      "id": "dev_wlaLaptop1",
+      "model": "laptop",
+      "position": {
+        "x": 136,
+        "y": 616
+      },
+      "powered": true,
+      "ports": [
+        {
+          "kind": "wireless",
+          "id": "Wireless0",
+          "mac": "b2:1f:56:da:90:69"
+        }
+      ],
+      "kind": "pc",
+      "config": {
+        "ipv4": {
+          "mode": "dhcp"
+        },
+        "hostname": "Laptop1",
+        "wireless": {
+          "ssid": "Corp",
+          "security": {
+            "mode": "wpa2-psk",
+            "passphrase": "tracer123"
+          }
+        }
+      }
+    },
+    "dev_wlaLaptop2": {
+      "id": "dev_wlaLaptop2",
+      "model": "laptop",
+      "position": {
+        "x": 712,
+        "y": 616
+      },
+      "powered": true,
+      "ports": [
+        {
+          "kind": "wireless",
+          "id": "Wireless0",
+          "mac": "b6:88:85:39:8a:09"
+        }
+      ],
+      "kind": "pc",
+      "config": {
+        "ipv4": {
+          "mode": "dhcp"
+        },
+        "hostname": "Laptop2",
+        "wireless": {
+          "ssid": "Corp",
+          "security": {
+            "mode": "wpa2-psk",
+            "passphrase": "tracer123"
+          }
+        }
+      }
+    }
+  },
+  "links": {
+    "lnk_wlaSW1R1": {
+      "id": "lnk_wlaSW1R1",
+      "a": {
+        "device": "dev_wlaSW1",
+        "port": "GigabitEthernet0/1"
+      },
+      "b": {
+        "device": "dev_wlaR1",
+        "port": "GigabitEthernet0/0"
+      },
+      "cable": "straight"
+    },
+    "lnk_wlaWLC1SW1": {
+      "id": "lnk_wlaWLC1SW1",
+      "a": {
+        "device": "dev_wlaWLC1",
+        "port": "GigabitEthernet1"
+      },
+      "b": {
+        "device": "dev_wlaSW1",
+        "port": "GigabitEthernet0/2"
+      },
+      "cable": "straight"
+    },
+    "lnk_wlaLAP1SW1": {
+      "id": "lnk_wlaLAP1SW1",
+      "a": {
+        "device": "dev_wlaLAP1",
+        "port": "GigabitEthernet0"
+      },
+      "b": {
+        "device": "dev_wlaSW1",
+        "port": "FastEthernet0/1"
+      },
+      "cable": "straight"
+    },
+    "lnk_wlaLAP2SW1": {
+      "id": "lnk_wlaLAP2SW1",
+      "a": {
+        "device": "dev_wlaLAP2",
+        "port": "GigabitEthernet0"
+      },
+      "b": {
+        "device": "dev_wlaSW1",
+        "port": "FastEthernet0/2"
+      },
+      "cable": "straight"
+    }
+  },
+  "annotations": {
+    "ann_wladhcp": {
+      "id": "ann_wladhcp",
+      "kind": "note",
+      "position": {
+        "x": 600,
+        "y": -16
+      },
+      "text": "R1 lends addresses on 192.168.10.0/24. Option 43 tells each lightweight AP its controller is WLC1 at 192.168.10.2.",
+      "width": 192,
+      "color": "amber"
+    },
+    "ann_wlacapwap": {
+      "id": "ann_wlacapwap",
+      "kind": "note",
+      "position": {
+        "x": 872,
+        "y": 376
+      },
+      "text": "Each LAP takes an address by DHCP, joins WLC1 over CAPWAP, then broadcasts WLC1’s WLAN Corp. Watch it in Simulation mode.",
+      "width": 192,
+      "color": "amber"
+    }
+  }
+}

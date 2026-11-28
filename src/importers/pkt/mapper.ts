@@ -2,8 +2,12 @@
 // approximated or skipped on the way.
 
 import {
+  DEFAULT_CENTRAL_OFFICE,
+  DEFAULT_HOME_GATEWAY,
   DEFAULT_HOME_ROUTER,
   DEFAULT_RADIO,
+  HOME_GATEWAY_MODEL,
+  type IotConfig,
   consolePortOf,
   createIdSource,
   emptyTopology,
@@ -133,6 +137,54 @@ const DEVICE_KINDS = new Map<string, KindRule>([
   ['WirelessRouter', { kind: 'wirelessRouter', approximated: true, model: 'wireless-router' }],
 ]);
 
+/**
+ * Packet Tracer models Tracer has a model of its own for, whatever type the file gives them. They
+ * take that model's ports in order, and its factory settings: the file's wireless, WLAN, cell and
+ * IoT settings are not read.
+ */
+const PT_MODELS = new Map<string, DeviceModelId>([
+  ['AccessPoint-PT-A', 'access-point-a'],
+  ['AccessPoint-PT-N', 'access-point-n'],
+  ['AccessPoint-PT-AC', 'access-point-ac'],
+  ['LAP-PT', 'lap-pt'],
+  ['3702i', 'lap-3702i'],
+  ['WLC-PT', 'wlc-pt'],
+  ['WLC-2504', 'wlc-2504'],
+  ['DLC100', HOME_GATEWAY_MODEL],
+  ['HomeGateway', HOME_GATEWAY_MODEL],
+  ['Cell-Tower', 'cell-tower'],
+  ['Central-Office-Server', 'central-office'],
+  ['MCU-PT', 'iot-mcu'],
+  ['SBC-PT', 'iot-sbc'],
+]);
+
+/** An IoT thing's model, by words in its Packet Tracer model name, first match wins. */
+const PT_THINGS: readonly [RegExp, DeviceModelId][] = [
+  [/motion/i, 'iot-motion'],
+  [/smoke/i, 'iot-smoke'],
+  [/siren/i, 'iot-siren'],
+  [/thermostat/i, 'iot-thermostat'],
+  [/webcam|camera/i, 'iot-webcam'],
+  [/window/i, 'iot-window'],
+  [/door/i, 'iot-door'],
+  [/fan/i, 'iot-fan'],
+  [/lamp|light/i, 'iot-lamp'],
+  [/^mcu/i, 'iot-mcu'],
+  [/^sbc/i, 'iot-sbc'],
+  [/thing/i, 'iot-thing'],
+];
+
+/** The rule for a device: by its model where Tracer has one, else by its type. */
+function kindRule(pt: PtDevice): KindRule | undefined {
+  const named =
+    PT_MODELS.get(pt.model) ??
+    (DEVICE_KINDS.has(pt.type)
+      ? undefined
+      : PT_THINGS.find(([pattern]) => pattern.test(pt.model || pt.type))?.[1]);
+  const model = named && findDeviceModel(named);
+  return model ? { kind: model.kind, approximated: true, model: named } : DEVICE_KINDS.get(pt.type);
+}
+
 const KIND_LABEL: Record<DeviceKind, string> = {
   router: 'Router',
   switch: 'Switch',
@@ -141,6 +193,10 @@ const KIND_LABEL: Record<DeviceKind, string> = {
   hub: 'Hub',
   accessPoint: 'Access point',
   wirelessRouter: 'Wireless router',
+  lightweightAp: 'Lightweight AP',
+  wlc: 'Wireless LAN controller',
+  cellTower: 'Cell tower',
+  centralOffice: 'Central office server',
 };
 
 // The interface name prefix of each PORT/TYPE.
@@ -208,7 +264,7 @@ function mapNetwork(network: PtNetwork, options: MapOptions): PktImport {
     now: options.now ?? new Date(),
   });
 
-  const kept = network.devices.filter((pt) => DEVICE_KINDS.has(pt.type));
+  const kept = network.devices.filter((pt) => kindRule(pt));
   const origin = {
     x: kept.length > 0 ? Math.min(...kept.map((pt) => pt.x)) : 0,
     y: kept.length > 0 ? Math.min(...kept.map((pt) => pt.y)) : 0,
@@ -216,7 +272,7 @@ function mapNetwork(network: PtNetwork, options: MapOptions): PktImport {
 
   const placed = new Map<string, Placed>();
   for (const pt of network.devices) {
-    const rule = DEVICE_KINDS.get(pt.type);
+    const rule = kindRule(pt);
     const position = { x: pt.x - origin.x, y: pt.y - origin.y };
     const mapped = rule && mapDevice(pt, rule, position, ctx);
     if (mapped) {
@@ -318,12 +374,18 @@ function mapDevice(pt: PtDevice, rule: KindRule, position: Point, ctx: Context):
       portKind === 'serial'
         ? { kind: portKind, id: portId.data }
         : portKind === 'wireless'
-          ? { kind: portKind, id: portId.data, mac: mac() }
+          ? {
+              kind: portKind,
+              id: portId.data,
+              mac: mac(),
+              ...(model?.ports[index]?.cellular && { cellular: true }),
+            }
           : {
               kind: portKind,
               id: portId.data,
               mac: mac(),
               ...(ptPortType(ptPort.type)?.fiber && { fiber: true }),
+              ...(model?.ports[index]?.coaxial && { coaxial: true }),
             };
     ports.push({ port, pt: ptPort });
   });
@@ -387,17 +449,35 @@ function mapDevice(pt: PtDevice, rule: KindRule, position: Point, ctx: Context):
       break;
     }
     case 'pc':
-    case 'server':
-      device = { ...fields, kind, config: hostConfig(pt, hostname, id, entries) };
+    case 'server': {
+      const iot = (model?.config as { iot?: IotConfig } | undefined)?.iot;
+      const config = hostConfig(pt, hostname, id, entries);
+      device = { ...fields, kind, config: iot ? { ...config, iot } : config };
       break;
+    }
     case 'hub':
       device = { ...fields, kind, config: { hostname } };
       break;
-    case 'accessPoint':
-      device = { ...fields, kind, config: { hostname, radio: DEFAULT_RADIO } };
+    case 'accessPoint': {
+      const radio = (model?.config as { radio?: typeof DEFAULT_RADIO } | undefined)?.radio;
+      device = { ...fields, kind, config: { hostname, radio: radio ?? DEFAULT_RADIO } };
       break;
-    case 'wirelessRouter':
-      device = { ...fields, kind, config: { ...DEFAULT_HOME_ROUTER, hostname } };
+    }
+    case 'wirelessRouter': {
+      const factory =
+        rule.model === HOME_GATEWAY_MODEL ? DEFAULT_HOME_GATEWAY : DEFAULT_HOME_ROUTER;
+      device = { ...fields, kind, config: { ...factory, hostname } };
+      break;
+    }
+    case 'lightweightAp':
+    case 'cellTower':
+      device = { ...fields, kind, config: { hostname } };
+      break;
+    case 'wlc':
+      device = { ...fields, kind, config: { hostname, management: { mode: 'static' }, wlans: [] } };
+      break;
+    case 'centralOffice':
+      device = { ...fields, kind, config: { ...DEFAULT_CENTRAL_OFFICE, hostname } };
       break;
     default: {
       const exhaustive: never = kind;

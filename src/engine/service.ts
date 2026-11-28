@@ -31,6 +31,9 @@ import { aclHits } from './l3/acl';
 import { closeFtp, sendFtp, startFtp } from './l3/ftp';
 import { startMail } from './l3/mail';
 import { ntpStatus } from './l3/ntp';
+import { lapStatus, wlcStatus } from './l3/capwap';
+import { iotServerStatus, thingStatus } from './l3/iot';
+import { iotOf, runsIotServer } from '@/model/iot';
 import { startTftp } from './l3/tftp';
 import { arpTable, clearArp } from './l3/arp';
 import { hostAddressingOf, routesOf, type IpContext } from './l3/context';
@@ -638,6 +641,30 @@ export function createSimService({
                 ),
               }
             : undefined,
+        ),
+      ),
+    lapStatus: (device) =>
+      flatten(
+        engine.withModule(device, ipModule, (ctx) =>
+          ctx.device.kind === 'lightweightAp' ? lapStatus(ctx) : undefined,
+        ),
+      ),
+    wlcStatus: (device) =>
+      flatten(
+        engine.withModule(device, ipModule, (ctx) =>
+          ctx.device.kind === 'wlc' ? wlcStatus(ctx) : undefined,
+        ),
+      ),
+    iotServerStatus: (device) =>
+      flatten(
+        engine.withModule(device, ipModule, (ctx) =>
+          runsIotServer(ctx.device) ? iotServerStatus(ctx) : undefined,
+        ),
+      ),
+    thingStatus: (device) =>
+      flatten(
+        engine.withModule(device, ipModule, (ctx) =>
+          iotOf(ctx.device) ? thingStatus(ctx) : undefined,
         ),
       ),
     logMessage(device, text) {

@@ -1,6 +1,8 @@
+import type { ThingKind, WirelessProfile } from '@/model';
+
 /**
  * The application protocols a server runs beyond DNS and HTTP, as plain data like every PDU:
- * TFTP, NTP and syslog over UDP, and FTP, SMTP and POP3 over TCP.
+ * TFTP, NTP, syslog, CAPWAP and IoT over UDP, and FTP, SMTP and POP3 over TCP.
  */
 
 /** Well-known ports of these protocols. */
@@ -11,6 +13,8 @@ export const APP_PORT = {
   ftp: 21,
   smtp: 25,
   pop3: 110,
+  capwap: 5246,
+  iot: 5683,
 } as const;
 
 /** The most data one TFTP DATA packet carries. A shorter one is the transfer's last. */
@@ -80,7 +84,73 @@ export type SyslogMessage = {
 /** The facility IOS logs to unless `logging facility` says otherwise: local7. */
 export const SYSLOG_FACILITY = 23;
 
-export type AppUdpPayload = TftpMessage | NtpMessage | SyslogMessage;
+/**
+ * A CAPWAP control message (RFC 5415), between a lightweight AP and a wireless LAN controller. An
+ * AP asks for controllers by Discovery Request, joins one, then takes its WLANs in Configuration
+ * Update Requests, and keeps the session alive with Echo Requests.
+ */
+export type CapwapMessage =
+  | { readonly kind: 'capwap'; readonly type: 'discovery-request' }
+  | { readonly kind: 'capwap'; readonly type: 'discovery-response'; readonly controller: string }
+  | {
+      readonly kind: 'capwap';
+      readonly type: 'join-request';
+      /** The AP's name and model, as the controller lists it. */
+      readonly ap: string;
+      readonly model: string;
+    }
+  | { readonly kind: 'capwap'; readonly type: 'join-response' }
+  | {
+      readonly kind: 'capwap';
+      readonly type: 'configuration-update';
+      /** The controller's enabled WLANs, which the AP broadcasts. */
+      readonly wlans: readonly WirelessProfile[];
+    }
+  | { readonly kind: 'capwap'; readonly type: 'echo-request' | 'echo-response' };
+
+/** CAPWAP's control message types, as the header numbers them. */
+export const CAPWAP_TYPE = {
+  'discovery-request': 1,
+  'discovery-response': 2,
+  'join-request': 3,
+  'join-response': 4,
+  'configuration-update': 7,
+  'echo-request': 13,
+  'echo-response': 14,
+} as const satisfies Record<CapwapMessage['type'], number>;
+
+/**
+ * A message between an IoT thing and its registration server: a Home Gateway, or a server with the
+ * IoT service on. A thing registers with its kind and state, reports its state when it changes and
+ * every so often, and takes the server's orders to change an actuator.
+ */
+export type IotMessage =
+  | {
+      readonly kind: 'iot';
+      readonly type: 'register';
+      readonly name: string;
+      readonly thing: ThingKind;
+      readonly state: Readonly<Record<string, string>>;
+      /** The account it registers under on a remote server. A Home Gateway takes any. */
+      readonly username: string;
+      readonly password: string;
+    }
+  | {
+      readonly kind: 'iot';
+      readonly type: 'registered';
+      readonly ok: boolean;
+      /** Why the server refused, when it did. */
+      readonly reason?: string;
+    }
+  | {
+      readonly kind: 'iot';
+      readonly type: 'report';
+      readonly name: string;
+      readonly state: Readonly<Record<string, string>>;
+    }
+  | { readonly kind: 'iot'; readonly type: 'set'; readonly key: string; readonly value: string };
+
+export type AppUdpPayload = TftpMessage | NtpMessage | SyslogMessage | CapwapMessage | IotMessage;
 
 /**
  * One command or reply on an FTP control connection, an SMTP session or a POP3 session. A reply

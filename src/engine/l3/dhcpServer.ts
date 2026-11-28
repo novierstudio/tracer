@@ -7,7 +7,7 @@ import type {
   MacAddress,
 } from '@/model';
 import { DEFAULT_DHCP_LEASE } from '@/model/defaults';
-import { homeRouterIos } from '@/model/wireless';
+import { homeRouterIos, isGateway } from '@/model/wireless';
 import { after, ms, type SimTime } from '../core/time';
 import {
   LIMITED_BROADCAST,
@@ -81,7 +81,7 @@ function upstreamDns(ctx: IpContext): readonly Ipv4Address[] {
 
 /** Every address configured on the device, which no pool may lend whether or not it is up. */
 function ownAddresses(ctx: IpContext): Set<number> {
-  if (ctx.device.kind === 'wirelessRouter') {
+  if (isGateway(ctx.device)) {
     return new Set([ipv4ToUint32(ctx.device.config.lan.address)]);
   }
   const device = routingDevice(ctx.device);
@@ -151,6 +151,7 @@ function grant(pool: Pool, serverId: Ipv4Address): DhcpGrant {
     subnetMask: pool.network.prefixLength,
     routers: pool.defaultRouters ?? [],
     dnsServers: pool.dnsServers ?? [],
+    ...(pool.option43 && { controllers: pool.option43 }),
   };
 }
 
@@ -196,10 +197,9 @@ const replyHeader = (request: DhcpMessage, yiaddr: Ipv4Address = UNSPECIFIED_ADD
  */
 function serve(ctx: IpContext, message: DhcpMessage, arrival: IpInterface | undefined) {
   const { device } = ctx;
-  const config =
-    device.kind === 'wirelessRouter'
-      ? homeRouterIos(device.config, upstreamDns(ctx)).dhcp
-      : routingDevice(device)?.config.dhcp;
+  const config = isGateway(device)
+    ? homeRouterIos(device.config, upstreamDns(ctx)).dhcp
+    : routingDevice(device)?.config.dhcp;
   if (!config) return;
   const network = isSet(message.giaddr)
     ? message.giaddr

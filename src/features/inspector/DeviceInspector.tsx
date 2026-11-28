@@ -21,7 +21,9 @@ import { HostnameField } from './HostnameField';
 import { InterfacesTab } from './InterfacesTab';
 import { PhysicalTab } from './PhysicalTab';
 import { ServicesTab } from './ServicesTab';
+import { IotThingTab } from './IotThingTab';
 import { WirelessConfigTab } from './WirelessConfigTab';
+import { LapStatusTab, WlcConfigTab } from './WlcConfigTab';
 import { formatCidr } from './ipv4';
 import { DeviceTile, Facts, Mono, PeerButton, STATE_LABELS, Section, StateDot } from './parts';
 import {
@@ -52,8 +54,12 @@ type Props = {
   focusConsole: boolean;
 };
 
-/** Routers and switches get an IOS CLI; end hosts get a desktop, as in the UI/UX doc. */
-const isHost = (device: Device) => device.kind === 'pc' || device.kind === 'server';
+/**
+ * Routers and switches get an IOS CLI; end hosts get a desktop, as in the UI/UX doc. An IoT thing
+ * is a host with no desktop.
+ */
+const isHost = (device: Device): device is Extract<Device, { kind: 'pc' | 'server' }> =>
+  device.kind === 'server' || (device.kind === 'pc' && !device.config.iot);
 const hasConsole = (device: Device) =>
   isHost(device) || device.kind === 'router' || device.kind === 'switch';
 
@@ -107,7 +113,7 @@ export function DeviceInspector({ device, topology, tab, onTabChange, focusConso
             <ServicesTab key={device.id} device={device} />
           </TabsContent>
         )}
-        {!hasConsole(device) ? null : host ? (
+        {!hasConsole(device) ? null : isHost(device) ? (
           <TabsContent value="console" className="h-full">
             <HostDesktop device={device} focusPrompt={focusConsole} />
           </TabsContent>
@@ -322,8 +328,28 @@ function ConfigTab({ device, rows }: { device: Device; rows: PortRow[] }) {
       </Section>
     );
   }
-  if (device.kind === 'accessPoint' || device.kind === 'wirelessRouter') {
+  if (
+    device.kind === 'accessPoint' ||
+    device.kind === 'wirelessRouter' ||
+    device.kind === 'centralOffice'
+  ) {
     return <WirelessConfigTab key={device.id} device={device} />;
+  }
+  if (device.kind === 'wlc') return <WlcConfigTab key={device.id} device={device} />;
+  if (device.kind === 'lightweightAp') return <LapStatusTab device={device} />;
+  if (device.kind === 'cellTower') {
+    return (
+      <Section title="Cell tower">
+        <p className="text-xs text-fg-2">
+          A cell tower has nothing to configure. It relays the phones and tablets that reach it over
+          3G/4G to the central office server on its coaxial port, which lends them addresses and
+          routes them on.
+        </p>
+      </Section>
+    );
+  }
+  if (device.kind === 'pc' && device.config.iot) {
+    return <IotThingTab key={device.id} device={device} iot={device.config.iot} />;
   }
   return (
     <>

@@ -38,7 +38,8 @@ export type FullServerServices = Required<ServerServices>;
 export const DEFAULT_NTP_EPOCH = Date.UTC(2026, 0, 1);
 
 /**
- * A server as it ships, as in Packet Tracer: HTTP, TFTP, FTP, email, NTP and syslog on, DNS off.
+ * A server as it ships, as in Packet Tracer: HTTP, TFTP, FTP, email, NTP and syslog on, DNS and IoT
+ * off.
  * FTP has one account, `cisco` with password `cisco`, that may do everything.
  */
 export const DEFAULT_SERVER_SERVICES: FullServerServices = {
@@ -59,6 +60,7 @@ export const DEFAULT_SERVER_SERVICES: FullServerServices = {
   email: { smtp: true, pop3: true, domain: '', users: [] },
   ntp: { enabled: true, epoch: DEFAULT_NTP_EPOCH },
   syslog: { enabled: true },
+  iot: { enabled: false, users: [] },
 };
 
 /** The services a server runs, with the factory ones for any its config leaves out. */

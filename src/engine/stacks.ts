@@ -30,4 +30,9 @@ export const STACKS: Stacks = {
   accessPoint: [bridgeModule],
   // A home router switches its LAN, then routes, serves DHCP and translates as a router does.
   wirelessRouter: [bridgeModule, ipModule],
+  centralOffice: [bridgeModule, ipModule],
+  // A lightweight AP bridges its clients once it joins a controller, which its IP stack finds.
+  lightweightAp: [bridgeModule, ipModule],
+  wlc: [ipModule],
+  cellTower: [bridgeModule],
 };

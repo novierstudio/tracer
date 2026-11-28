@@ -1,6 +1,6 @@
 import { Position, type Edge, type EdgeChange, type Node, type NodeChange } from '@xyflow/react';
 import { findDeviceModel, KIND_ICONS, type DeviceIconName } from '@/devices/catalog';
-import { associations } from '@/model';
+import { associations, type ApBroadcasts } from '@/model';
 import type {
   AnnotationId,
   AnnotationKind,
@@ -129,7 +129,12 @@ function address(device: Device): string | undefined {
     case 'router':
       return Object.values(device.config.interfaces).find((i) => i.ipv4)?.ipv4?.address;
     case 'wirelessRouter':
+    case 'centralOffice':
       return device.config.lan.address;
+    case 'wlc':
+      return device.config.management.mode === 'static'
+        ? device.config.management.address?.address
+        : undefined;
     case 'pc':
     case 'server':
       return device.config.ipv4.mode === 'static' ? device.config.ipv4.address?.address : undefined;
@@ -403,13 +408,14 @@ export function applySelectChanges<Id extends string>(
 
 /**
  * The associations the devices make, as edges from each host to its radio. They are derived
- * from the devices, as the engine derives them, so they come and go with SSID and key changes.
+ * from the devices and what each lightweight AP broadcasts, as the engine derives them, so they
+ * come and go with SSID and key changes and with each AP's CAPWAP join.
  */
 export function createWirelessEdgeMapper() {
   let cache = new Map<string, WirelessFlowEdge>();
-  return (devices: Topology['devices']): WirelessFlowEdge[] => {
+  return (devices: Topology['devices'], broadcasts: ApBroadcasts = {}): WirelessFlowEdge[] => {
     const next = new Map<string, WirelessFlowEdge>();
-    const edges = associations(Object.values(devices)).map((association) => {
+    const edges = associations(Object.values(devices), broadcasts).map((association) => {
       const key = `${association.id} ${association.b.device}`;
       const edge = cache.get(key) ?? {
         id: association.id,

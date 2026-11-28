@@ -12,3 +12,4 @@ export * from './remote';
 export * from './wireless';
 export * from './hsrp';
 export * from './vtp';
+export * from './iot';

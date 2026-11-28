@@ -330,6 +330,36 @@ export const SAMPLE_LABS: readonly SampleLab[] = [
     load: () => import('./home-wireless.tracer.json?raw').then(text),
   },
   {
+    id: 'wlc-lightweight-aps',
+    title: 'Wireless LAN controller',
+    description:
+      'Two lightweight APs take addresses by DHCP, find the controller WLC1 through option 43 and join it over CAPWAP. Once joined, each broadcasts the controller’s WLAN, and the laptops associate.',
+    difficulty: 'intermediate',
+    devices: { router: 1, switch: 1, wlc: 1, lightweightAp: 2, pc: 2 },
+    tryThis: [
+      'Open WLC1’s Config tab: both APs are in its AP list',
+      'Ping R1 (192.168.10.1) from Laptop1',
+      'Add a WLAN named Guest on WLC1, then join it from a laptop’s PC Wireless app',
+      'Switch to Simulation mode, power LAP2 off and on, and watch its CAPWAP join',
+    ],
+    load: () => import('./wlc-lightweight-aps.tracer.json?raw').then(text),
+  },
+  {
+    id: 'smart-home',
+    title: 'Smart home',
+    description:
+      'A Home Gateway serves a lamp, a door and a motion detector, which register with its IoT server. A laptop on the gateway’s wireless signs in to its web page and controls them.',
+    difficulty: 'beginner',
+    devices: { wirelessRouter: 1, pc: 4 },
+    tryThis: [
+      'Browse from the laptop to `192.168.25.1` and sign in as `admin` with password `admin`',
+      'Turn the lamp on from the page, and watch its Config tab follow',
+      'Set the motion detector to Yes in its Config tab, then refresh the page',
+      'Lock the door from the page',
+    ],
+    load: () => import('./smart-home.tracer.json?raw').then(text),
+  },
+  {
     id: 'vtp-server-clients',
     title: 'VTP server and clients',
     description:

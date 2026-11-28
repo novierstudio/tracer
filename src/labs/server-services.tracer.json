@@ -819,6 +819,10 @@
           },
           "syslog": {
             "enabled": true
+          },
+          "iot": {
+            "enabled": false,
+            "users": []
           }
         }
       }

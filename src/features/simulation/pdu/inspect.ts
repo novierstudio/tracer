@@ -39,6 +39,10 @@ const CABLES: Record<Cable, { name: string; explain: string }> = {
     name: 'Fiber',
     explain: 'Joins two fiber ports, such as the fiber uplinks of two switches.',
   },
+  coaxial: {
+    name: 'Coaxial',
+    explain: 'Joins a cell tower to a central office server, or a cable modem to its provider.',
+  },
   serial: {
     name: 'Serial',
     explain: 'A WAN link between two routers. The DCE end sets the clock rate.',

@@ -76,6 +76,7 @@ const SWATCH: Record<Cable, string> = {
   straight: 'M1 5h18',
   crossover: 'M1 5h18',
   fiber: 'M1 5h18',
+  coaxial: 'M1 5h18',
   serial: 'M1 5h6l2-4 2 8 2-4h6',
   console: 'M1 5h18',
 };
@@ -102,6 +103,7 @@ const CABLE_TOOLBAR_LABELS: Record<CableChoice, string> = {
   straight: 'Straight',
   crossover: 'Crossover',
   fiber: 'Fiber',
+  coaxial: 'Coaxial',
   serial: 'Serial',
   console: 'Console',
 };

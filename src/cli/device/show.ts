@@ -351,6 +351,7 @@ function dhcpLines({ excluded, pools }: DhcpServerConfig): string[] {
     }
     if (pool.defaultRouters) out.push(` default-router ${pool.defaultRouters.join(' ')}`);
     if (pool.dnsServers) out.push(` dns-server ${pool.dnsServers.join(' ')}`);
+    if (pool.option43) out.push(` option 43 ip ${pool.option43.join(' ')}`);
     if (pool.lease !== undefined) out.push(leaseLine(pool.lease));
     out.push('!');
   }

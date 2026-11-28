@@ -326,8 +326,15 @@ export function ownAddresses(device: Device): Ipv4Address[] {
   switch (device.kind) {
     case 'hub':
     case 'accessPoint':
+    case 'cellTower':
+    case 'lightweightAp':
       return [];
-    case 'wirelessRouter': {
+    case 'wlc':
+      return device.config.management.mode === 'static' && device.config.management.address
+        ? [device.config.management.address.address]
+        : [];
+    case 'wirelessRouter':
+    case 'centralOffice': {
       const { wan, lan } = device.config;
       return wan.mode === 'static' && wan.address
         ? [lan.address, wan.address.address]
@@ -725,6 +732,10 @@ function ownIpv6Addresses(device: Device): Ipv6Address[] {
     case 'hub':
     case 'accessPoint':
     case 'wirelessRouter':
+    case 'lightweightAp':
+    case 'wlc':
+    case 'cellTower':
+    case 'centralOffice':
       return [];
   }
 }

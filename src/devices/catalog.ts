@@ -1,6 +1,7 @@
-import { PortId, type DeviceKind, type PortKind, type PortSpec } from '@/model';
+import { PortId, type DeviceKind, type DeviceSpec, type PortKind, type PortSpec } from '@/model';
 import { HUB_MODELS, ROUTER_MODELS, SWITCH_MODELS } from './models/routers-switches';
 import { modelPorts, subslots, type ModuleMap, type Slot } from './modules';
+import { WIRELESS_IOT_MODELS } from './models/wireless-iot';
 import { fiber, numbered, ports, radio, single } from './ports';
 
 export { WIRELESS_NIC } from './ports';
@@ -51,7 +52,24 @@ export type DeviceIconName =
   | 'server'
   | 'hub'
   | 'access-point'
-  | 'wireless-router';
+  | 'wireless-router'
+  | 'lightweight-ap'
+  | 'wlc'
+  | 'home-gateway'
+  | 'cell-tower'
+  | 'central-office'
+  | 'iot-mcu'
+  | 'iot-sbc'
+  | 'iot-lamp'
+  | 'iot-fan'
+  | 'iot-door'
+  | 'iot-window'
+  | 'iot-motion'
+  | 'iot-smoke'
+  | 'iot-siren'
+  | 'iot-thermostat'
+  | 'iot-webcam'
+  | 'iot-thing';
 
 /** The icon for a device whose model the catalog does not know, by its kind. */
 export const KIND_ICONS: Record<DeviceKind, DeviceIconName> = {
@@ -62,6 +80,10 @@ export const KIND_ICONS: Record<DeviceKind, DeviceIconName> = {
   hub: 'hub',
   accessPoint: 'access-point',
   wirelessRouter: 'wireless-router',
+  lightweightAp: 'lightweight-ap',
+  wlc: 'wlc',
+  cellTower: 'cell-tower',
+  centralOffice: 'central-office',
 };
 
 export type DeviceModel = {
@@ -79,6 +101,10 @@ export type DeviceModel = {
   readonly modules?: ModuleMap;
   /** A multilayer switch: it takes `ip routing`, routed ports and static routes. */
   readonly multilayer?: true;
+  /** A radio's band and 802.11 standards, as Packet Tracer lists them for the model. */
+  readonly wifi?: { readonly band: string; readonly standards: readonly string[] };
+  /** The model's factory settings, where they differ from its kind's, as a new device takes them. */
+  readonly config?: DeviceSpec['config'];
 };
 
 export const DEVICE_MODELS = [
@@ -209,6 +235,7 @@ export const DEVICE_MODELS = [
     icon: 'server',
     ports: single('gigabitEthernet'),
   },
+  ...WIRELESS_IOT_MODELS,
 ] as const satisfies readonly DeviceModel[];
 
 export type DeviceModelId = (typeof DEVICE_MODELS)[number]['id'];
@@ -241,11 +268,15 @@ const PORT_ABBREVIATION: Record<PortKind, string> = {
   wireless: 'Wireless',
 };
 
-/** "2× Gi, 2× Serial", in the order the kinds first appear. Fiber ports say so. */
+/** "2× Gi, 2× Serial", in the order the kinds first appear. Fiber, coaxial and 3G/4G ports say so. */
 export function portSummary(model: DeviceModel): string {
   const counts = new Map<string, number>();
   for (const port of modelPorts(model)) {
-    const name = `${PORT_ABBREVIATION[port.kind]}${port.fiber ? ' fiber' : ''}`;
+    const name = port.coaxial
+      ? 'Coaxial'
+      : port.cellular
+        ? '3G/4G'
+        : `${PORT_ABBREVIATION[port.kind]}${port.fiber ? ' fiber' : ''}`;
     counts.set(name, (counts.get(name) ?? 0) + 1);
   }
   if (counts.size === 0) return 'No ports';

@@ -56,8 +56,9 @@ test('PC1 browses to http://www.lab.local and sees Server1’s page, and Simulat
   await expect(
     frame.contentFrame().getByRole('heading', { name: 'Welcome to www.lab.local' }),
   ).toBeVisible({ timeout: 15_000 });
-  // No permissions at all, so the page can never run a script.
-  await expect(frame).toHaveAttribute('sandbox', '');
+  // No allow-scripts, so the page can never run a script; same origin only lets the browser follow
+  // its links.
+  await expect(frame).toHaveAttribute('sandbox', 'allow-same-origin');
 
   await page.getByRole('radio', { name: 'Simulation' }).click();
   await expect(page.getByRole('toolbar', { name: 'Simulation timeline' })).toBeVisible();

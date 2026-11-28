@@ -12,6 +12,10 @@ function adminUp(device: Device, port: PortId): boolean {
     case 'hub':
     case 'accessPoint':
     case 'wirelessRouter':
+    case 'lightweightAp':
+    case 'wlc':
+    case 'cellTower':
+    case 'centralOffice':
       return true;
     default: {
       const exhaustive: never = device;

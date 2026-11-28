@@ -156,7 +156,7 @@ function labBuilder(id: string) {
       name: string,
       x: number,
       y: number,
-      join?: { ssid: string; passphrase: string },
+      join?: { ssid: string; passphrase?: string },
     ) {
       add(name, 'laptop', x, y, (device) => {
         if (device.kind !== 'pc') throw new Error(`${name} is not a PC`);
@@ -165,7 +165,10 @@ function labBuilder(id: string) {
         device.ports = [{ kind: 'wireless', id: PortId.parse('Wireless0'), mac: card.mac }];
         device.config.ipv4 = { mode: 'dhcp' };
         if (join) {
-          const security = { mode: 'wpa2-psk' as const, passphrase: join.passphrase };
+          const security =
+            join.passphrase === undefined
+              ? { mode: 'none' as const }
+              : { mode: 'wpa2-psk' as const, passphrase: join.passphrase };
           device.config.wireless = { ssid: join.ssid, security };
         }
       });
@@ -1325,7 +1328,90 @@ function serverServicesLab() {
   return lab.topology;
 }
 
+function wlcLightweightAps() {
+  const lab = labBuilder('wlc-lightweight-aps');
+  lab.ios('R1', 'router-2g2s', 424, 40, [
+    'ip dhcp excluded-address 192.168.10.1 192.168.10.10',
+    'ip dhcp pool WLAN',
+    ' network 192.168.10.0 255.255.255.0',
+    ' default-router 192.168.10.1',
+    ' option 43 ip 192.168.10.2',
+    'interface GigabitEthernet0/0',
+    ' ip address 192.168.10.1 255.255.255.0',
+    ' no shutdown',
+  ]);
+  lab.ios('SW1', 'switch-24', 424, 232, []);
+  lab.device('WLC1', 'wlc-2504', 744, 232, (device) => {
+    if (device.kind !== 'wlc') throw new Error('WLC1 is not a controller');
+    device.config.management = {
+      mode: 'static',
+      address: cidr('192.168.10.2/24'),
+      gateway: Ipv4Address.parse('192.168.10.1'),
+    };
+    device.config.wlans = [
+      {
+        ssid: 'Corp',
+        security: { mode: 'wpa2-psk', passphrase: 'tracer123' },
+        enabled: true,
+      },
+    ];
+  });
+  lab.device('LAP1', 'lap-pt', 232, 424);
+  lab.device('LAP2', 'lap-3702i', 616, 424);
+  lab.wirelessLaptop('Laptop1', 136, 616, { ssid: 'Corp', passphrase: 'tracer123' });
+  lab.wirelessLaptop('Laptop2', 712, 616, { ssid: 'Corp', passphrase: 'tracer123' });
+  lab.cable(['SW1', 'GigabitEthernet0/1'], ['R1', 'GigabitEthernet0/0']);
+  lab.cable(['WLC1', 'GigabitEthernet1'], ['SW1', 'GigabitEthernet0/2']);
+  lab.cable(['LAP1', 'GigabitEthernet0'], ['SW1', 'FastEthernet0/1']);
+  lab.cable(['LAP2', 'GigabitEthernet0'], ['SW1', 'FastEthernet0/2']);
+  lab.note(
+    'dhcp',
+    600,
+    -16,
+    'R1 lends addresses on 192.168.10.0/24. Option 43 tells each lightweight AP its controller is WLC1 at 192.168.10.2.',
+  );
+  lab.note(
+    'capwap',
+    872,
+    376,
+    'Each LAP takes an address by DHCP, joins WLC1 over CAPWAP, then broadcasts WLC1’s WLAN Corp. Watch it in Simulation mode.',
+  );
+  return lab.topology;
+}
+
+function smartHome() {
+  const lab = labBuilder('smart-home');
+  lab.device('HomeGateway', 'home-gateway', 424, 232);
+  const thing = (name: string, model: DeviceModelId, x: number, y: number) =>
+    lab.device(name, model, x, y, (device) => {
+      if (device.kind !== 'pc' || !device.config.iot) throw new Error(`${name} is not a thing`);
+      device.config.iot = { ...device.config.iot, server: { mode: 'gateway' } };
+    });
+  thing('Lamp', 'iot-lamp', 136, 424);
+  thing('Door', 'iot-door', 424, 488);
+  thing('Motion', 'iot-motion', 712, 424);
+  lab.wirelessLaptop('Laptop', 712, 88, { ssid: 'HomeGateway' });
+  lab.cable(['Lamp', 'FastEthernet0'], ['HomeGateway', 'Ethernet1']);
+  lab.cable(['Door', 'FastEthernet0'], ['HomeGateway', 'Ethernet2']);
+  lab.cable(['Motion', 'FastEthernet0'], ['HomeGateway', 'Ethernet3']);
+  lab.note(
+    'things',
+    136,
+    600,
+    'The lamp, door and motion detector lease addresses from HomeGateway and register with its IoT server.',
+  );
+  lab.note(
+    'browse',
+    840,
+    168,
+    'Open the laptop’s Web Browser at 192.168.25.1, sign in as admin with password admin, and turn the lamp on.',
+  );
+  return lab.topology;
+}
+
 export const BUILDERS: Record<string, () => Topology> = {
+  'wlc-lightweight-aps': wlcLightweightAps,
+  'smart-home': smartHome,
   'server-services': serverServicesLab,
   'two-pcs-switch': twoPcsSwitch,
   'two-lans-router': twoLansRouter,

@@ -34,6 +34,8 @@ import {
 import { emptyNatTable, natIn, natOut } from './nat';
 import { originate, reportError, transmit } from './output';
 import { bootNtp, onNtpTimer, reconcileNtp } from './ntp';
+import { apBroadcasts, bootCapwap, onCapwapTimer, reconcileController } from './capwap';
+import { bootIot, onIotTimer, reconcileThing } from './iot';
 import { finishPing, onPingAnswer, onPingTimer } from './ping';
 import { nextHop } from './routes';
 import { onConsoleMessage, onSyslogTimer } from './syslog';
@@ -64,6 +66,8 @@ function onAppTimer(ctx: IpContext, name: string) {
   if (app === 'tftp') onTftpTimer(ctx, Number(value));
   else if (app === 'ntp') onNtpTimer(ctx);
   else if (app === 'syslog') onSyslogTimer(ctx);
+  else if (app === 'capwap') onCapwapTimer(ctx);
+  else if (app === 'iot') onIotTimer(ctx);
 }
 
 /** A packet for this device, by what it carries. `arrival` is absent for one it sent itself. */
@@ -168,6 +172,8 @@ export const ipModule: SimModule<IpState> = {
   init: (ctx) => {
     bootDhcp(ctx);
     bootNtp(ctx);
+    bootCapwap(ctx);
+    bootIot(ctx);
     return {
       arp: new Map(),
       resolving: new Map(),
@@ -248,7 +254,11 @@ export const ipModule: SimModule<IpState> = {
     reconcileDhcp(ctx);
     forgetRemovedLists(ctx);
     reconcileNtp(ctx);
+    reconcileController(ctx);
+    reconcileThing(ctx);
   },
+  broadcasts: (ctx) =>
+    ctx.device.kind === 'lightweightAp' ? apBroadcasts(ctx.state.apps.capwap) : undefined,
   onSyslog: onConsoleMessage,
   /**
    * The device is going away: every ping and traceroute it runs ends with what it got so far,

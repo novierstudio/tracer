@@ -90,6 +90,15 @@ export type ServerFilesEvent = {
   files: readonly StoredFile[];
 };
 
+/** An IoT thing's state changed on its server's order, which belongs in its config. */
+export type ThingStateEvent = {
+  kind: 'thing-state';
+  id: EventId;
+  time: SimTime;
+  device: DeviceId;
+  state: Readonly<Record<string, string>>;
+};
+
 export type SimEvent =
   | FrameEvent
   | LinkEvent
@@ -97,7 +106,8 @@ export type SimEvent =
   | SyslogEvent
   | StickyMacEvent
   | VlanDatabaseEvent
-  | ServerFilesEvent;
+  | ServerFilesEvent
+  | ThingStateEvent;
 
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
 

@@ -55,7 +55,9 @@ export type ProtocolId =
   | 'ftp'
   | 'ftp-data'
   | 'smtp'
-  | 'pop3';
+  | 'pop3'
+  | 'capwap'
+  | 'iot';
 
 /** Each protocol's short label and colour token. The label means colour is never the only cue. */
 export const PROTOCOLS: Record<ProtocolId, { label: string; token: `--proto-${string}` }> = {
@@ -91,6 +93,8 @@ export const PROTOCOLS: Record<ProtocolId, { label: string; token: `--proto-${st
   'ftp-data': { label: 'FTP-DATA', token: '--proto-tcp' },
   smtp: { label: 'SMTP', token: '--proto-tcp' },
   pop3: { label: 'POP3', token: '--proto-tcp' },
+  capwap: { label: 'CAPWAP', token: '--proto-dns' },
+  iot: { label: 'IoT', token: '--proto-dns' },
 };
 
 export const PROTOCOL_IDS = Object.keys(PROTOCOLS) as ProtocolId[];

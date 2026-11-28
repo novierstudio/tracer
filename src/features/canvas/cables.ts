@@ -27,6 +27,7 @@ export const CABLE_CHOICES = [
   'straight',
   'crossover',
   'fiber',
+  'coaxial',
   'serial',
   'console',
 ] as const;
@@ -37,6 +38,7 @@ export const CABLE_LABELS: Record<CableChoice, string> = {
   straight: 'Straight-through',
   crossover: 'Crossover',
   fiber: 'Fiber',
+  coaxial: 'Coaxial',
   serial: 'Serial',
   console: 'Console',
 };
@@ -206,6 +208,7 @@ function describeEndpoint(topology: Topology, endpoint: Endpoint): string {
 const MEDIUM_DEFAULT_CABLE: Record<Medium, Cable> = {
   copper: 'straight',
   fiber: 'fiber',
+  coaxial: 'coaxial',
   serial: 'serial',
   console: 'console',
   // No cable fits a radio; one that tries reads as a copper cable that does not fit.
@@ -215,6 +218,7 @@ const MEDIUM_DEFAULT_CABLE: Record<Medium, Cable> = {
 const MEDIUM_CABLE: Record<Medium, string> = {
   copper: 'a copper',
   fiber: 'a fiber',
+  coaxial: 'a coaxial',
   serial: 'a serial',
   console: 'a console',
   wireless: 'no',

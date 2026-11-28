@@ -3,13 +3,13 @@ import { portOf, type ConsolePortKind } from './remote';
 import type { Cable, DeviceKind, Endpoint, Link, PortId, PortKind, Topology } from './topology';
 
 /** What a cable is made of, and so which ports it plugs into. */
-export type Medium = 'copper' | 'fiber' | 'serial' | 'console' | 'wireless';
+export type Medium = 'copper' | 'fiber' | 'coaxial' | 'serial' | 'console' | 'wireless';
 
 /** A network port or a console port: anything a cable plugs into, or a radio, which none does. */
 export type JackKind = PortKind | ConsolePortKind;
 
-/** A port as far as cabling cares: its kind, and whether an Ethernet port is fiber. */
-export type Jack = { readonly kind: JackKind; readonly fiber?: true };
+/** A port as far as cabling cares: its kind, and whether an Ethernet port is fiber or coaxial. */
+export type Jack = { readonly kind: JackKind; readonly fiber?: true; readonly coaxial?: true };
 
 const JACK_MEDIUM: Record<JackKind, Medium> = {
   fastEthernet: 'copper',
@@ -20,12 +20,14 @@ const JACK_MEDIUM: Record<JackKind, Medium> = {
   rs232: 'console',
 };
 
-export const portMedium = (jack: Jack): Medium => (jack.fiber ? 'fiber' : JACK_MEDIUM[jack.kind]);
+export const portMedium = (jack: Jack): Medium =>
+  jack.fiber ? 'fiber' : jack.coaxial ? 'coaxial' : JACK_MEDIUM[jack.kind];
 
 export const CABLE_MEDIUM: Record<Cable, Medium> = {
   straight: 'copper',
   crossover: 'copper',
   fiber: 'fiber',
+  coaxial: 'coaxial',
   serial: 'serial',
   console: 'console',
 };
@@ -53,10 +55,15 @@ export function isMdiX(end: CopperEnd): boolean {
       return true;
     case 'wirelessRouter':
       return end.port !== WAN_PORT;
+    case 'centralOffice':
+      return end.port !== 'Backbone';
     case 'router':
     case 'pc':
     case 'server':
     case 'accessPoint':
+    case 'lightweightAp':
+    case 'wlc':
+    case 'cellTower':
       return false;
     default: {
       const exhaustive: never = end.kind;
@@ -91,7 +98,7 @@ export type CableEnd = { readonly device: DeviceKind; readonly id: PortId; reado
 export function autoCable(a: CableEnd, b: CableEnd): Cable | undefined {
   const medium = portMedium(a.port);
   if (medium !== portMedium(b.port)) return undefined;
-  if (medium === 'serial' || medium === 'fiber') return medium;
+  if (medium === 'serial' || medium === 'fiber' || medium === 'coaxial') return medium;
   if (medium === 'console') return a.port.kind === b.port.kind ? undefined : 'console';
   return copperCable(
     { kind: a.device, port: a.id, portKind: a.port.kind },

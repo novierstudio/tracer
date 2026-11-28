@@ -26,6 +26,10 @@ const CONSOLE_PORTS: Readonly<Record<DeviceKind, ConsolePort | undefined>> = {
   hub: undefined,
   accessPoint: undefined,
   wirelessRouter: undefined,
+  lightweightAp: undefined,
+  wlc: { kind: 'console', id: 'Console' as PortId },
+  cellTower: undefined,
+  centralOffice: undefined,
 };
 
 /** Every router and switch has a Console port, and every PC an RS-232 port. Other devices have neither. */

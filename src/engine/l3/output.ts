@@ -20,9 +20,13 @@ export const INITIAL_TTL: Record<DeviceKind, number> = {
   pc: 128,
   server: 128,
   wirelessRouter: 64,
-  // A hub and an access point run no IP.
+  centralOffice: 64,
+  lightweightAp: 255,
+  wlc: 64,
+  // A hub, an access point and a cell tower run no IP.
   hub: 0,
   accessPoint: 0,
+  cellTower: 0,
 };
 
 /** Hands a packet to the next hop. A LAN resolves the neighbour's MAC first. */

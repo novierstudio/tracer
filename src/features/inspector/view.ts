@@ -3,6 +3,7 @@ import {
   cableWorks,
   linkAt,
   WAN_PORT,
+  BACKBONE_PORT,
   type Annotation,
   type Device,
   type DeviceKind,
@@ -47,6 +48,10 @@ export const KIND_LABELS: Record<DeviceKind, { one: string; many: string }> = {
   hub: { one: 'Hub', many: 'Hubs' },
   accessPoint: { one: 'Access point', many: 'Access points' },
   wirelessRouter: { one: 'Wireless router', many: 'Wireless routers' },
+  lightweightAp: { one: 'Lightweight AP', many: 'Lightweight APs' },
+  wlc: { one: 'Wireless LAN controller', many: 'Wireless LAN controllers' },
+  cellTower: { one: 'Cell tower', many: 'Cell towers' },
+  centralOffice: { one: 'Central office server', many: 'Central office servers' },
 };
 
 /** Catalog name and icon, falling back to the kind for models the catalog does not know. */
@@ -169,6 +174,18 @@ export function portRows(topology: Topology, device: Device): PortRow[] {
         return port.kind === 'wireless' || port.id !== WAN_PORT
           ? { ...base, layer: 'plain', label: port.kind === 'wireless' ? 'Radio, LAN' : 'LAN' }
           : { ...base, layer: 'plain', label: 'Internet' };
+      case 'centralOffice':
+        return {
+          ...base,
+          layer: 'plain',
+          label: port.id === BACKBONE_PORT ? 'Backbone' : 'Cell network',
+        };
+      case 'lightweightAp':
+        return { ...base, layer: 'plain', label: port.kind === 'wireless' ? 'Radio' : 'Uplink' };
+      case 'wlc':
+        return { ...base, layer: 'plain', label: 'Management' };
+      case 'cellTower':
+        return { ...base, layer: 'plain', label: port.kind === 'wireless' ? '3G/4G' : 'Coaxial' };
       default: {
         const exhaustive: never = device;
         return exhaustive;
@@ -181,6 +198,7 @@ export const CABLE_LABELS: Record<Link['cable'], string> = {
   straight: 'Copper straight-through',
   crossover: 'Copper crossover',
   fiber: 'Fiber',
+  coaxial: 'Coaxial',
   serial: 'Serial DCE/DTE',
   console: 'Console',
 };

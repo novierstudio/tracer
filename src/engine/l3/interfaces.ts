@@ -8,13 +8,12 @@ import type {
   SubinterfaceId,
   VlanId,
 } from '@/model';
-import { WAN_PORT } from '@/model/cabling';
 import { parentPort } from '@/model/vlans';
-import { bridgedPorts, HOME_LAN } from '@/model/wireless';
+import { bridgedPorts, HOME_LAN, isGateway, uplinkPort, type Gateway } from '@/model/wireless';
 import { egressFrame, ingressVlan, vlanPorts } from '../l2/switching';
 import type { DeviceContext } from '../module';
 import type { EthernetFrame } from '../pdu';
-import { addressOf, hostPort, type HostAddressing } from './hostAddress';
+import { addressedPort, addressOf, type HostAddressing } from './hostAddress';
 
 /**
  * What carries an interface's packets. Ethernet and a switch's VLAN interface need ARP, a serial
@@ -53,7 +52,7 @@ export type Links = Pick<DeviceContext, 'portUp' | 'forwards'>;
  */
 export const routesPackets = (device: Device): boolean =>
   device.kind === 'router' ||
-  device.kind === 'wirelessRouter' ||
+  isGateway(device) ||
   (device.kind === 'switch' && device.config.ipRouting === true);
 
 /** A device that can route: a router, or a multilayer switch. */
@@ -158,9 +157,11 @@ export function ipInterfaces(
       return found;
     }
     case 'pc':
-    case 'server': {
+    case 'server':
+    case 'wlc':
+    case 'lightweightAp': {
       const address = host && addressOf(host);
-      const port = hostPort(device);
+      const port = addressedPort(device)?.port;
       if (!address || !port || !portUp(port.id)) return [];
       return [
         {
@@ -179,9 +180,11 @@ export function ipInterfaces(
       return [...routedPorts(device, routedAddress, links), ...svis(device, links)];
     }
     case 'wirelessRouter':
+    case 'centralOffice':
       return homeRouterInterfaces(device, links, host);
     case 'hub':
     case 'accessPoint':
+    case 'cellTower':
       return [];
     default: {
       const exhaustive: never = device;
@@ -191,17 +194,19 @@ export function ipInterfaces(
 }
 
 /**
- * A home router routes between two interfaces: its Internet port, with the address it was set or
- * leased, and its LAN, which its LAN ports and radio switch between as one VLAN. The LAN answers
- * with the first LAN port's MAC, and stays up while the router runs, as a built-in switch does.
+ * A gateway routes between two interfaces: its uplink, with the address it was set or leased, and
+ * its LAN, which its other ports switch between as one VLAN: a home router's LAN ports and radio,
+ * a central office server's coaxial ports. The LAN answers with the first LAN port's MAC, and
+ * stays up while the gateway runs, as a built-in switch does.
  */
 function homeRouterInterfaces(
-  device: Extract<Device, { kind: 'wirelessRouter' }>,
+  device: Gateway,
   links: Links,
   host: HostAddressing | undefined,
 ): IpInterface[] {
   const found: IpInterface[] = [];
-  const wan = device.ports.find((port) => port.id === WAN_PORT);
+  const uplink = uplinkPort(device);
+  const wan = device.ports.find((port) => port.id === uplink);
   const address = host && addressOf(host);
   if (wan && wan.kind !== 'serial' && address && links.portUp(wan.id)) {
     found.push({
@@ -210,7 +215,7 @@ function homeRouterInterfaces(
       medium: { kind: 'ethernet', port: wan.id, mac: wan.mac },
     });
   }
-  const lan = device.ports.find((port) => port.id !== WAN_PORT);
+  const lan = device.ports.find((port) => port.id !== uplink);
   if (lan && lan.kind !== 'serial') {
     const medium = { kind: 'svi', vlan: 1 as VlanId, mac: lan.mac } as const;
     found.push({ name: HOME_LAN, cidr: device.config.lan, medium });
@@ -243,7 +248,7 @@ export function lanInterfaceFor(
   frame: EthernetFrame,
 ): LanInterface | undefined {
   const { device } = ctx;
-  if (device.kind === 'wirelessRouter' && port !== WAN_PORT) {
+  if (isGateway(device) && port !== uplinkPort(device)) {
     return interfaces.find((iface): iface is LanInterface => iface.medium.kind === 'svi');
   }
   const switchport = device.kind === 'switch' && device.config.interfaces[port]?.switchport;
@@ -283,7 +288,7 @@ export function sendOnLan(
     return;
   }
   const { device } = ctx;
-  if (device.kind === 'wirelessRouter') {
+  if (isGateway(device)) {
     for (const out of bridgedPorts(device)) {
       if ((port === undefined || out === port) && ctx.portUp(out)) ctx.send(out, frame);
     }

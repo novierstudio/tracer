@@ -9,6 +9,7 @@ import type {
   StoredFile,
   VlanDatabase,
   VlanId,
+  WirelessProfile,
 } from '@/model';
 import type { SimDuration, SimTime } from './core/time';
 import type { Frame } from './frame';
@@ -54,8 +55,15 @@ export interface DeviceContext {
    * so they show in its Services tab and save with the lab.
    */
   learnFiles(service: FileService, files: readonly StoredFile[]): void;
+  /**
+   * An IoT thing's state changed, as its server's order changes it: it belongs in its config, so
+   * its inspector shows it and it saves with the lab.
+   */
+  learnThingState(state: Readonly<Record<string, string>>): void;
   /** A module's `disablesPort` answer changed: bring the device's links in line with it. */
   relink(): void;
+  /** A module's `broadcasts` answer changed: re-derive which hosts associate with which radios. */
+  reassociate(): void;
   /**
    * A module's `holdsVlan` answer changed, as when spanning tree moves a port to or from
    * forwarding. The device's other modules re-derive what depends on `forwards`, such as which
@@ -126,6 +134,11 @@ export interface SimModule<S = unknown> {
    * ends while any module says so. Call `relink` when the answer changes.
    */
   disablesPort?(ctx: ModuleContext<S>, port: PortId): boolean;
+  /**
+   * The Wi-Fi networks the device's radio broadcasts now, as a lightweight AP broadcasts its
+   * controller's WLANs once it joins. Call `reassociate` when the answer changes.
+   */
+  broadcasts?(ctx: ModuleContext<S>): readonly WirelessProfile[] | undefined;
   /** The bundle the module has bundled the port into, if any. See `bundleOf`. */
   bundleOf?(ctx: ModuleContext<S>, port: PortId): string | undefined;
   /** Whether the module holds an up port back from forwarding `vlan`'s frames. See `forwards`. */
