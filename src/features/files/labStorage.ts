@@ -64,3 +64,24 @@ export async function openLabStorage(): Promise<LabStorage> {
   });
   return wrap(db);
 }
+
+let persistence: Promise<boolean> | undefined;
+
+/**
+ * Asks the browser to keep the site's storage when the disk runs low, and Safari not to clear it
+ * after seven days without a visit. Chrome and Safari decide silently; Firefox asks the user, so
+ * it is asked once, after a lab has been saved. The answer only lowers the risk of losing labs:
+ * the app saves the same either way.
+ */
+export function requestPersistentStorage(): Promise<boolean> {
+  persistence ??= (async () => {
+    try {
+      const storage = navigator.storage;
+      if (!storage?.persist) return false;
+      return (await storage.persisted()) || (await storage.persist());
+    } catch {
+      return false;
+    }
+  })();
+  return persistence;
+}

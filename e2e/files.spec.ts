@@ -37,6 +37,30 @@ test('restores the lab after a reload', async ({ page }) => {
   await expect(labName(page)).toHaveValue('Campus lab');
 });
 
+test('asks the browser once to keep its storage, after the first save', async ({ page }) => {
+  await page.addInitScript(() => {
+    const w = window as unknown as { persistCalls: number };
+    w.persistCalls = 0;
+    navigator.storage.persisted = async () => false;
+    navigator.storage.persist = async () => {
+      w.persistCalls += 1;
+      return true;
+    };
+  });
+  await page.reload();
+  const persistCalls = () =>
+    page.evaluate(() => (window as unknown as { persistCalls: number }).persistCalls);
+  expect(await persistCalls()).toBe(0);
+
+  await rename(page, 'Campus lab');
+  await expect(saveStatus(page)).toHaveText('Saved');
+  await expect.poll(persistCalls).toBe(1);
+
+  await rename(page, 'Campus lab 2');
+  await expect(saveStatus(page)).toHaveText('Saved');
+  expect(await persistCalls()).toBe(1);
+});
+
 test('saves a .tracer.json download and opens it back', async ({ page }) => {
   await rename(page, 'Branch lab');
 
@@ -46,7 +70,7 @@ test('saves a .tracer.json download and opens it back', async ({ page }) => {
   expect(download.suggestedFilename()).toBe('Branch lab.tracer.json');
   const text = await readFile((await download.path())!, 'utf8');
   const saved = JSON.parse(text);
-  expect(saved).toMatchObject({ version: 1, meta: { name: 'Branch lab' } });
+  expect(saved).toMatchObject({ version: 2, meta: { name: 'Branch lab' } });
 
   await rename(page, 'Something else');
   await menu(page, 'New lab');
