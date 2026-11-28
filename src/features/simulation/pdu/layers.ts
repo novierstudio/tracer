@@ -41,12 +41,15 @@ import {
   type Ipv4Packet,
   type Ipv4Payload,
   type LeaseTime,
-  type Lsa,
+  type AsbrSummaryLsa,
+  type ExternalLsa,
   type LsaHeader,
   type LsaType,
   type OspfDatabaseDescription,
   type OspfPacket,
   type RouterLink,
+  type RouterLsa,
+  type SummaryLsa,
   type RipEntry,
   type RipMessage,
   type RipVersion,
@@ -58,6 +61,7 @@ import {
   multicastMac,
 } from '@/engine/pdu';
 import type { Ipv6Packet } from '@/engine/pdu6';
+import { lsaBytes, lsaHeaderBytes, OSPF_OPTIONS } from '@/engine/routing/ospf/wire';
 import type { TcpSegment } from '@/engine/tcp';
 import { isIpv6MulticastMac } from '@/model/ipv6';
 import {
@@ -1110,15 +1114,16 @@ const OSPF_TYPE_EXPLAIN: Record<OspfPacket['type'], string> = {
     'A link state acknowledgment confirms LSAs arrived, so the router that sent them stops sending them again.',
 };
 
-/** The options byte of every packet and LSA Tracer sends: only the E bit, as a normal area sets. */
-const OSPF_OPTIONS = 0x02;
-
 const OPTIONS_EXPLAIN =
   'The E bit: the sender’s area is a normal one that takes routes from outside OSPF. Neighbours must agree on the options.';
 
-const LSA_NAMES: Record<LsaType, string> = { router: 'Router LSA', network: 'Network LSA' };
-
-const LINK_TYPE: Record<RouterLink['type'], number> = { 'point-to-point': 1, transit: 2, stub: 3 };
+const LSA_NAMES: Record<LsaType, string> = {
+  router: 'Router LSA',
+  network: 'Network LSA',
+  summary: 'Summary LSA',
+  'asbr-summary': 'ASBR summary LSA',
+  external: 'External LSA',
+};
 
 const DBD_FLAGS = [
   ['init', 0x04, 'Init'],
@@ -1128,73 +1133,6 @@ const DBD_FLAGS = [
 
 const maskText = (prefixLength: PrefixLength) =>
   `${formatSubnetMask(prefixLength)} (/${prefixLength})`;
-
-/** A link's ID and data, as RFC 2328 defines them for its type. */
-function linkIdAndData(link: RouterLink): [id: string, data: string] {
-  switch (link.type) {
-    case 'point-to-point':
-      return [link.neighbor, link.address];
-    case 'transit':
-      return [link.dr, link.address];
-    case 'stub':
-      return [link.network, formatSubnetMask(link.prefixLength)];
-  }
-}
-
-function linkBytes(link: RouterLink): number[] {
-  const [id, data] = linkIdAndData(link);
-  return [...ipBytes(id), ...ipBytes(data), LINK_TYPE[link.type], 0, ...u16(link.metric)];
-}
-
-function lsaBodyBytes(lsa: Lsa): number[] {
-  switch (lsa.type) {
-    case 'router':
-      return [0, 0, ...u16(lsa.links.length), ...lsa.links.flatMap(linkBytes)];
-    case 'network':
-      return [...ipBytes(formatSubnetMask(lsa.prefixLength)), ...lsa.attached.flatMap(ipBytes)];
-  }
-}
-
-function lsaHeaderBytes(header: LsaHeader, checksum: number, length: number): number[] {
-  return [
-    ...u16(header.age),
-    OSPF_OPTIONS,
-    LSA_TYPE[header.type],
-    ...ipBytes(header.id),
-    ...ipBytes(header.advertisingRouter),
-    ...u32(header.sequence >>> 0),
-    ...u16(checksum),
-    ...u16(length),
-  ];
-}
-
-/**
- * The two check bytes, placed at `offset`, that make the Fletcher checksum (ISO 8473) of `data`
- * come out to zero. `data` holds zeros where they go.
- */
-function fletcherCheck(data: readonly number[], offset: number): [number, number] {
-  let c0 = 0;
-  let c1 = 0;
-  for (const byte of data) {
-    c0 = (c0 + byte) % 255;
-    c1 = (c1 + c0) % 255;
-  }
-  let x = ((data.length - offset - 1) * c0 - c1) % 255;
-  if (x <= 0) x += 255;
-  let y = 510 - c0 - x;
-  if (y > 255) y -= 255;
-  return [x, y];
-}
-
-/** A whole LSA's bytes, with its checksum over everything but the age, which changes in transit. */
-function lsaBytes(lsa: Lsa): number[] {
-  const body = lsaBodyBytes(lsa);
-  const bytes = [...lsaHeaderBytes(lsa, 0, 20 + body.length), ...body];
-  const [x, y] = fletcherCheck(bytes.slice(2), 14);
-  bytes[16] = x;
-  bytes[17] = y;
-  return bytes;
-}
 
 /** A header on its own, in a DBD or an ack. Tracer keeps no checksum or length without the body. */
 const bareHeaderBytes = (header: LsaHeader) => lsaHeaderBytes(header, 0, 0);
@@ -1267,6 +1205,12 @@ const LSA_EXPLAIN: Record<LsaType, string> = {
     'A router LSA: every router originates one that lists its links in the area and what each costs. Its link state ID is the router’s own ID.',
   network:
     'A network LSA: the DR of a multi-access network originates one that lists every router on the network. Its link state ID is the DR’s address there.',
+  summary:
+    'A summary LSA (type 3): an area border router advertises a network of another area into this one. Its link state ID is the network number.',
+  'asbr-summary':
+    'An ASBR summary LSA (type 4): an area border router tells this area how to reach an AS boundary router in another area. Its link state ID is that router’s ID.',
+  external:
+    'An external LSA (type 5): an AS boundary router brings in a route from outside OSPF, and it floods to every area but a stub one. Its link state ID is the network number.',
 };
 
 const SEQUENCE_EXPLAIN =
@@ -1299,6 +1243,70 @@ const LINK_EXPLAIN: Record<RouterLink['type'], string> = {
 
 const METRIC_EXPLAIN =
   ' The TOS count is 0, and the metric is the cost to send out of the interface: 100 Mbit/s divided by its bandwidth, unless ip ospf cost sets it.';
+
+function routerFlags(lsa: RouterLsa): string {
+  const set = [lsa.asbr && 'E', lsa.abr && 'B'].filter(Boolean);
+  return set.length > 0
+    ? `Here ${set.join(' and ')} ${set.length > 1 ? 'are' : 'is'} set.`
+    : 'Here none is set.';
+}
+
+type FieldOf = (id: string, label: string, value: string, explain: string, length: number) => Field;
+
+/** The body of a summary, ASBR summary or external LSA: a mask, then a metric, then for an external LSA a forwarding address and a tag. */
+function summaryFields(
+  field: FieldOf,
+  n: number,
+  lsa: SummaryLsa | AsbrSummaryLsa | ExternalLsa,
+): Field[] {
+  const mask = field(
+    `ospf.lsa.${n}.mask`,
+    `LSA ${n} mask`,
+    lsa.type === 'asbr-summary' ? '0.0.0.0' : maskText(lsa.prefixLength),
+    lsa.type === 'asbr-summary'
+      ? 'Unused in an ASBR summary LSA, which names a router, not a network.'
+      : 'The network’s mask. With the link state ID, it gives the network.',
+    4,
+  );
+  if (lsa.type !== 'external') {
+    return [
+      mask,
+      field(
+        `ospf.lsa.${n}.metric`,
+        `LSA ${n} metric`,
+        String(lsa.metric),
+        'The area border router’s own cost to the destination. A router adds its cost to the border router.',
+        4,
+      ),
+    ];
+  }
+  return [
+    mask,
+    field(
+      `ospf.lsa.${n}.metric`,
+      `LSA ${n} type, metric`,
+      `E${lsa.metricType}, ${lsa.metric}`,
+      lsa.metricType === 2
+        ? 'The E bit set: a type 2 metric, which routers take as is, whatever their cost to the AS boundary router.'
+        : 'The E bit clear: a type 1 metric, to which routers add their cost to the AS boundary router.',
+      4,
+    ),
+    field(
+      `ospf.lsa.${n}.forward`,
+      `LSA ${n} forwarding address`,
+      '0.0.0.0',
+      '0.0.0.0: send traffic for the route to the AS boundary router itself.',
+      4,
+    ),
+    field(
+      `ospf.lsa.${n}.tag`,
+      `LSA ${n} route tag`,
+      String(lsa.tag),
+      'A tag OSPF itself ignores. IOS tags a default route it originates with the process ID.',
+      4,
+    ),
+  ];
+}
 
 function ospfLayers(wire: Wire, packet: OspfPacket): Layer[] {
   const bytes = ospfBytes(packet);
@@ -1507,7 +1515,7 @@ function ospfLayers(wire: Wire, packet: OspfPacket): Layer[] {
               `ospf.lsa.${n}.links`,
               `LSA ${n} flags, links`,
               plural(lsa.links.length, 'link'),
-              'Flags V, E and B would mark the end of a virtual link, a boundary to routes from outside OSPF, and an area border router. Tracer runs one area, so they are 0. Then the number of links that follow.',
+              `Flags V, E and B mark the end of a virtual link, an AS boundary router, which brings in routes from outside OSPF, and an area border router. ${routerFlags(lsa)} Then the number of links that follow.`,
               4,
             ),
             ...lsa.links.map((link, linkIndex) =>
@@ -1520,6 +1528,8 @@ function ospfLayers(wire: Wire, packet: OspfPacket): Layer[] {
               ),
             ),
           );
+        } else if (lsa.type !== 'network') {
+          fields.push(...summaryFields(field, n, lsa));
         } else {
           fields.push(
             field(

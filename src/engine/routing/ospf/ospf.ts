@@ -7,18 +7,21 @@ import { ALL_D_ROUTERS, ALL_SPF_ROUTERS, type OspfPacket } from '../../pdu';
 import { arrival, packetIn } from '../link';
 import { dropNeighbor, electDr, endWait, onDbd, onHello } from './adjacency';
 import { LS_REFRESH_TIME, seconds, type OspfContext } from './context';
-import { originate, runSpf } from './database';
+import { runSpf } from './calculate';
+import { originate } from './database';
 import { onAck, onRequest, onUpdate, retransmit } from './flooding';
 import { reconcile } from './process';
 import { sendHello } from './send';
 import { parseTimer, timerKey, type Iface, type OspfState, type Process } from './state';
 
 /**
- * Single-area OSPFv2 as IOS runs it, by RFC 2328. Routers find neighbours with hellos, elect a DR
+ * OSPFv2 as IOS runs it, by RFC 2328. Routers find neighbours with hellos, elect a DR
  * and BDR on each multi-access network, and bring adjacencies up to FULL by trading database
  * descriptions, requesting what they lack and flooding what changes, every LSA acknowledged.
  * Each router describes its links in a router LSA, each DR its network in a network LSA, and
- * every router runs Dijkstra over the same database to find its routes.
+ * every router runs Dijkstra over its area's database to find its routes. Area border routers
+ * carry networks between areas in summary LSAs, and AS boundary routers bring routes from outside
+ * OSPF in external LSAs.
  */
 
 function onTimer(ctx: OspfContext, key: string) {
@@ -109,6 +112,8 @@ function onPacket(
   }
 }
 
+const OSPF_CODE = { inter: 'IA', E1: 'E1', E2: 'E2' } as const;
+
 /** OSPF on a router. The engine starts it on every router; it idles until `router ospf`. */
 export const ospfModule: SimModule<OspfState> = {
   id: 'ospf',
@@ -136,6 +141,7 @@ export const ospfModule: SimModule<OspfState> = {
       route.hops.map((hop) => ({
         source: 'ospf' as const,
         prefix: route.prefix,
+        ...(route.kind === 'intra' ? {} : { ospf: OSPF_CODE[route.kind] }),
         distance: ADMINISTRATIVE_DISTANCE.ospf,
         metric: route.cost,
         via: hop.via,

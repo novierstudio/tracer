@@ -2,8 +2,10 @@ import type { Ipv4Address } from '@/model';
 import { ipInterfaces } from '../../l3/interfaces';
 import { compareAddresses } from '../../l3/ipv4';
 import { ospfConfig, timersOf, type OspfContext } from './context';
-import { lsaKey, NO_ROUTER, type Iface, type Process } from './state';
-import type { OspfDesignated, OspfInterfaceStatus, OspfStatus } from './status';
+import { MAX_AGE, type Lsa } from '../../pdu';
+import { aged, lsaKey, NO_ROUTER, type Iface, type Process } from './state';
+import type { OspfDesignated, OspfInterfaceStatus, OspfLsaStatus, OspfStatus } from './status';
+import { lsaChecksum } from './wire';
 
 function designated(
   process: Process,
@@ -65,6 +67,12 @@ export function ospfStatus(ctx: OspfContext): OspfStatus | undefined {
       timers,
       interfaces: [],
       sources: [],
+      abr: false,
+      asbr: false,
+      spfRuns: 0,
+      areas: [],
+      externals: [],
+      borderRouters: [],
     };
   const order = ipInterfaces(ctx.device, ctx, undefined).map((ip) => ip.name);
   const interfaces = [...process.interfaces.values()].sort(
@@ -85,5 +93,46 @@ export function ospfStatus(ctx: OspfContext): OspfStatus | undefined {
     timers,
     interfaces: interfaces.map((iface) => interfaceStatus(ctx, process, iface)),
     sources,
+    abr: process.abr,
+    asbr: process.asbr,
+    spfRuns: process.spfRuns,
+    areas: [...process.areas.keys()]
+      .sort((a, b) => a - b)
+      .map((id) => ({
+        id,
+        interfaces: interfaces.filter((iface) => iface.area === id).length,
+        lsas: databaseStatus(ctx, process, id).filter(({ lsa }) => lsa.type !== 'external'),
+      })),
+    externals: [...process.areas.keys()]
+      .flatMap((id) => databaseStatus(ctx, process, id))
+      .filter(({ lsa }, i, all) => {
+        if (lsa.type !== 'external') return false;
+        return all.findIndex((other) => lsaKey(other.lsa) === lsaKey(lsa)) === i;
+      }),
+    borderRouters: process.borderRouters.flatMap(({ hops, ...entry }) =>
+      hops.map((hop) => ({ ...entry, via: hop.via, interface: hop.interface })),
+    ),
   };
+}
+
+const TYPE_ORDER: Record<Lsa['type'], number> = {
+  router: 1,
+  network: 2,
+  summary: 3,
+  'asbr-summary': 4,
+  external: 5,
+};
+
+/** The area's live LSAs, aged to now, as `show ip ospf database` orders them. */
+function databaseStatus(ctx: OspfContext, process: Process, area: number): OspfLsaStatus[] {
+  return [...(process.areas.get(area)?.values() ?? [])]
+    .map((stored) => aged(stored, ctx.now))
+    .filter((lsa) => lsa.age < MAX_AGE)
+    .sort(
+      (a, b) =>
+        TYPE_ORDER[a.type] - TYPE_ORDER[b.type] ||
+        compareAddresses(a.id, b.id) ||
+        compareAddresses(a.advertisingRouter, b.advertisingRouter),
+    )
+    .map((lsa) => ({ lsa, checksum: lsaChecksum(lsa) }));
 }

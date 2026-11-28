@@ -1,27 +1,35 @@
-import type { Ipv4Address, PrefixLength } from '@/model';
+import type { PrefixLength } from '@/model';
 import { compareAddresses, networkOf } from '../../l3/ipv4';
 import {
   INITIAL_SEQUENCE,
   MAX_AGE,
   type Lsa,
   type LsaHeader,
-  type NetworkLsa,
+  type LsaType,
   type RouterLink,
-  type RouterLsa,
 } from '../../pdu';
-import { same, seconds, timersOf, type OspfContext } from './context';
+import {
+  isBoundary,
+  isStub,
+  ospfConfig,
+  same,
+  seconds,
+  timersOf,
+  type OspfContext,
+} from './context';
+import { externalsWanted } from './external';
 import { armRetransmit, floodAudience, send } from './send';
-import { shortestPaths } from './spf';
 import {
   aged,
   atLeast,
+  compareInstances,
   headerOf,
   lsaKey,
   timerKey,
   type Iface,
+  type LsaBody,
   type Neighbor,
   type Process,
-  type SpfRoute,
   type Stored,
 } from './state';
 
@@ -79,10 +87,79 @@ export function flood(
   return back;
 }
 
-/** Installs a new instance of one of this router's own LSAs and floods it. */
+/**
+ * The areas whose databases hold an LSA: its own area, or for an external LSA every area that is
+ * not a stub area, since external LSAs flood through the whole AS.
+ */
+export function scopeOf(ctx: OspfContext, process: Process, area: number, lsa: Lsa): number[] {
+  if (lsa.type !== 'external') return [area];
+  const config = ospfConfig(ctx.device);
+  return [...process.areas.keys()].filter((other) => !config || !isStub(config, other));
+}
+
+/** Installs a new instance of one of this router's own LSAs and floods it through its scope. */
 function issue(ctx: OspfContext, process: Process, area: number, lsa: Lsa) {
-  databaseOf(process, area).set(lsaKey(lsa), { lsa, receivedAt: ctx.now });
-  flood(ctx, process, area, lsa);
+  for (const target of scopeOf(ctx, process, area, lsa)) {
+    databaseOf(process, target).set(lsaKey(lsa), { lsa, receivedAt: ctx.now });
+    flood(ctx, process, target, lsa);
+  }
+}
+
+/** What an LSA says, apart from the age and sequence number of this instance. */
+const sameContent = (lsa: Lsa, body: LsaBody) =>
+  same({ ...lsa, age: 0, sequence: 0 }, { ...body, age: 0, sequence: 0 });
+
+/**
+ * Brings this router's own LSAs of `types` in the area in line with `wanted`, by LSA key. One that
+ * is new or changed goes out as a new instance, as does every one with `refresh`; one no longer
+ * wanted is flushed at MaxAge. So calling this after any change is cheap.
+ */
+export function syncOwn(
+  ctx: OspfContext,
+  process: Process,
+  area: number,
+  types: readonly LsaType[],
+  wanted: ReadonlyMap<string, LsaBody>,
+  refresh: boolean,
+) {
+  const database = databaseOf(process, area);
+  for (const [key, stored] of database) {
+    const lsa = aged(stored, ctx.now);
+    if (!types.includes(lsa.type) || lsa.advertisingRouter !== process.routerId) continue;
+    if (!wanted.has(key) && lsa.age < MAX_AGE) issue(ctx, process, area, { ...lsa, age: MAX_AGE });
+  }
+  for (const [key, body] of wanted) {
+    const stored = database.get(key);
+    const current = stored && aged(stored, ctx.now);
+    const fresh = current !== undefined && current.age < MAX_AGE;
+    if (!refresh && fresh && sameContent(current, body)) continue;
+    const sequence = current ? current.sequence + 1 : INITIAL_SEQUENCE;
+    issue(ctx, process, area, { ...body, age: 0, sequence } as Lsa);
+  }
+}
+
+/**
+ * Keeps every area that is not a stub area holding the newest instance of each external LSA, as
+ * a new area joins, and empties a stub area of them.
+ */
+function shareExternals(ctx: OspfContext, process: Process) {
+  const newest = new Map<string, Stored>();
+  for (const database of process.areas.values()) {
+    for (const [key, stored] of database) {
+      if (stored.lsa.type !== 'external') continue;
+      const held = newest.get(key);
+      if (!held || compareInstances(aged(stored, ctx.now), aged(held, ctx.now)) > 0)
+        newest.set(key, stored);
+    }
+  }
+  const config = ospfConfig(ctx.device);
+  for (const [area, database] of process.areas) {
+    const stub = config !== undefined && isStub(config, area);
+    for (const [key, stored] of newest) {
+      if (stub) database.delete(key);
+      else if (database.get(key) !== stored) database.set(key, stored);
+    }
+  }
 }
 
 /** The links this router's LSA describes in an area. */
@@ -131,97 +208,55 @@ function routerLinks(process: Process, area: number): RouterLink[] {
 }
 
 /**
- * Brings this router's own LSAs in line with its interfaces and neighbours: a router LSA in each
- * area it has an interface in, and a network LSA for each network where it is DR with a full
- * neighbour. One it no longer originates is flushed at MaxAge. A new instance goes out only when
- * the content changed, or with `refresh`, so calling this after any change is cheap.
+ * Brings this router's own LSAs in line with its interfaces, neighbours and config: a router LSA
+ * in each area it has an interface in, a network LSA for each network where it is DR with a full
+ * neighbour, and an external LSA for each route it redistributes. One it no longer originates is
+ * flushed at MaxAge. A new instance goes out only when the content changed, or with `refresh`.
+ * The summaries an area border router originates follow SPF, which this schedules.
  */
 export function originate(ctx: OspfContext, process: Process, refresh = false) {
+  const config = ospfConfig(ctx.device);
+  if (!config) return;
   const { routerId } = process;
+  if (refresh) process.refreshPending = true;
   const areas = new Set([...process.interfaces.values()].map((iface) => iface.area));
   for (const area of process.areas.keys()) if (!areas.has(area)) process.areas.delete(area);
+  for (const area of areas) databaseOf(process, area);
+  shareExternals(ctx, process);
+  process.abr = areas.size > 1;
+  process.asbr = isBoundary(config);
 
   for (const area of areas) {
-    const database = databaseOf(process, area);
-    const own = (type: Lsa['type'], id: Ipv4Address) => {
-      const stored = database.get(lsaKey({ type, id, advertisingRouter: routerId }));
-      return stored && aged(stored, ctx.now);
+    const router: LsaBody = {
+      type: 'router',
+      id: routerId,
+      advertisingRouter: routerId,
+      abr: process.abr,
+      asbr: process.asbr,
+      links: routerLinks(process, area),
     };
-    const nextSequence = (current: Lsa | undefined) =>
-      current ? current.sequence + 1 : INITIAL_SEQUENCE;
+    syncOwn(ctx, process, area, ['router'], new Map([[lsaKey(router), router]]), refresh);
 
-    const links = routerLinks(process, area);
-    const current = own('router', routerId);
-    const stale = !current || current.age >= MAX_AGE || current.type !== 'router';
-    if (refresh || stale || !same(current.links, links)) {
-      const lsa: RouterLsa = {
-        type: 'router',
-        id: routerId,
-        advertisingRouter: routerId,
-        age: 0,
-        sequence: nextSequence(current),
-        links,
-      };
-      issue(ctx, process, area, lsa);
-    }
-
-    const wanted = new Map<string, Omit<NetworkLsa, 'age' | 'sequence'>>();
+    const networks = new Map<string, LsaBody>();
     for (const iface of process.interfaces.values()) {
       if (iface.area !== area || iface.type !== 'broadcast' || iface.state !== 'dr') continue;
       const full = [...iface.neighbors.values()].filter((neighbor) => neighbor.state === 'full');
       if (full.length === 0) continue;
-      const network = {
+      const network: LsaBody = {
         type: 'network',
         id: iface.ip.cidr.address,
         advertisingRouter: routerId,
         prefixLength: iface.ip.cidr.prefixLength,
         attached: [routerId, ...full.map((neighbor) => neighbor.routerId)].sort(compareAddresses),
-      } as const;
-      wanted.set(lsaKey(network), network);
+      };
+      networks.set(lsaKey(network), network);
     }
-    for (const [key, stored] of database) {
-      const lsa = aged(stored, ctx.now);
-      if (lsa.type !== 'network' || lsa.advertisingRouter !== routerId) continue;
-      if (!wanted.has(key) && lsa.age < MAX_AGE)
-        issue(ctx, process, area, { ...lsa, age: MAX_AGE });
-    }
-    for (const network of wanted.values()) {
-      const held = own('network', network.id);
-      const fresh = held?.type === 'network' && held.age < MAX_AGE;
-      if (
-        !refresh &&
-        fresh &&
-        same(held.attached, network.attached) &&
-        held.prefixLength === network.prefixLength
-      )
-        continue;
-      issue(ctx, process, area, { ...network, age: 0, sequence: nextSequence(held) });
-    }
+    syncOwn(ctx, process, area, ['network'], networks, refresh);
+  }
+
+  const home = [...areas].find((area) => !isStub(config, area));
+  if (home !== undefined) {
+    syncOwn(ctx, process, home, ['external'], externalsWanted(ctx, process, config), refresh);
   }
   scheduleSpf(ctx, process);
-}
-
-/** Runs SPF in each area and keeps the routes, each aged from when it last changed. */
-export function runSpf(ctx: OspfContext, process: Process) {
-  process.spfPending = false;
-  const routes = new Map<string, SpfRoute>();
-  const reached = new Set<Ipv4Address>();
-  for (const [area, database] of process.areas) {
-    const lsas = [...database.values()].map((stored) => aged(stored, ctx.now));
-    const interfaces = [...process.interfaces.values()]
-      .filter((iface) => iface.area === area)
-      .map((iface) => ({ name: iface.name, address: iface.ip.cidr.address }));
-    const result = shortestPaths(process.routerId, lsas, interfaces);
-    for (const router of result.reached) reached.add(router);
-    for (const { prefix, cost, hops } of result.paths) {
-      const key = `${prefix.address}/${prefix.prefixLength}`;
-      const held = routes.get(key);
-      if (held && held.cost <= cost) continue;
-      const before = process.routes.get(key);
-      const unchanged = before && before.cost === cost && same(before.hops, hops);
-      routes.set(key, { prefix, cost, hops, since: unchanged ? before.since : ctx.now });
-    }
-  }
-  process.routes = routes;
-  process.reached = [...reached].sort(compareAddresses);
 }

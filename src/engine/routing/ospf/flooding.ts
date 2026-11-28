@@ -8,7 +8,7 @@ import {
 } from '../../pdu';
 import { mismatch, setState } from './adjacency';
 import type { OspfContext } from './context';
-import { databaseOf, flood, originate } from './database';
+import { databaseOf, flood, originate, scopeOf } from './database';
 import { armRetransmit, floodAudience, send, sendRequest } from './send';
 import {
   aged,
@@ -69,13 +69,18 @@ export function onUpdate(
         acks.push(headerOf(lsa));
         continue;
       }
-      database.set(key, { lsa, receivedAt: ctx.now });
       changed = true;
       for (const other of process.interfaces.values()) {
         for (const peer of other.neighbors.values()) peer.unacked.delete(key);
       }
       const own = lsa.advertisingRouter === process.routerId;
-      const back = !own && flood(ctx, process, iface.area, lsa, { iface, neighbor });
+      let back = false;
+      // An external LSA floods on into every other area that takes them.
+      for (const area of scopeOf(ctx, process, iface.area, lsa)) {
+        databaseOf(process, area).set(key, { lsa, receivedAt: ctx.now });
+        const sent = !own && flood(ctx, process, area, lsa, { iface, neighbor });
+        back ||= sent && area === iface.area;
+      }
       if (!back) acks.push(headerOf(lsa));
     } else if (order === 0) {
       if (!neighbor.unacked.delete(key)) acks.push(headerOf(lsa));

@@ -6,6 +6,7 @@ import type { DeviceContext } from '../../module';
 import { bandwidthOf, pickRouterId, settingsOf } from '../interfaceMetrics';
 import { dropNeighbor, electDr } from './adjacency';
 import {
+  isStub,
   LS_REFRESH_TIME,
   ospfConfig,
   REFERENCE_BANDWIDTH,
@@ -19,7 +20,7 @@ import { originate } from './database';
 import { NO_ROUTER, timerKey, type Iface, type Process } from './state';
 import type { OspfNetworkType } from './status';
 
-type Plan = Pick<Iface, 'ip' | 'area' | 'type' | 'cost' | 'priority' | 'passive'>;
+type Plan = Pick<Iface, 'ip' | 'area' | 'stub' | 'type' | 'cost' | 'priority' | 'passive'>;
 
 /**
  * The working interfaces OSPF runs on: each one the first matching `network` statement covers,
@@ -44,6 +45,7 @@ function plan(ctx: DeviceContext, device: Router, config: OspfConfig): Plan[] {
       {
         ip,
         area: network.area,
+        stub: isStub(config, network.area),
         type,
         cost,
         priority: settings?.ospfPriority ?? 1,
@@ -95,6 +97,7 @@ function syncInterfaces(ctx: OspfContext, process: Process, device: Router, conf
     const kept =
       planned !== undefined &&
       planned.area === iface.area &&
+      planned.stub === iface.stub &&
       planned.type === iface.type &&
       planned.passive === iface.passive &&
       same(planned.ip.cidr, iface.ip.cidr);
@@ -158,7 +161,12 @@ export function reconcile(ctx: OspfContext) {
       areas: new Map(),
       routes: new Map(),
       reached: [],
+      borderRouters: [],
+      abr: false,
+      asbr: false,
       spfPending: false,
+      spfRuns: 0,
+      refreshPending: false,
     };
     ctx.state.process = process;
     ctx.setTimer(timerKey({ kind: 'refresh' }), seconds(LS_REFRESH_TIME));

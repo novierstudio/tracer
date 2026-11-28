@@ -130,6 +130,12 @@ export function onHello(
     ctx.note(`OSPF: hello from ${hello.routerId} on ${iface.name} has other hello or dead timers`);
     return;
   }
+  if (hello.stub !== iface.stub) {
+    ctx.note(
+      `OSPF: hello from ${hello.routerId} on ${iface.name} has a mismatched Stub/Transit area option bit`,
+    );
+    return;
+  }
   if (iface.type === 'broadcast' && hello.networkMask !== iface.ip.cidr.prefixLength) {
     ctx.note(`OSPF: hello from ${hello.routerId} on ${iface.name} has another network mask`);
     return;

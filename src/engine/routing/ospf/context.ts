@@ -1,4 +1,4 @@
-import type { Device, OspfConfig } from '@/model';
+import type { Device, OspfArea, OspfConfig } from '@/model';
 import { ms, type SimDuration } from '../../core/time';
 import { routingDevice, type RoutingDevice } from '../../l3/interfaces';
 import type { DeviceContext, ModuleContext } from '../../module';
@@ -19,6 +19,20 @@ export const seconds = (value: number): SimDuration => ms(value * 1000);
 export const timersOf = (ctx: DeviceContext) => OSPF_TIMERS[ctx.settings.routingTimers];
 export const ospfConfig = (device: Device): OspfConfig | undefined =>
   routingDevice(device)?.config.ospf;
+
+/** What `area <id>` commands set for the area, if any. */
+export const areaSettings = (config: OspfConfig, area: number): OspfArea | undefined =>
+  config.areas?.find((entry) => entry.area === area);
+
+/** Whether the area is a stub area: `area <id> stub`, with or without `no-summary`. */
+export const isStub = (config: OspfConfig, area: number): boolean =>
+  areaSettings(config, area)?.stub !== undefined;
+
+/** Whether the router redistributes routes into OSPF, which makes it an AS boundary router. */
+export const isBoundary = (config: OspfConfig): boolean =>
+  config.redistributeStatic !== undefined ||
+  config.redistributeConnected !== undefined ||
+  config.defaultOriginate !== undefined;
 
 export const STATE_NAMES: Record<OspfNeighborState, string> = {
   down: 'DOWN',

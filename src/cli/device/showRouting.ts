@@ -24,10 +24,11 @@ const CODE: Record<Route['source'], string> = {
   eigrp: 'D',
 };
 
-/** A route's code, as `D`, `S*` or `D*EX`: the candidate default star goes after the first letter. */
+/** A route's code, as `D`, `S*`, `D*EX`, `O IA` or `O*E2`: the candidate default star goes after the first letter. */
 function codeOf(route: Route): string {
   const star = isDefault(route) ? '*' : '';
   if ('external' in route && route.external) return `${CODE[route.source]}${star || ' '}EX`;
+  if ('ospf' in route && route.ospf) return `${CODE[route.source]}${star || ' '}${route.ospf}`;
   return CODE[route.source] + star;
 }
 

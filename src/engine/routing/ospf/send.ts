@@ -72,6 +72,7 @@ export function sendHello(ctx: OspfContext, process: Process, iface: Iface) {
       helloInterval: hello,
       deadInterval: dead,
       priority: iface.priority,
+      stub: iface.stub,
       dr: iface.dr,
       bdr: iface.bdr,
       neighbors: [...iface.neighbors.keys()].sort(compareAddresses),

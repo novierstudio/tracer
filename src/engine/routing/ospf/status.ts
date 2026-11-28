@@ -1,4 +1,5 @@
 import type { InterfaceId, Ipv4Address, Ipv4Cidr } from '@/model';
+import type { Lsa } from '../../pdu';
 import type { OspfTimers } from '../timers';
 
 /** A neighbour's progress toward a full adjacency, as RFC 2328 names the states. */
@@ -51,6 +52,30 @@ export type OspfInterfaceStatus = {
   readonly neighbors: readonly OspfNeighborStatus[];
 };
 
+/** One LSA in the database, aged to now, with the checksum its header carries. */
+export type OspfLsaStatus = { readonly lsa: Lsa; readonly checksum: number };
+
+/** One area the router has interfaces in, with its database but for external LSAs. */
+export type OspfAreaStatus = {
+  readonly id: number;
+  readonly interfaces: number;
+  /** Router, network and summary LSAs, by type, link state ID, then advertising router. */
+  readonly lsas: readonly OspfLsaStatus[];
+};
+
+/** A path to an area border or AS boundary router, as `show ip ospf border-routers` lists it. */
+export type OspfBorderRouterStatus = {
+  readonly routerId: Ipv4Address;
+  readonly cost: number;
+  readonly via: Ipv4Address;
+  readonly interface: InterfaceId;
+  readonly abr: boolean;
+  readonly asbr: boolean;
+  readonly area: number;
+  /** Reached through another area's summary. */
+  readonly inter: boolean;
+};
+
 /** What `show ip protocols` and `show ip ospf` read of a router's OSPF process as it runs. */
 export type OspfStatus = {
   readonly processId: number;
@@ -62,4 +87,16 @@ export type OspfStatus = {
   readonly interfaces: readonly OspfInterfaceStatus[];
   /** The routers whose LSAs gave this router routes, by router ID, with when that LSA arrived. */
   readonly sources: readonly { readonly routerId: Ipv4Address; readonly lastUpdateMs: number }[];
+  /** It has interfaces in more than one area. */
+  readonly abr: boolean;
+  /** It redistributes routes into OSPF. */
+  readonly asbr: boolean;
+  /** How many times SPF has run. */
+  readonly spfRuns: number;
+  /** By area ID. */
+  readonly areas: readonly OspfAreaStatus[];
+  /** The external LSAs, which belong to no one area, by link state ID then advertising router. */
+  readonly externals: readonly OspfLsaStatus[];
+  /** Intra-area paths first, then inter-area ones, each by router ID. */
+  readonly borderRouters: readonly OspfBorderRouterStatus[];
 };

@@ -58,6 +58,8 @@ export type Iface = {
   /** The working interface it runs on, as the IP stack derives it. */
   ip: IpInterface;
   readonly area: number;
+  /** Whether its area is a stub area, which neighbours must agree on. */
+  readonly stub: boolean;
   readonly type: OspfNetworkType;
   cost: number;
   priority: number;
@@ -71,16 +73,43 @@ export type Iface = {
   helloAt: SimTime | undefined;
 };
 
+/** An LSA as its originator describes it, before it has an age and a sequence number. */
+export type LsaBody = Lsa extends infer Each
+  ? Each extends Lsa
+    ? Omit<Each, 'age' | 'sequence'>
+    : never
+  : never;
+
 /** An LSA in the database: its age grows from `age` at `receivedAt`. */
 export type Stored = { readonly lsa: Lsa; readonly receivedAt: SimTime };
+
+/**
+ * How OSPF learned a route, which it prefers in this order whatever the cost: within an area,
+ * from another area, or from outside OSPF at type 1 or type 2 metrics.
+ */
+export type RouteKind = 'intra' | 'inter' | 'E1' | 'E2';
 
 /** A network SPF reached, and the neighbours to forward through. */
 export type SpfRoute = {
   readonly prefix: Ipv4Cidr;
+  readonly kind: RouteKind;
+  /** The path's cost, or a type 2 external's own metric. */
   readonly cost: number;
   readonly hops: readonly { readonly via: Ipv4Address; readonly interface: InterfaceId }[];
   /** When SPF first found it as it is now, as `show ip route` ages it. */
   readonly since: SimTime;
+};
+
+/** An area border or AS boundary router this router has a path to, for `show ip ospf border-routers`. */
+export type BorderRouter = {
+  readonly routerId: Ipv4Address;
+  readonly cost: number;
+  readonly hops: SpfRoute['hops'];
+  readonly abr: boolean;
+  readonly asbr: boolean;
+  readonly area: number;
+  /** Reached through another area's summary, rather than within the area. */
+  readonly inter: boolean;
 };
 
 /** A running OSPF process. A new router ID or timer profile starts a new one. */
@@ -96,7 +125,16 @@ export type Process = {
   routes: Map<string, SpfRoute>;
   /** The routers SPF reached, for the routing information sources. */
   reached: Ipv4Address[];
+  borderRouters: BorderRouter[];
+  /** Whether it has interfaces in more than one area: the B bit of its router LSAs. */
+  abr: boolean;
+  /** Whether it redistributes routes into OSPF: the E bit of its router LSAs. */
+  asbr: boolean;
   spfPending: boolean;
+  /** How many times SPF has run, as `show ip ospf` counts it. */
+  spfRuns: number;
+  /** The refresh timer fired: the summaries SPF originates go out again too. */
+  refreshPending: boolean;
 };
 
 export type OspfState = {
