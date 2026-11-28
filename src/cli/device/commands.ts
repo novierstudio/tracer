@@ -68,6 +68,7 @@ import {
   removePortChannel,
 } from './etherchannel';
 import { portSecurityCommands } from './portSecurity';
+import { countVlanChange, isVtpClient, VTP_CLIENT_REFUSAL, vtpCommands } from './vtp';
 import {
   showInterfacesSwitchport,
   showInterfacesTrunk,
@@ -998,14 +999,24 @@ const DEFAULT_VLAN = VlanId.parse(1);
 const defaultVlanName = (vlan: VlanId) =>
   vlan === DEFAULT_VLAN ? 'default' : `VLAN${String(vlan).padStart(4, '0')}`;
 
-/** `switchport access vlan` on a VLAN the switch lacks creates it, as IOS does. */
+/**
+ * `switchport access vlan` on a VLAN the switch lacks creates it, as IOS does, except on a VTP
+ * client, which takes its VLANs from the domain.
+ */
 function ensureVlan(ctx: SwitchContext, vlan: VlanId): readonly string[] {
-  if (vlan in ctx.device.config.vlans) return NOTHING;
+  if (vlan in ctx.device.config.vlans || isVtpClient(ctx)) return NOTHING;
   ctx.device.config.vlans[vlan] = { name: defaultVlanName(vlan) };
+  countVlanChange(ctx);
   return [`% Access VLAN does not exist. Creating vlan ${vlan}`];
 }
 
 const VLAN_NAME_MAX = 32;
+
+function renameVlan(ctx: SwitchContext, vlan: VlanId, name: string) {
+  if (ctx.device.config.vlans[vlan]?.name === name) return;
+  ctx.device.config.vlans[vlan] = { name };
+  countVlanChange(ctx);
+}
 
 function eachSwitchport(
   ctx: SwitchContext,
@@ -1182,19 +1193,27 @@ export const switchCommands = [
   ...spanningTreeCommands,
   ...etherchannelCommands,
   ...portSecurityCommands,
+  ...vtpCommands,
   switchCommand({
     modes: GLOBAL,
     path: [keyword('vlan', 'Vlan commands'), num('vlan', 1, 4094, 'ISL VLAN IDs 1-1005')],
     to: ({ vlan }) => ({ kind: 'vlan-config', vlan: VlanId.parse(vlan) }),
     run: ({ vlan }, ctx) => {
+      if (isVtpClient(ctx)) return ctx.reject(VTP_CLIENT_REFUSAL);
       const id = VlanId.parse(vlan);
-      ctx.device.config.vlans[id] ??= { name: defaultVlanName(id) };
+      if (id in ctx.device.config.vlans) return NOTHING;
+      ctx.device.config.vlans[id] = { name: defaultVlanName(id) };
+      countVlanChange(ctx);
       return NOTHING;
     },
     no: ({ vlan }, ctx) => {
       if (vlan === undefined) return ctx.reject('% Incomplete command.');
       if (vlan === DEFAULT_VLAN) return ctx.reject('Default VLAN 1 may not be deleted.');
-      delete ctx.device.config.vlans[VlanId.parse(vlan)];
+      if (isVtpClient(ctx)) return ctx.reject(VTP_CLIENT_REFUSAL);
+      const id = VlanId.parse(vlan);
+      if (!(id in ctx.device.config.vlans)) return NOTHING;
+      delete ctx.device.config.vlans[id];
+      countVlanChange(ctx);
       return NOTHING;
     },
   }),
@@ -1203,11 +1222,11 @@ export const switchCommands = [
     path: [keyword('name', 'Ascii name of the VLAN'), word('name', 'The ascii name for the VLAN')],
     run: ({ name }, ctx, mode) => {
       if (name.length > VLAN_NAME_MAX) return ctx.reject('% Name too long');
-      ctx.device.config.vlans[mode.vlan] = { name };
+      renameVlan(ctx, mode.vlan, name);
       return NOTHING;
     },
     no: (_a, ctx, mode) => {
-      ctx.device.config.vlans[mode.vlan] = { name: defaultVlanName(mode.vlan) };
+      renameVlan(ctx, mode.vlan, defaultVlanName(mode.vlan));
       return NOTHING;
     },
   }),

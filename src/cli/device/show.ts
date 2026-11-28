@@ -38,6 +38,7 @@ import { ipv6InterfaceLines, ipv6RouteLine } from './ipv6Config';
 import { sshLines, usernameLines } from './remote';
 import { eigrpLines } from './eigrpConfig';
 import { accessListLines, natLines } from './showAclNat';
+import { transparentVlanLines, vtpConfigLines } from './vtpConfig';
 
 export const UNSUPPORTED_MARKER = '! unsupported in Tracer';
 
@@ -449,7 +450,9 @@ export function runningConfig(device: IosDevice): string[] {
     if (device.config.loadBalance) {
       out.push(`port-channel load-balance ${device.config.loadBalance}`, '!');
     }
+    out.push(...vtpConfigLines(device.config));
     out.push(...spanningTreeLines(device.config), '!');
+    out.push(...transparentVlanLines(device.config));
   }
   for (const entry of interfaceEntries(device)) out.push(...interfaceBlock(entry), '!');
   if (device.kind === 'router' && device.config.eigrp) {
