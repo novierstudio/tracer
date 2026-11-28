@@ -171,6 +171,94 @@ export function swapNic(
   );
 }
 
+/**
+ * Fits a router's or switch's modules, as its Physical tab does with the power off. `ports` is
+ * the device's whole port list with them fitted. A port that stays keeps its MAC, its config and
+ * its cable; a new one gets factory settings; a removed one loses its cable.
+ */
+export function setModules(
+  topology: Topology,
+  {
+    device,
+    modules,
+    ports: specs,
+  }: { device: DeviceId; modules: Record<string, string>; ports: readonly PortSpec[] },
+  ids: IdSource,
+): CommandResult {
+  const current = topology.devices[device];
+  if (!current) return err({ kind: 'device-not-found', device });
+  if (current.powered) return err({ kind: 'device-powered-on', device });
+
+  const kept = new Map(current.ports.map((port) => [port.id, port]));
+  const freshMac = macAllocator(topology, ids);
+  const ports = specs.map((spec): Port => {
+    const old = kept.get(spec.id);
+    if (old && old.kind === spec.kind && portFiber(old) === Boolean(spec.fiber)) return old;
+    return buildPort(spec, freshMac);
+  });
+  const portIds = new Set<string>(
+    ports.filter((port) => kept.get(port.id) === port).map((p) => p.id),
+  );
+  const next = produce(current, (draft) => {
+    draft.ports = ports;
+    draft.modules = modules;
+    if (draft.kind === 'router' || draft.kind === 'switch') {
+      const interfaces: Record<string, unknown> = draft.config.interfaces;
+      for (const id of Object.keys(interfaces)) if (!portIds.has(id)) delete interfaces[id];
+      for (const port of ports) {
+        if (!portIds.has(port.id)) interfaces[port.id] = factoryInterface(draft.kind);
+      }
+    }
+    if (draft.kind === 'router') {
+      for (const id of Object.keys(draft.config.subinterfaces)) {
+        if (!portIds.has(id.slice(0, id.indexOf('.')))) {
+          delete draft.config.subinterfaces[id as keyof typeof draft.config.subinterfaces];
+        }
+      }
+    }
+  });
+  const problem = findDeviceProblem(next);
+  if (problem) return err(problem);
+  return ok(
+    produce(putDevice(topology, next), (draft) => {
+      for (const link of Object.values(topology.links)) {
+        if ([link.a, link.b].some((end) => end.device === device && !portIds.has(end.port))) {
+          delete draft.links[link.id];
+        }
+      }
+    }),
+  );
+}
+
+const portFiber = (port: Port) => port.kind !== 'serial' && 'fiber' in port && port.fiber === true;
+
+function factoryInterface(kind: 'router' | 'switch'): RoutedInterface | SwitchInterface {
+  return kind === 'router'
+    ? { shutdown: true }
+    : { shutdown: false, switchport: { mode: 'access', vlan: DEFAULT_VLAN } };
+}
+
+/** Hands out MACs no device in `topology` has. */
+function macAllocator(topology: Topology, ids: IdSource): () => MacAddress {
+  const taken = new Set(
+    Object.values(topology.devices).flatMap((device) =>
+      device.ports.flatMap((port) => (port.kind === 'serial' ? [] : [port.mac])),
+    ),
+  );
+  return () => {
+    let mac = ids.macAddress();
+    while (taken.has(mac)) mac = ids.macAddress();
+    taken.add(mac);
+    return mac;
+  };
+}
+
+function buildPort(port: PortSpec, freshMac: () => MacAddress): Port {
+  if (port.kind === 'serial') return { kind: 'serial', id: port.id };
+  if (port.kind === 'wireless') return { kind: 'wireless', id: port.id, mac: freshMac() };
+  return { kind: port.kind, id: port.id, mac: freshMac(), ...(port.fiber && { fiber: true }) };
+}
+
 export function removeLinks(topology: Topology, ids: readonly LinkId[]): Topology {
   return produce(topology, (draft) => {
     for (const id of ids) delete draft.links[id];
@@ -293,6 +381,8 @@ export type DeviceSpec = {
     hostname: Hostname;
     position: Point;
     ports: readonly PortSpec[];
+    /** The module in each slot, for a model that has slots. `ports` has their ports. */
+    modules?: Record<string, string>;
     /** A model's defaults. Each field it names replaces the factory value; `hostname` wins. */
     config?: Partial<Omit<ConfigOf<K>, 'hostname'>>;
   };
@@ -318,24 +408,16 @@ export function createDevice(
   let id = ids.deviceId();
   while (id in topology.devices) id = ids.deviceId();
 
-  const takenMacs = new Set(
-    Object.values(topology.devices).flatMap((device) =>
-      device.ports.flatMap((port) => (port.kind === 'serial' ? [] : [port.mac])),
-    ),
-  );
-  const freshMac = (): MacAddress => {
-    let mac = ids.macAddress();
-    while (takenMacs.has(mac)) mac = ids.macAddress();
-    takenMacs.add(mac);
-    return mac;
+  const freshMac = macAllocator(topology, ids);
+  const ports = spec.ports.map((port) => buildPort(port, freshMac));
+  const fields = {
+    id,
+    model: spec.model,
+    position: spec.position,
+    powered: true,
+    ports,
+    ...(spec.modules && { modules: spec.modules }),
   };
-
-  const ports = spec.ports.map((port): Port => {
-    if (port.kind === 'serial') return { kind: 'serial', id: port.id };
-    if (port.kind === 'wireless') return { kind: 'wireless', id: port.id, mac: freshMac() };
-    return { kind: port.kind, id: port.id, mac: freshMac(), ...(port.fiber && { fiber: true }) };
-  });
-  const fields = { id, model: spec.model, position: spec.position, powered: true, ports };
   const { hostname } = spec;
 
   switch (spec.kind) {

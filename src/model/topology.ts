@@ -1154,6 +1154,11 @@ const deviceFields = {
   position: Point,
   powered: z.boolean(),
   ports: z.array(Port),
+  /**
+   * The module in each of a router's or switch's slots, such as `{ "0/0": "HWIC-2T" }`, by slot.
+   * Its ports are in `ports`. Absent in files from before modules: the model's own then.
+   */
+  modules: z.record(z.string(), z.string()).optional(),
 };
 
 const DeviceShape = z.discriminatedUnion('kind', [
@@ -1352,7 +1357,8 @@ export type TopologyError =
       cable: Cable;
       portKind: JackKind;
     }
-  | { kind: 'same-port'; endpoint: Endpoint };
+  | { kind: 'same-port'; endpoint: Endpoint }
+  | { kind: 'device-powered-on'; device: DeviceId };
 
 export function findDeviceProblem(device: Device): TopologyError | undefined {
   const portIds = new Set<string>();
@@ -1448,6 +1454,8 @@ export function describeTopologyError(error: TopologyError): string {
       return `A ${error.cable} cable cannot connect to ${error.endpoint.port} on device ${error.endpoint.device}`;
     case 'same-port':
       return `Both ends of the link are port ${error.endpoint.port} on device ${error.endpoint.device}`;
+    case 'device-powered-on':
+      return 'Turn the device off before you add or remove a module';
     default: {
       const exhaustive: never = error;
       return exhaustive;
