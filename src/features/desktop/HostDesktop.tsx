@@ -1,6 +1,7 @@
 import {
   ChevronLeftIcon,
   FileTextIcon,
+  MailIcon,
   GlobeIcon,
   NetworkIcon,
   MonitorCogIcon,
@@ -24,6 +25,7 @@ import { cn } from '@/ui/cn';
 import { EmptyState } from '@/ui/empty-state';
 import { Kbd } from '@/ui/kbd';
 import { addressPort, configAddressing, nicConnected, type HostDevice } from './format';
+import { EmailApp } from './EmailApp';
 import { HostPrompt } from './HostPrompt';
 import { hostBackend } from './registry';
 import { TerminalApp } from './TerminalApp';
@@ -31,7 +33,7 @@ import { TextEditor } from './TextEditor';
 import { WebBrowser } from './WebBrowser';
 import { WirelessApp } from './WirelessApp';
 
-type App = 'ip' | 'prompt' | 'terminal' | 'browser' | 'wireless' | 'editor';
+type App = 'ip' | 'prompt' | 'terminal' | 'browser' | 'wireless' | 'editor' | 'email';
 
 const APPS: Record<App, { title: string; blurb: string; icon: LucideIcon; tile: string }> = {
   ip: {
@@ -69,6 +71,12 @@ const APPS: Record<App, { title: string; blurb: string; icon: LucideIcon; tile: 
     blurb: 'Write and edit files on this disk',
     icon: FileTextIcon,
     tile: 'bg-proto-arp text-surface-1',
+  },
+  email: {
+    title: 'Email',
+    blurb: 'Send and receive mail',
+    icon: MailIcon,
+    tile: 'bg-proto-dns text-surface-1',
   },
 };
 
@@ -133,6 +141,8 @@ function Desktop({ device, focusPrompt }: Props) {
           <h4 className="border-t border-line pt-3 text-2xs font-medium text-fg-3">IPv6</h4>
           <HostIpv6Form device={device} ipv6Status={hostBackend.ipv6Status} />
         </div>
+      ) : app === 'email' ? (
+        <EmailApp device={device} backend={hostBackend} />
       ) : app === 'editor' ? (
         <TextEditor device={device} />
       ) : app === 'browser' ? (
