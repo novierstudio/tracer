@@ -25,9 +25,11 @@ import {
   updateConfig,
   type Device,
   type Link,
+  type MailAccount,
   type ServerServices,
   type Topology,
 } from '@/model';
+import { DEFAULT_SERVER_SERVICES } from '@/model/defaults';
 import { SAMPLE_LABS } from './catalog';
 
 const CREATED = new Date('2026-11-25T00:00:00.000Z');
@@ -85,7 +87,15 @@ function labBuilder(id: string) {
       topology = unwrap(updateConfig(topology, toConfigUpdate({ ...device, config } as IosDevice)));
     },
 
-    pc(name: string, x: number, y: number, address: string, gateway?: string, dns?: string) {
+    pc(
+      name: string,
+      x: number,
+      y: number,
+      address: string,
+      gateway?: string,
+      dns?: string,
+      mail?: MailAccount,
+    ) {
       add(name, 'pc', x, y, (device) => {
         if (device.kind !== 'pc') throw new Error(`${name} is not a PC`);
         device.config.ipv4 = {
@@ -94,6 +104,7 @@ function labBuilder(id: string) {
           gateway: gateway === undefined ? undefined : Ipv4Address.parse(gateway),
           ...(dns !== undefined && { dns: Ipv4Address.parse(dns) }),
         };
+        if (mail) device.config.mail = mail;
       });
     },
 
@@ -1110,7 +1121,78 @@ function hsrpGateway() {
   return lab.topology;
 }
 
+/** A PC's Email app, set up for `user` at lab.local on Server1. */
+const labMail = (name: string, user: string): MailAccount => ({
+  name,
+  address: `${user}@lab.local`,
+  incoming: '192.168.1.20',
+  outgoing: '192.168.1.20',
+  username: user,
+  password: 'cisco',
+});
+
+function serverServicesLab() {
+  const lab = labBuilder('server-services');
+  lab.ios('R1', 'router-2g2s', 232, 40, [
+    'interface GigabitEthernet0/0',
+    ' ip address 192.168.1.1 255.255.255.0',
+    ' no shutdown',
+    'interface GigabitEthernet0/1',
+    ' ip address 192.168.2.1 255.255.255.0',
+    ' no shutdown',
+    'ntp server 192.168.1.20',
+    'logging host 192.168.1.20',
+  ]);
+  lab.ios('SW1', 'switch-24', 232, 232, []);
+  lab.pc('PC1', 40, 424, '192.168.1.10/24', '192.168.1.1', undefined, labMail('User One', 'user1'));
+  lab.pc(
+    'PC2',
+    232,
+    424,
+    '192.168.1.11/24',
+    '192.168.1.1',
+    undefined,
+    labMail('User Two', 'user2'),
+  );
+  lab.server('Server1', 424, 424, '192.168.1.20/24', {
+    ...DEFAULT_SERVER_SERVICES,
+    email: {
+      smtp: true,
+      pop3: true,
+      domain: 'lab.local',
+      users: [
+        { username: 'user1', password: 'cisco' },
+        { username: 'user2', password: 'cisco' },
+      ],
+    },
+  });
+  lab.cable(['R1', 'GigabitEthernet0/0'], ['SW1', 'GigabitEthernet0/1']);
+  lab.cable(['PC1', 'FastEthernet0'], ['SW1', 'FastEthernet0/1']);
+  lab.cable(['PC2', 'FastEthernet0'], ['SW1', 'FastEthernet0/2']);
+  lab.cable(['Server1', 'GigabitEthernet0'], ['SW1', 'GigabitEthernet0/2']);
+  lab.note(
+    'tftp',
+    544,
+    -16,
+    'Server1 runs TFTP, FTP, email, NTP and syslog. Back up R1 with `copy running-config tftp:` and find R1-confg in Server1’s TFTP list.',
+  );
+  lab.note(
+    'clock',
+    544,
+    120,
+    'R1 takes its clock from Server1 by NTP and logs to it: shut Gi0/1 and read the messages in Server1’s SYSLOG.',
+  );
+  lab.note(
+    'mail',
+    544,
+    256,
+    'PC1 is user1@lab.local and PC2 is user2@lab.local, password cisco. FTP logs in as cisco, password cisco.',
+  );
+  return lab.topology;
+}
+
 export const BUILDERS: Record<string, () => Topology> = {
+  'server-services': serverServicesLab,
   'two-pcs-switch': twoPcsSwitch,
   'two-lans-router': twoLansRouter,
   'static-routes-serial': staticRoutesSerial,
