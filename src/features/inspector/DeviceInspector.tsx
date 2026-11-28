@@ -1,6 +1,7 @@
 import { Trash2Icon } from 'lucide-react';
 import { Switch } from 'radix-ui';
 import { useId, useState, type ReactNode } from 'react';
+import { findDeviceModel } from '@/devices/catalog';
 import type { HostAddressing } from '@/engine/api';
 import { HostDesktop } from '@/features/desktop/HostDesktop';
 import { hostBackend } from '@/features/desktop/registry';
@@ -18,6 +19,7 @@ import { HostAddressForm } from './HostAddressForm';
 import { HostIpv6Form } from './HostIpv6Form';
 import { HostnameField } from './HostnameField';
 import { InterfacesTab } from './InterfacesTab';
+import { PhysicalTab } from './PhysicalTab';
 import { ServicesTab } from './ServicesTab';
 import { WirelessConfigTab } from './WirelessConfigTab';
 import { formatCidr } from './ipv4';
@@ -31,7 +33,14 @@ import {
   type PortRow,
 } from './view';
 
-export const DEVICE_TABS = ['overview', 'interfaces', 'config', 'services', 'console'] as const;
+export const DEVICE_TABS = [
+  'overview',
+  'interfaces',
+  'physical',
+  'config',
+  'services',
+  'console',
+] as const;
 export type DeviceTab = (typeof DEVICE_TABS)[number];
 
 type Props = {
@@ -51,10 +60,14 @@ const hasConsole = (device: Device) =>
 export function DeviceInspector({ device, topology, tab, onTabChange, focusConsole }: Props) {
   const rows = portRows(topology, device);
   const host = isHost(device);
-  // Only a server has services, and a hub has no console; a tab kept from another device falls
-  // back to Config.
+  const model = findDeviceModel(device.model);
+  const modular = model?.slots !== undefined;
+  // Only a server has services, a hub has no console and only a modular device has a Physical
+  // tab; a tab kept from another device falls back to Config.
   const shown =
-    (tab === 'services' && device.kind !== 'server') || (tab === 'console' && !hasConsole(device))
+    (tab === 'services' && device.kind !== 'server') ||
+    (tab === 'console' && !hasConsole(device)) ||
+    (tab === 'physical' && !modular)
       ? 'config'
       : tab;
   return (
@@ -67,6 +80,7 @@ export function DeviceInspector({ device, topology, tab, onTabChange, focusConso
       <TabsList aria-label="Device views" className="shrink-0 border-b border-line px-2 pb-2">
         <TabsTrigger value="overview">Overview</TabsTrigger>
         <TabsTrigger value="interfaces">Interfaces</TabsTrigger>
+        {modular && <TabsTrigger value="physical">Physical</TabsTrigger>}
         <TabsTrigger value="config">Config</TabsTrigger>
         {device.kind === 'server' && <TabsTrigger value="services">Services</TabsTrigger>}
         {hasConsole(device) && (
@@ -80,6 +94,11 @@ export function DeviceInspector({ device, topology, tab, onTabChange, focusConso
         <TabsContent value="interfaces" className="pb-3">
           <InterfacesTab device={device} topology={topology} />
         </TabsContent>
+        {model?.slots && (
+          <TabsContent value="physical">
+            <PhysicalTab device={device} model={model} />
+          </TabsContent>
+        )}
         <TabsContent value="config">
           <ConfigTab device={device} rows={rows} />
         </TabsContent>
