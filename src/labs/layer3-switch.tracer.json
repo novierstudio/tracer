@@ -495,7 +495,10 @@
             }
           ]
         },
-        "ipRouting": true
+        "ipRouting": true,
+        "vtp": {
+          "revision": 4
+        }
       }
     },
     "dev_lsPC1": {

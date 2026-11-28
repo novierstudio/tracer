@@ -951,6 +951,10 @@ function homeWireless() {
     904,
     232,
     'Server1 at 198.51.100.10 stands for the Internet. Ping it, or browse to it, from any laptop.',
+  );
+  return lab.topology;
+}
+
 function vtpServerClients() {
   const lab = labBuilder('vtp-server-clients');
   const trunks = (...ports: string[]) =>
@@ -984,8 +988,8 @@ function vtpServerClients() {
   lab.pc('PC3', 328, 424, '192.168.20.11/24');
   lab.pc('PC2', 520, 424, '192.168.10.12/24');
   lab.pc('PC4', 712, 424, '192.168.20.12/24');
-  lab.cable(['SW1', 'GigabitEthernet0/1'], ['SW2', 'GigabitEthernet0/1'], { cable: 'crossover' });
-  lab.cable(['SW1', 'GigabitEthernet0/2'], ['SW3', 'GigabitEthernet0/1'], { cable: 'crossover' });
+  lab.cable(['SW1', 'GigabitEthernet0/1'], ['SW2', 'GigabitEthernet0/1']);
+  lab.cable(['SW1', 'GigabitEthernet0/2'], ['SW3', 'GigabitEthernet0/1']);
   lab.cable(['PC1', 'FastEthernet0'], ['SW2', 'FastEthernet0/1']);
   lab.cable(['PC3', 'FastEthernet0'], ['SW2', 'FastEthernet0/2']);
   lab.cable(['PC2', 'FastEthernet0'], ['SW3', 'FastEthernet0/1']);
@@ -1085,12 +1089,12 @@ function hsrpGateway() {
   lab.ios('SW1', 'switch-24', 424, 424, []);
   lab.pc('PC1', 424, 616, '192.168.1.10/24', '192.168.1.1');
   lab.pc('Server', 808, 40, '192.168.2.10/24', '192.168.2.1');
-  lab.cable(['R1', 'GigabitEthernet0/1'], ['R3', 'GigabitEthernet0/0'], { cable: 'crossover' });
-  lab.cable(['R2', 'GigabitEthernet0/1'], ['R3', 'GigabitEthernet0/1'], { cable: 'crossover' });
+  lab.cable(['R1', 'GigabitEthernet0/1'], ['R3', 'GigabitEthernet0/0']);
+  lab.cable(['R2', 'GigabitEthernet0/1'], ['R3', 'GigabitEthernet0/1']);
   lab.cable(['R1', 'GigabitEthernet0/0'], ['SW1', 'GigabitEthernet0/1']);
   lab.cable(['R2', 'GigabitEthernet0/0'], ['SW1', 'GigabitEthernet0/2']);
   lab.cable(['PC1', 'FastEthernet0'], ['SW1', 'FastEthernet0/1']);
-  lab.cable(['Server', 'FastEthernet0'], ['R3', 'GigabitEthernet0/2'], { cable: 'crossover' });
+  lab.cable(['Server', 'FastEthernet0'], ['R3', 'GigabitEthernet0/2']);
   lab.note(
     'vip',
     -40,
