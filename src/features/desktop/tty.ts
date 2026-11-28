@@ -29,8 +29,8 @@ export function createHostTty(shell: HostShell): HostTty {
   let line: LineState = initialState(80, 24);
   let transcript = GREETING.map((text) => `${text}\r\n`).join('') + PROMPT;
   let job: AbortController | undefined;
-  /** A Telnet or SSH login the running job handed the keyboard to. */
-  let attached: Tty | undefined;
+  /** A Telnet, SSH or FTP session the running job handed the keyboard to. */
+  let attached: { tty: Tty; interruptible: boolean } | undefined;
   const views = new Set<(out: string) => void>();
 
   const write = (out: string) => {
@@ -55,15 +55,19 @@ export function createHostTty(shell: HostShell): HostTty {
         transcript = '';
         for (const view of views) view(CLEAR);
       },
-      attach: (remote, done) => {
+      attach: (remote, done, { interruptible = false, onLog } = {}) => {
         if (job !== controller) return Promise.resolve();
         const inner = createTty(remote);
         write(inner.transcript);
         const unsubscribe = inner.subscribe(write);
-        attached = inner;
+        const current = { tty: inner, interruptible };
+        attached = current;
+        onLog?.((lines) => {
+          if (attached === current) inner.log(lines);
+        });
         return done.finally(() => {
           unsubscribe();
-          if (attached === inner) attached = undefined;
+          if (attached === current) attached = undefined;
         });
       },
     };
@@ -114,7 +118,8 @@ export function createHostTty(shell: HostShell): HostTty {
       return line.history;
     },
     input(data, { cols, rows }) {
-      if (attached) return attached.input(data, { cols, rows });
+      if (attached?.interruptible && data.includes('\x03')) return job?.abort();
+      if (attached) return attached.tty.input(data, { cols, rows });
       if (cols !== line.cols || rows !== line.rows) {
         line = reduce(line, { kind: 'resize', cols, rows }, session).state;
       }
