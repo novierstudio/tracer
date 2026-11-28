@@ -13,7 +13,15 @@ export const CATEGORY_LABELS: Record<DeviceCategory, string> = {
 };
 
 export type DeviceIconName =
-  'router' | 'switch' | 'multilayer-switch' | 'pc' | 'laptop' | 'server' | 'hub';
+  | 'router'
+  | 'switch'
+  | 'multilayer-switch'
+  | 'pc'
+  | 'laptop'
+  | 'server'
+  | 'hub'
+  | 'access-point'
+  | 'wireless-router';
 
 /** The icon for a device whose model the catalog does not know, by its kind. */
 export const KIND_ICONS: Record<DeviceKind, DeviceIconName> = {
@@ -22,6 +30,8 @@ export const KIND_ICONS: Record<DeviceKind, DeviceIconName> = {
   pc: 'pc',
   server: 'server',
   hub: 'hub',
+  accessPoint: 'access-point',
+  wirelessRouter: 'wireless-router',
 };
 
 export type DeviceModel = {
@@ -41,6 +51,7 @@ const PORT_PREFIX: Record<PortKind, string> = {
   fastEthernet: 'FastEthernet',
   gigabitEthernet: 'GigabitEthernet',
   serial: 'Serial',
+  wireless: 'Wireless',
 };
 
 /** `ports('gigabitEthernet', '0/', 0, 2)` is GigabitEthernet0/0 and GigabitEthernet0/1. */
@@ -179,6 +190,7 @@ const PORT_ABBREVIATION: Record<PortKind, string> = {
   fastEthernet: 'Fa',
   gigabitEthernet: 'Gi',
   serial: 'Serial',
+  wireless: 'Wireless',
 };
 
 /** "2× Gi, 2× Serial", in the order the kinds first appear. Fiber ports say so. */

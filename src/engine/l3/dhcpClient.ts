@@ -10,7 +10,7 @@ import {
   type EthernetFrame,
 } from '../pdu';
 import { timerKey, type IpContext } from './context';
-import { hostPort, isHost } from './hostAddress';
+import { addressedPort } from './hostAddress';
 import { INITIAL_TTL, originate } from './output';
 import { udp } from './udp';
 
@@ -103,18 +103,19 @@ const TIMER = timerKey({ kind: 'dhcp' });
 
 const LINK_LOCAL_PREFIX = 16 as PrefixLength;
 
-/** A powered host whose config asks for DHCP starts asking once it boots. */
+/**
+ * A powered host whose config asks for DHCP starts asking once it boots, and so does a home
+ * router set to take its Internet address by DHCP.
+ */
 export function bootDhcp(ctx: DeviceContext) {
-  const { device } = ctx;
-  if (isHost(device) && device.config.ipv4.mode === 'dhcp') ctx.setTimer(TIMER, ms(0));
+  if (addressedPort(ctx.device)?.ipv4.mode === 'dhcp') ctx.setTimer(TIMER, ms(0));
 }
 
-/** The port the client runs on, while the host wants DHCP and that port's link is up. */
+/** The port the client runs on, while the device wants DHCP there and that port's link is up. */
 function clientPort(ctx: IpContext) {
-  const { device } = ctx;
-  if (!isHost(device) || device.config.ipv4.mode !== 'dhcp') return undefined;
-  const port = hostPort(device);
-  return port && ctx.portUp(port.id) ? port : undefined;
+  const own = addressedPort(ctx.device);
+  if (own?.ipv4.mode !== 'dhcp') return undefined;
+  return ctx.portUp(own.port.id) ? own.port : undefined;
 }
 
 /** Tells whoever waits on the client how it went. */

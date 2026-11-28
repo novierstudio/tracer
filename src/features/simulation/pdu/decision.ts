@@ -315,7 +315,14 @@ const isGroup = (mac: MacAddress) => (parseInt(mac.slice(0, 2), 16) & 1) === 1;
 export function ownAddresses(device: Device): Ipv4Address[] {
   switch (device.kind) {
     case 'hub':
+    case 'accessPoint':
       return [];
+    case 'wirelessRouter': {
+      const { wan, lan } = device.config;
+      return wan.mode === 'static' && wan.address
+        ? [lan.address, wan.address.address]
+        : [lan.address];
+    }
     case 'pc':
     case 'server':
       return device.config.ipv4.mode === 'static' && device.config.ipv4.address
@@ -671,6 +678,8 @@ function ownIpv6Addresses(device: Device): Ipv6Address[] {
     }
     case 'switch':
     case 'hub':
+    case 'accessPoint':
+    case 'wirelessRouter':
       return [];
   }
 }

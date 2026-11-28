@@ -1,4 +1,5 @@
 import type { Device, Link, PortId } from '@/model';
+import type { Association } from '@/model/wireless';
 import { CABLE_MEDIUM, copperWorks, portMedium } from '@/model/cabling';
 
 function adminUp(device: Device, port: PortId): boolean {
@@ -9,6 +10,8 @@ function adminUp(device: Device, port: PortId): boolean {
     case 'pc':
     case 'server':
     case 'hub':
+    case 'accessPoint':
+    case 'wirelessRouter':
       return true;
     default: {
       const exhaustive: never = device;
@@ -34,7 +37,13 @@ function endUp(device: Device | undefined, port: PortId, link: Link) {
  * A link is up when both ends are and the cable works between them. A copper link between Fast
  * Ethernet ports stays down on the wrong cable, as in Packet Tracer: see `copperWorks`.
  */
-export function linkUp(link: Link, a: Device | undefined, b: Device | undefined): boolean {
+export function linkUp(
+  link: Link | Association,
+  a: Device | undefined,
+  b: Device | undefined,
+): boolean {
+  // An association exists only while both ends are powered and the radio admits the client.
+  if (link.cable === 'wireless') return !!a?.powered && !!b?.powered;
   const aEnd = endUp(a, link.a.port, link);
   const bEnd = endUp(b, link.b.port, link);
   if (!aEnd || !bEnd) return false;

@@ -172,6 +172,8 @@ export function ipv6Interfaces(device: Device, links: Links, state: Ipv6State): 
     }
     case 'switch':
     case 'hub':
+    case 'accessPoint':
+    case 'wirelessRouter':
       return [];
     default: {
       const exhaustive: never = device;

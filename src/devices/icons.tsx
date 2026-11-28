@@ -56,6 +56,23 @@ const GLYPHS: Record<DeviceIconName, ReactNode> = {
       <path d="M14 24h20M17.5 20.5 14 24l3.5 3.5M30.5 20.5 34 24l-3.5 3.5" stroke={ACCENT} />
     </>
   ),
+  // A puck on the ceiling, with the waves it sends.
+  'access-point': (
+    <>
+      <rect x="12" y="29" width="24" height="9" rx="4.5" />
+      <path d="M18.5 22.5a8 8 0 0 1 11 0M14.5 18a14 14 0 0 1 19 0" stroke={ACCENT} />
+      <circle cx="24" cy="33.5" r="1.5" fill={ACCENT} stroke="none" />
+    </>
+  ),
+  // A home router: a box with two antennas and its waves.
+  'wireless-router': (
+    <>
+      <rect x="9" y="26" width="30" height="11" rx="3" />
+      <path d="M15 26v-9M33 26v-9" />
+      <path d="M20 17.5a6 6 0 0 1 8 0M17 13.5a11 11 0 0 1 14 0" stroke={ACCENT} />
+      <path d="M15 31.5h2M20 31.5h2M25 31.5h2" />
+    </>
+  ),
 };
 
 type DeviceIconProps = Omit<SVGProps<SVGSVGElement>, 'name'> & { name: DeviceIconName };

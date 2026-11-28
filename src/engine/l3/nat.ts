@@ -1,4 +1,5 @@
 import type { Ipv4Address, NatConfig, NatDynamic } from '@/model';
+import { homeRouterIos } from '@/model/wireless';
 import { ms, type SimDuration, type SimTime } from '../core/time';
 import { IP_PROTOCOL, type Ipv4Packet, type Ipv4Payload } from '../pdu';
 import { filterSettings, flowOf, permits, transportPorts } from './acl';
@@ -53,8 +54,10 @@ const flowTimeout = (protocol: number): SimDuration =>
 export const PAT_FIRST_PORT = 1024;
 const LAST_PORT = 65535;
 
-const natOf = (ctx: IpContext): NatConfig | undefined =>
-  ctx.device.kind === 'router' ? ctx.device.config.nat : undefined;
+function natOf({ device }: IpContext): NatConfig | undefined {
+  if (device.kind === 'router') return device.config.nat;
+  return device.kind === 'wirelessRouter' ? homeRouterIos(device.config).nat : undefined;
+}
 
 const roleOf = (ctx: IpContext, iface: IpInterface) => filterSettings(ctx.device, iface)?.nat;
 

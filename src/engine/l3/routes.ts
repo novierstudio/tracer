@@ -88,7 +88,7 @@ const SOURCE_ORDER: Record<Route['source'], number> = {
 
 /**
  * A host's default gateway, from its config or its DHCP lease, is a static default route, as
- * `route print` shows it. So is a switch's `ip default-gateway`, which its management interface
+ * `route print` shows it, and so is a home router's gateway on its Internet port. So is a switch's `ip default-gateway`, which its management interface
  * uses until `ip routing` turns on its static routes instead.
  */
 function configuredRoutes(
@@ -99,7 +99,8 @@ function configuredRoutes(
     case 'router':
       return device.config.staticRoutes;
     case 'pc':
-    case 'server': {
+    case 'server':
+    case 'wirelessRouter': {
       const gateway = host && gatewayOf(host);
       return gateway
         ? [{ prefix: DEFAULT_ROUTE, nextHop: { kind: 'address', address: gateway } }]
@@ -113,6 +114,7 @@ function configuredRoutes(
         : [];
     }
     case 'hub':
+    case 'accessPoint':
       return [];
     default: {
       const exhaustive: never = device;

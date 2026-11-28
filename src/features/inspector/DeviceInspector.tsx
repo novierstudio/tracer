@@ -19,6 +19,7 @@ import { HostIpv6Form } from './HostIpv6Form';
 import { HostnameField } from './HostnameField';
 import { InterfacesTab } from './InterfacesTab';
 import { ServicesTab } from './ServicesTab';
+import { WirelessConfigTab } from './WirelessConfigTab';
 import { formatCidr } from './ipv4';
 import { DeviceTile, Facts, Mono, PeerButton, STATE_LABELS, Section, StateDot } from './parts';
 import {
@@ -301,6 +302,9 @@ function ConfigTab({ device, rows }: { device: Device; rows: PortRow[] }) {
         </p>
       </Section>
     );
+  }
+  if (device.kind === 'accessPoint' || device.kind === 'wirelessRouter') {
+    return <WirelessConfigTab key={device.id} device={device} />;
   }
   return (
     <>

@@ -7,6 +7,7 @@ import type {
   MacAddress,
 } from '@/model';
 import { DEFAULT_DHCP_LEASE } from '@/model/defaults';
+import { homeRouterIos } from '@/model/wireless';
 import { after, ms, type SimTime } from '../core/time';
 import {
   LIMITED_BROADCAST,
@@ -75,6 +76,7 @@ function poolFor(config: DhcpServerConfig, address: Ipv4Address): [string, Pool]
 /** Every address configured on the router, which no pool may lend whether or not it is up. */
 function ownAddresses(ctx: IpContext): Set<number> {
   const { device } = ctx;
+  if (device.kind === 'wirelessRouter') return new Set([ipv4ToUint32(device.config.lan.address)]);
   if (device.kind !== 'router') return new Set();
   const { interfaces, subinterfaces, virtualInterfaces } = device.config;
   const configured = [
@@ -186,7 +188,12 @@ const replyHeader = (request: DhcpMessage, yiaddr: Ipv4Address = UNSPECIFIED_ADD
  */
 function serve(ctx: IpContext, message: DhcpMessage, arrival: IpInterface | undefined) {
   const { device } = ctx;
-  const config = device.kind === 'router' ? device.config.dhcp : undefined;
+  const config =
+    device.kind === 'router'
+      ? device.config.dhcp
+      : device.kind === 'wirelessRouter'
+        ? homeRouterIos(device.config).dhcp
+        : undefined;
   if (!config) return;
   const network = isSet(message.giaddr)
     ? message.giaddr

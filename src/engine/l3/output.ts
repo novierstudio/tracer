@@ -13,14 +13,16 @@ import { routesOf, timerKey, type IpContext } from './context';
 import { isLan, ownsAddress, sendOnLan, type LanInterface } from './interfaces';
 import { nextHop, type NextHop } from './routes';
 
-/** The TTL a device's own packets start with: 255 on IOS, 128 on Windows. */
+/** The TTL a device's own packets start with: 255 on IOS, 128 on Windows, 64 on a home router. */
 export const INITIAL_TTL: Record<DeviceKind, number> = {
   router: 255,
   switch: 255,
   pc: 128,
   server: 128,
-  // A hub runs no IP.
+  wirelessRouter: 64,
+  // A hub and an access point run no IP.
   hub: 0,
+  accessPoint: 0,
 };
 
 /** Hands a packet to the next hop. A LAN resolves the neighbour's MAC first. */

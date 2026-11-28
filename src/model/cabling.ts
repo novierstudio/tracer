@@ -3,9 +3,9 @@ import { portOf, type ConsolePortKind } from './remote';
 import type { Cable, DeviceKind, Endpoint, Link, PortId, PortKind, Topology } from './topology';
 
 /** What a cable is made of, and so which ports it plugs into. */
-export type Medium = 'copper' | 'fiber' | 'serial' | 'console';
+export type Medium = 'copper' | 'fiber' | 'serial' | 'console' | 'wireless';
 
-/** A network port or a console port: anything a cable plugs into. */
+/** A network port or a console port: anything a cable plugs into, or a radio, which none does. */
 export type JackKind = PortKind | ConsolePortKind;
 
 /** A port as far as cabling cares: its kind, and whether an Ethernet port is fiber. */
@@ -15,6 +15,7 @@ const JACK_MEDIUM: Record<JackKind, Medium> = {
   fastEthernet: 'copper',
   gigabitEthernet: 'copper',
   serial: 'serial',
+  wireless: 'wireless',
   console: 'console',
   rs232: 'console',
 };
@@ -29,6 +30,9 @@ export const CABLE_MEDIUM: Record<Cable, Medium> = {
   console: 'console',
 };
 
+/** The port on a home wireless router that faces the ISP. Its other Ethernet ports are its LAN. */
+export const WAN_PORT = 'Internet' as PortId;
+
 /** One end of a copper link: the device's kind, and the port's name and kind. */
 export type CopperEnd = {
   readonly kind: DeviceKind;
@@ -37,17 +41,22 @@ export type CopperEnd = {
 };
 
 /**
- * Whether a copper port receives on the pins hosts and routers transmit on (MDI-X), as switch
- * and hub ports do. Like ports take a crossover cable and unlike ports a straight-through one.
+ * Whether a copper port receives on the pins hosts and routers transmit on (MDI-X), as switch,
+ * hub and home router LAN ports do. Like ports take a crossover cable and unlike ports a
+ * straight-through one. An access point's Ethernet port and a home router's Internet port are
+ * MDI, as a host's is, so each takes a straight-through cable to a switch.
  */
 export function isMdiX(end: CopperEnd): boolean {
   switch (end.kind) {
     case 'switch':
     case 'hub':
       return true;
+    case 'wirelessRouter':
+      return end.port !== WAN_PORT;
     case 'router':
     case 'pc':
     case 'server':
+    case 'accessPoint':
       return false;
     default: {
       const exhaustive: never = end.kind;

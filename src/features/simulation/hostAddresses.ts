@@ -10,8 +10,10 @@ import type { Device, DeviceId, Topology } from '@/model';
  */
 export const hostAddresses = createStore<Partial<Record<DeviceId, HostAddressing>>>(() => ({}));
 
+/** A host set to DHCP, or a home router whose Internet port is. */
 const isDhcpHost = (device: Device) =>
-  (device.kind === 'pc' || device.kind === 'server') && device.config.ipv4.mode === 'dhcp';
+  ((device.kind === 'pc' || device.kind === 'server') && device.config.ipv4.mode === 'dhcp') ||
+  (device.kind === 'wirelessRouter' && device.config.wan.mode === 'dhcp');
 
 /** The live addressing of a DHCP host, or undefined for any other device or before it is known. */
 export function useHostAddressing(device: DeviceId): HostAddressing | undefined {

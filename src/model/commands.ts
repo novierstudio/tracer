@@ -23,6 +23,7 @@ import {
   type TopologyError,
 } from './topology';
 import { VlanId, type Hostname, type MacAddress } from './values';
+import { DEFAULT_HOME_ROUTER, DEFAULT_RADIO } from './wireless';
 
 export type CommandResult = Result<Topology, TopologyError>;
 
@@ -130,6 +131,42 @@ export function setLinkCable(topology: Topology, change: CableChange): CommandRe
   return ok(
     produce(topology, (draft) => {
       draft.links[id] = next;
+    }),
+  );
+}
+
+/**
+ * Swaps a PC's or server's network card, as Packet Tracer's Physical tab does: its one port
+ * becomes `port`, such as a wireless NIC's `Wireless0` in place of `FastEthernet0`. The card keeps
+ * its MAC address, and a cable in the old port comes out.
+ */
+export function swapNic(
+  topology: Topology,
+  { device, port }: { device: DeviceId; port: PortSpec },
+): CommandResult {
+  const current = topology.devices[device];
+  if (!current) return err({ kind: 'device-not-found', device });
+  if (current.kind !== 'pc' && current.kind !== 'server') {
+    return err({ kind: 'device-kind-mismatch', device, expected: 'pc', actual: current.kind });
+  }
+  const [old] = current.ports;
+  if (!old || old.kind === 'serial' || port.kind === 'serial') return ok(topology);
+  if (old.id === port.id && old.kind === port.kind) return ok(topology);
+  const mac = old.mac;
+  const fresh: Port =
+    port.kind === 'wireless'
+      ? { kind: 'wireless', id: port.id, mac }
+      : { kind: port.kind, id: port.id, mac, ...(port.fiber && { fiber: true }) };
+  const next: Device = { ...current, ports: [fresh] };
+  const problem = findDeviceProblem(next);
+  if (problem) return err(problem);
+  return ok(
+    produce(putDevice(topology, next), (draft) => {
+      for (const link of Object.values(topology.links)) {
+        if ([link.a, link.b].some((end) => end.device === device && end.port === old.id)) {
+          delete draft.links[link.id];
+        }
+      }
     }),
   );
 }
@@ -293,11 +330,11 @@ export function createDevice(
     return mac;
   };
 
-  const ports = spec.ports.map((port): Port =>
-    port.kind === 'serial'
-      ? { kind: 'serial', id: port.id }
-      : { kind: port.kind, id: port.id, mac: freshMac(), ...(port.fiber && { fiber: true }) },
-  );
+  const ports = spec.ports.map((port): Port => {
+    if (port.kind === 'serial') return { kind: 'serial', id: port.id };
+    if (port.kind === 'wireless') return { kind: 'wireless', id: port.id, mac: freshMac() };
+    return { kind: port.kind, id: port.id, mac: freshMac(), ...(port.fiber && { fiber: true }) };
+  });
   const fields = { id, model: spec.model, position: spec.position, powered: true, ports };
   const { hostname } = spec;
 
@@ -346,6 +383,18 @@ export function createDevice(
       };
     case 'hub':
       return { ...fields, kind: 'hub', config: { ...spec.config, hostname } };
+    case 'accessPoint':
+      return {
+        ...fields,
+        kind: 'accessPoint',
+        config: { radio: DEFAULT_RADIO, ...spec.config, hostname },
+      };
+    case 'wirelessRouter':
+      return {
+        ...fields,
+        kind: 'wirelessRouter',
+        config: { ...DEFAULT_HOME_ROUTER, ...spec.config, hostname },
+      };
     default: {
       const exhaustive: never = spec;
       return exhaustive;
@@ -394,6 +443,10 @@ function withConfig(device: Device, update: ConfigUpdate): Device | undefined {
       return device.kind === 'server' ? { ...device, config: update.config } : undefined;
     case 'hub':
       return device.kind === 'hub' ? { ...device, config: update.config } : undefined;
+    case 'accessPoint':
+      return device.kind === 'accessPoint' ? { ...device, config: update.config } : undefined;
+    case 'wirelessRouter':
+      return device.kind === 'wirelessRouter' ? { ...device, config: update.config } : undefined;
     default: {
       const exhaustive: never = update;
       return exhaustive;

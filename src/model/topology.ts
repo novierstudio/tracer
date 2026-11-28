@@ -25,13 +25,15 @@ export type Point = z.infer<typeof Point>;
 
 /**
  * How each kind of port may be named. IOS devices number theirs by slot, such as
- * `FastEthernet0/1`. Packet Tracer names a hub's ports `Port 0` to `Port 5`; Tracer drops the
- * space.
+ * `FastEthernet0/1`. Packet Tracer names a hub's and an access point's ports `Port 0`, a home
+ * router's `Internet`, `Ethernet 1` and `Wireless`, and a host's radio `Wireless0`; Tracer drops
+ * the spaces.
  */
 const PORT_NAMES = {
-  fastEthernet: String.raw`FastEthernet\d+(?:/\d+)*|Port\d+`,
+  fastEthernet: String.raw`FastEthernet\d+(?:/\d+)*|Port\d+|Ethernet\d+|Internet`,
   gigabitEthernet: String.raw`GigabitEthernet\d+(?:/\d+)*`,
   serial: String.raw`Serial\d+(?:/\d+)*`,
+  wireless: String.raw`Wireless\d*|Port\d+`,
 } as const;
 
 const PORT_NAME_PATTERNS = Object.fromEntries(
@@ -117,6 +119,8 @@ export const Port = z.discriminatedUnion('kind', [
     fiber: z.literal(true).optional(),
   }),
   z.object({ kind: z.literal('serial'), id: PortId }),
+  /** A radio: a host's wireless NIC, or an access point's or home router's. It takes no cable. */
+  z.object({ kind: z.literal('wireless'), id: PortId, mac: MacAddress }),
 ]);
 export type Port = z.infer<typeof Port>;
 export type PortKind = Port['kind'];
@@ -840,11 +844,44 @@ export const HostIpv6 = z.discriminatedUnion('mode', [
 ]);
 export type HostIpv6 = z.infer<typeof HostIpv6>;
 
-/** Absent `ipv6` means static with no address: the host has its link-local address only. */
+/** A wireless network's name: 1 to 32 characters, as 802.11 allows. */
+export const Ssid = z.string().min(1, 'Enter an SSID').max(32, 'An SSID is at most 32 characters');
+export type Ssid = z.infer<typeof Ssid>;
+
+/** How a wireless network admits clients: open, or WPA2 Personal with a shared passphrase. */
+export const WirelessSecurity = z.discriminatedUnion('mode', [
+  z.object({ mode: z.literal('none') }),
+  z.object({
+    mode: z.literal('wpa2-psk'),
+    passphrase: z
+      .string()
+      .min(8, 'A WPA2 passphrase is 8 to 63 characters')
+      .max(63, 'A WPA2 passphrase is 8 to 63 characters'),
+  }),
+]);
+export type WirelessSecurity = z.infer<typeof WirelessSecurity>;
+
+/** An access point's or home router's radio: the network it offers, on a 2.4 GHz channel. */
+export const WirelessRadio = z.object({
+  ssid: Ssid,
+  security: WirelessSecurity,
+  channel: z.int().min(1).max(11),
+});
+export type WirelessRadio = z.infer<typeof WirelessRadio>;
+
+/** The network a host's wireless NIC joins, as its PC Wireless app sets it. */
+export const WirelessProfile = z.object({ ssid: Ssid, security: WirelessSecurity });
+export type WirelessProfile = z.infer<typeof WirelessProfile>;
+
+/**
+ * Absent `ipv6` means static with no address: the host has its link-local address only. Absent
+ * `wireless` means a wireless NIC joins no network.
+ */
 export const HostConfig = z.object({
   hostname: Hostname,
   ipv4: HostIpv4,
   ipv6: HostIpv6.optional(),
+  wireless: WirelessProfile.optional(),
 });
 export type HostConfig = z.infer<typeof HostConfig>;
 
@@ -881,6 +918,29 @@ export type ServerConfig = z.infer<typeof ServerConfig>;
 export const HubConfig = z.object({ hostname: Hostname });
 export type HubConfig = z.infer<typeof HubConfig>;
 
+/** An access point's settings: it bridges its radio's clients to its Ethernet port. */
+export const AccessPointConfig = z.object({ hostname: Hostname, radio: WirelessRadio });
+export type AccessPointConfig = z.infer<typeof AccessPointConfig>;
+
+/**
+ * A home wireless router's settings, as its web GUI sets them. Its Internet port takes an address
+ * by DHCP or a static one. Its LAN ports and radio share one LAN, which its DHCP server serves
+ * from `start`, and whose traffic it translates to the Internet port's address (PAT).
+ */
+export const WirelessRouterConfig = z.object({
+  hostname: Hostname,
+  wan: HostIpv4,
+  /** The router's own LAN address and subnet. */
+  lan: Ipv4Cidr,
+  dhcp: z.object({
+    enabled: z.boolean(),
+    start: Ipv4Address,
+    maxUsers: z.int().min(1).max(253),
+  }),
+  radio: WirelessRadio,
+});
+export type WirelessRouterConfig = z.infer<typeof WirelessRouterConfig>;
+
 const deviceFields = {
   id: DeviceId,
   model: z.string().min(1),
@@ -895,6 +955,8 @@ const DeviceShape = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('pc'), ...deviceFields, config: HostConfig }),
   z.object({ kind: z.literal('server'), ...deviceFields, config: ServerConfig }),
   z.object({ kind: z.literal('hub'), ...deviceFields, config: HubConfig }),
+  z.object({ kind: z.literal('accessPoint'), ...deviceFields, config: AccessPointConfig }),
+  z.object({ kind: z.literal('wirelessRouter'), ...deviceFields, config: WirelessRouterConfig }),
 ]);
 export type Device = z.infer<typeof DeviceShape>;
 export type DeviceKind = Device['kind'];

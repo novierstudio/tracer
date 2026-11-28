@@ -1,4 +1,5 @@
 import { hubModule } from './hub';
+import { bridgeModule } from './l2/bridge';
 import { discoveryModule } from './l2/discovery';
 import { switchingModule } from './l2/switching';
 import { ipModule } from './l3/ip';
@@ -15,4 +16,7 @@ export const STACKS: Stacks = {
   pc: [ipModule, ipv6Module],
   server: [ipModule, ipv6Module],
   hub: [hubModule],
+  accessPoint: [bridgeModule],
+  // A home router switches its LAN, then routes, serves DHCP and translates as a router does.
+  wirelessRouter: [bridgeModule, ipModule],
 };

@@ -24,9 +24,11 @@ const CONSOLE_PORTS: Readonly<Record<DeviceKind, ConsolePort | undefined>> = {
   pc: { kind: 'rs232', id: 'RS232' as PortId },
   server: undefined,
   hub: undefined,
+  accessPoint: undefined,
+  wirelessRouter: undefined,
 };
 
-/** Every router and switch has a Console port, and every PC an RS-232 port. Servers and hubs have neither. */
+/** Every router and switch has a Console port, and every PC an RS-232 port. Other devices have neither. */
 export const consolePortOf = (kind: DeviceKind): ConsolePort | undefined => CONSOLE_PORTS[kind];
 
 /** The device's port named `id`: one of its network ports, or its console port. */

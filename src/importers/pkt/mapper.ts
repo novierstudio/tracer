@@ -2,6 +2,8 @@
 // approximated or skipped on the way.
 
 import {
+  DEFAULT_HOME_ROUTER,
+  DEFAULT_RADIO,
   consolePortOf,
   createIdSource,
   emptyTopology,
@@ -129,6 +131,8 @@ const KIND_LABEL: Record<DeviceKind, string> = {
   pc: 'PC',
   server: 'Server',
   hub: 'Hub',
+  accessPoint: 'Access point',
+  wirelessRouter: 'Wireless router',
 };
 
 // The interface name prefix of each PORT/TYPE.
@@ -358,6 +362,12 @@ function mapDevice(pt: PtDevice, rule: KindRule, position: Point, ctx: Context):
       break;
     case 'hub':
       device = { ...fields, kind, config: { hostname } };
+      break;
+    case 'accessPoint':
+      device = { ...fields, kind, config: { hostname, radio: DEFAULT_RADIO } };
+      break;
+    case 'wirelessRouter':
+      device = { ...fields, kind, config: { ...DEFAULT_HOME_ROUTER, hostname } };
       break;
     default: {
       const exhaustive: never = kind;

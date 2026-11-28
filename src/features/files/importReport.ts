@@ -72,6 +72,8 @@ const KIND_NAME: Record<DeviceKind, string> = {
   pc: 'PC',
   server: 'server',
   hub: 'hub',
+  accessPoint: 'access point',
+  wirelessRouter: 'wireless router',
 };
 
 const CABLE_NAME: Record<Cable, string> = {

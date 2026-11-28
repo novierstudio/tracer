@@ -74,6 +74,7 @@ const SHORT_PREFIX: Record<PortKind, [long: string, short: string]> = {
   fastEthernet: ['FastEthernet', 'Fa'],
   gigabitEthernet: ['GigabitEthernet', 'Gi'],
   serial: ['Serial', 'Se'],
+  wireless: ['Wireless', 'Wl'],
 };
 
 /** `GigabitEthernet0/1` is `Gi0/1`, as IOS abbreviates it. */
@@ -207,6 +208,8 @@ const MEDIUM_DEFAULT_CABLE: Record<Medium, Cable> = {
   fiber: 'fiber',
   serial: 'serial',
   console: 'console',
+  // No cable fits a radio; one that tries reads as a copper cable that does not fit.
+  wireless: 'straight',
 };
 
 const MEDIUM_CABLE: Record<Medium, string> = {
@@ -214,6 +217,7 @@ const MEDIUM_CABLE: Record<Medium, string> = {
   fiber: 'a fiber',
   serial: 'a serial',
   console: 'a console',
+  wireless: 'no',
 };
 
 /** The medium of the port at `endpoint`, or of its kind when the port is gone. */
