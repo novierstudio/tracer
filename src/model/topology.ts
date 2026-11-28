@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { AnnotationId, DeviceId, LinkId } from './ids';
-import { consolePortOf, portOf, type ConsolePortKind } from './remote';
+import { CABLE_MEDIUM, portMedium, type JackKind } from './cabling';
+import { consolePortOf, portOf } from './remote';
 import {
   Hostname,
   Ipv4Address,
@@ -13,24 +14,37 @@ import {
   VlanId,
 } from './values';
 
-export const TOPOLOGY_VERSION = 1;
+/**
+ * Version 2 ended auto-MDIX: a copper link works only on the right cable for its ends. Version 1
+ * files load with each copper link on the cable that works, as it did then.
+ */
+export const TOPOLOGY_VERSION = 2;
 
 export const Point = z.object({ x: z.number(), y: z.number() });
 export type Point = z.infer<typeof Point>;
 
-const PORT_NAME_PREFIX = {
-  fastEthernet: 'FastEthernet',
-  gigabitEthernet: 'GigabitEthernet',
-  serial: 'Serial',
+/**
+ * How each kind of port may be named. IOS devices number theirs by slot, such as
+ * `FastEthernet0/1`. Packet Tracer names a hub's and an access point's ports `Port 0`, a home
+ * router's `Internet`, `Ethernet 1` and `Wireless`, and a host's radio `Wireless0`; Tracer drops
+ * the spaces.
+ */
+const PORT_NAMES = {
+  fastEthernet: String.raw`FastEthernet\d+(?:/\d+)*|Port\d+|Ethernet\d+|Internet`,
+  gigabitEthernet: String.raw`GigabitEthernet\d+(?:/\d+)*`,
+  serial: String.raw`Serial\d+(?:/\d+)*`,
+  wireless: String.raw`Wireless\d*|Port\d+`,
 } as const;
+
+const PORT_NAME_PATTERNS = Object.fromEntries(
+  Object.entries(PORT_NAMES).map(([kind, names]) => [kind, new RegExp(`^(?:${names})$`)]),
+) as Record<keyof typeof PORT_NAMES, RegExp>;
 
 export const PortId = z
   .string()
   .regex(
     // `Console` and `RS232` are the management ports a console cable plugs into.
-    new RegExp(
-      `^(?:(?:${Object.values(PORT_NAME_PREFIX).join('|')})\\d+(?:/\\d+)*|Console|RS232)$`,
-    ),
+    new RegExp(`^(?:${Object.values(PORT_NAMES).join('|')}|Console|RS232)$`),
     'Invalid interface name',
   )
   .brand<'PortId'>();
@@ -88,15 +102,25 @@ export const INTERFACE_TYPES = [
   'Serial',
   'Vlan',
 ] as const satisfies readonly (
-  | (typeof PORT_NAME_PREFIX)[keyof typeof PORT_NAME_PREFIX]
+  | 'FastEthernet'
+  | 'GigabitEthernet'
+  | 'Serial'
   | keyof typeof VIRTUAL_INTERFACE_LIMIT
   | 'Port-channel'
 )[];
 export type InterfaceType = (typeof INTERFACE_TYPES)[number];
 
 export const Port = z.discriminatedUnion('kind', [
-  z.object({ kind: z.enum(['fastEthernet', 'gigabitEthernet']), id: PortId, mac: MacAddress }),
+  z.object({
+    kind: z.enum(['fastEthernet', 'gigabitEthernet']),
+    id: PortId,
+    mac: MacAddress,
+    /** A fiber port, which takes a fiber cable only. Absent means copper. */
+    fiber: z.literal(true).optional(),
+  }),
   z.object({ kind: z.literal('serial'), id: PortId }),
+  /** A radio: a host's wireless NIC, or an access point's or home router's. It takes no cable. */
+  z.object({ kind: z.literal('wireless'), id: PortId, mac: MacAddress }),
 ]);
 export type Port = z.infer<typeof Port>;
 export type PortKind = Port['kind'];
@@ -820,11 +844,44 @@ export const HostIpv6 = z.discriminatedUnion('mode', [
 ]);
 export type HostIpv6 = z.infer<typeof HostIpv6>;
 
-/** Absent `ipv6` means static with no address: the host has its link-local address only. */
+/** A wireless network's name: 1 to 32 characters, as 802.11 allows. */
+export const Ssid = z.string().min(1, 'Enter an SSID').max(32, 'An SSID is at most 32 characters');
+export type Ssid = z.infer<typeof Ssid>;
+
+/** How a wireless network admits clients: open, or WPA2 Personal with a shared passphrase. */
+export const WirelessSecurity = z.discriminatedUnion('mode', [
+  z.object({ mode: z.literal('none') }),
+  z.object({
+    mode: z.literal('wpa2-psk'),
+    passphrase: z
+      .string()
+      .min(8, 'A WPA2 passphrase is 8 to 63 characters')
+      .max(63, 'A WPA2 passphrase is 8 to 63 characters'),
+  }),
+]);
+export type WirelessSecurity = z.infer<typeof WirelessSecurity>;
+
+/** An access point's or home router's radio: the network it offers, on a 2.4 GHz channel. */
+export const WirelessRadio = z.object({
+  ssid: Ssid,
+  security: WirelessSecurity,
+  channel: z.int().min(1).max(11),
+});
+export type WirelessRadio = z.infer<typeof WirelessRadio>;
+
+/** The network a host's wireless NIC joins, as its PC Wireless app sets it. */
+export const WirelessProfile = z.object({ ssid: Ssid, security: WirelessSecurity });
+export type WirelessProfile = z.infer<typeof WirelessProfile>;
+
+/**
+ * Absent `ipv6` means static with no address: the host has its link-local address only. Absent
+ * `wireless` means a wireless NIC joins no network.
+ */
 export const HostConfig = z.object({
   hostname: Hostname,
   ipv4: HostIpv4,
   ipv6: HostIpv6.optional(),
+  wireless: WirelessProfile.optional(),
 });
 export type HostConfig = z.infer<typeof HostConfig>;
 
@@ -857,6 +914,33 @@ export type ServerServices = z.infer<typeof ServerServices>;
 export const ServerConfig = HostConfig.extend({ services: ServerServices.optional() });
 export type ServerConfig = z.infer<typeof ServerConfig>;
 
+/** A hub's settings. Packet Tracer's hub has a display name and nothing else to configure. */
+export const HubConfig = z.object({ hostname: Hostname });
+export type HubConfig = z.infer<typeof HubConfig>;
+
+/** An access point's settings: it bridges its radio's clients to its Ethernet port. */
+export const AccessPointConfig = z.object({ hostname: Hostname, radio: WirelessRadio });
+export type AccessPointConfig = z.infer<typeof AccessPointConfig>;
+
+/**
+ * A home wireless router's settings, as its web GUI sets them. Its Internet port takes an address
+ * by DHCP or a static one. Its LAN ports and radio share one LAN, which its DHCP server serves
+ * from `start`, and whose traffic it translates to the Internet port's address (PAT).
+ */
+export const WirelessRouterConfig = z.object({
+  hostname: Hostname,
+  wan: HostIpv4,
+  /** The router's own LAN address and subnet. */
+  lan: Ipv4Cidr,
+  dhcp: z.object({
+    enabled: z.boolean(),
+    start: Ipv4Address,
+    maxUsers: z.int().min(1).max(253),
+  }),
+  radio: WirelessRadio,
+});
+export type WirelessRouterConfig = z.infer<typeof WirelessRouterConfig>;
+
 const deviceFields = {
   id: DeviceId,
   model: z.string().min(1),
@@ -870,6 +954,9 @@ const DeviceShape = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('switch'), ...deviceFields, config: SwitchConfig }),
   z.object({ kind: z.literal('pc'), ...deviceFields, config: HostConfig }),
   z.object({ kind: z.literal('server'), ...deviceFields, config: ServerConfig }),
+  z.object({ kind: z.literal('hub'), ...deviceFields, config: HubConfig }),
+  z.object({ kind: z.literal('accessPoint'), ...deviceFields, config: AccessPointConfig }),
+  z.object({ kind: z.literal('wirelessRouter'), ...deviceFields, config: WirelessRouterConfig }),
 ]);
 export type Device = z.infer<typeof DeviceShape>;
 export type DeviceKind = Device['kind'];
@@ -884,7 +971,12 @@ export const Endpoint = z.object({ device: DeviceId, port: PortId });
 export type Endpoint = z.infer<typeof Endpoint>;
 
 export const Link = z.discriminatedUnion('cable', [
-  z.object({ id: LinkId, cable: z.enum(['straight', 'crossover']), a: Endpoint, b: Endpoint }),
+  z.object({
+    id: LinkId,
+    cable: z.enum(['straight', 'crossover', 'fiber']),
+    a: Endpoint,
+    b: Endpoint,
+  }),
   z.object({
     id: LinkId,
     cable: z.literal('serial'),
@@ -1036,23 +1128,6 @@ export function emptyTopology({ name, now }: { name: string; now: Date }): Topol
   };
 }
 
-type Medium = 'copper' | 'serial' | 'console';
-
-const PORT_MEDIUM: Record<PortKind | ConsolePortKind, Medium> = {
-  fastEthernet: 'copper',
-  gigabitEthernet: 'copper',
-  serial: 'serial',
-  console: 'console',
-  rs232: 'console',
-};
-
-const CABLE_MEDIUM: Record<Cable, Medium> = {
-  straight: 'copper',
-  crossover: 'copper',
-  serial: 'serial',
-  console: 'console',
-};
-
 export type TopologyError =
   | { kind: 'duplicate-id'; id: DeviceId | LinkId | AnnotationId }
   | { kind: 'device-not-found'; device: DeviceId }
@@ -1068,7 +1143,7 @@ export type TopologyError =
       kind: 'cable-mismatch';
       endpoint: Endpoint;
       cable: Cable;
-      portKind: PortKind | ConsolePortKind;
+      portKind: JackKind;
     }
   | { kind: 'same-port'; endpoint: Endpoint };
 
@@ -1077,7 +1152,7 @@ export function findDeviceProblem(device: Device): TopologyError | undefined {
   for (const port of device.ports) {
     if (portIds.has(port.id)) return { kind: 'duplicate-port', device: device.id, port: port.id };
     portIds.add(port.id);
-    if (!port.id.startsWith(PORT_NAME_PREFIX[port.kind])) {
+    if (!PORT_NAME_PATTERNS[port.kind].test(port.id)) {
       return { kind: 'port-name-mismatch', device: device.id, port: port.id, portKind: port.kind };
     }
   }
@@ -1113,7 +1188,7 @@ export function findLinkProblem(topology: Topology, link: Link): TopologyError |
     const port = portOf(device, endpoint.port);
     if (!port) return { kind: 'port-not-found', endpoint };
 
-    if (PORT_MEDIUM[port.kind] !== CABLE_MEDIUM[link.cable]) {
+    if (portMedium(port) !== CABLE_MEDIUM[link.cable]) {
       return { kind: 'cable-mismatch', endpoint, cable: link.cable, portKind: port.kind };
     }
     // A console cable joins a PC's RS-232 port to a Console port, never two of a kind.

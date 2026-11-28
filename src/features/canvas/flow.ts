@@ -1,5 +1,6 @@
 import { Position, type Edge, type EdgeChange, type Node, type NodeChange } from '@xyflow/react';
-import { findDeviceModel, type DeviceIconName } from '@/devices/catalog';
+import { findDeviceModel, KIND_ICONS, type DeviceIconName } from '@/devices/catalog';
+import { associations } from '@/model';
 import type {
   AnnotationId,
   AnnotationKind,
@@ -8,7 +9,6 @@ import type {
   Cable,
   Device,
   DeviceId,
-  DeviceKind,
   Link,
   LinkId,
   Move,
@@ -73,12 +73,10 @@ function bundleOf(link: Link, devices: Topology['devices']): string | undefined 
 }
 export type CableFlowEdge = Edge<CableEdgeData, 'cable'>;
 
-const KIND_ICON: Record<DeviceKind, DeviceIconName> = {
-  router: 'router',
-  switch: 'switch',
-  pc: 'pc',
-  server: 'server',
-};
+/** A host's association with an access point or home router: drawn, never selected or stored. */
+export type WirelessFlowEdge = Edge<Record<string, never>, 'wireless'>;
+
+export type CanvasEdge = CableFlowEdge | WirelessFlowEdge;
 
 // Edges join tile centres. Declaring the handles and size up front means React Flow never has to
 // measure a node before drawing its links.
@@ -130,6 +128,8 @@ function address(device: Device): string | undefined {
   switch (device.kind) {
     case 'router':
       return Object.values(device.config.interfaces).find((i) => i.ipv4)?.ipv4?.address;
+    case 'wirelessRouter':
+      return device.config.lan.address;
     case 'pc':
     case 'server':
       return device.config.ipv4.mode === 'static' ? device.config.ipv4.address?.address : undefined;
@@ -141,7 +141,7 @@ function address(device: Device): string | undefined {
 function nodeData(device: Device, used: number): DeviceNodeData {
   return {
     hostname: device.config.hostname,
-    icon: findDeviceModel(device.model)?.icon ?? KIND_ICON[device.kind],
+    icon: findDeviceModel(device.model)?.icon ?? KIND_ICONS[device.kind],
     address: address(device),
     dhcp: (device.kind === 'pc' || device.kind === 'server') && device.config.ipv4.mode === 'dhcp',
     powered: device.powered,
@@ -399,4 +399,34 @@ export function applySelectChanges<Id extends string>(
   }
   const unchanged = ids.size === current.length && current.every((id) => ids.has(id));
   return unchanged ? undefined : [...ids];
+}
+
+/**
+ * The associations the devices make, as edges from each host to its radio. They are derived
+ * from the devices, as the engine derives them, so they come and go with SSID and key changes.
+ */
+export function createWirelessEdgeMapper() {
+  let cache = new Map<string, WirelessFlowEdge>();
+  return (devices: Topology['devices']): WirelessFlowEdge[] => {
+    const next = new Map<string, WirelessFlowEdge>();
+    const edges = associations(Object.values(devices)).map((association) => {
+      const key = `${association.id} ${association.b.device}`;
+      const edge = cache.get(key) ?? {
+        id: association.id,
+        type: 'wireless' as const,
+        source: association.a.device,
+        target: association.b.device,
+        sourceHandle: CENTRE_HANDLE.id,
+        targetHandle: CENTRE_HANDLE.id,
+        selectable: false,
+        deletable: false,
+        focusable: false,
+        data: {},
+      };
+      next.set(key, edge);
+      return edge;
+    });
+    cache = next;
+    return edges;
+  };
 }

@@ -11,6 +11,7 @@ import type {
   RoutedInterface,
   StandardAclEntry,
 } from '@/model';
+import { homeRouterIos } from '@/model/wireless';
 import { IP_PROTOCOL, type IcmpMessage, type Ipv4Packet, type Ipv4Payload } from '../pdu';
 import type { IpContext } from './context';
 import type { IpInterface } from './interfaces';
@@ -130,10 +131,13 @@ const actionAt = (list: AccessList, index: number | undefined) => {
 };
 
 /** The device's access list `name`, if the config defines it. */
-export const accessList = (device: Device, name: AclName): AccessList | undefined =>
-  device.kind === 'router' || device.kind === 'switch'
-    ? device.config.accessLists?.[name]
+export function accessList(device: Device, name: AclName): AccessList | undefined {
+  if (device.kind === 'router' || device.kind === 'switch')
+    return device.config.accessLists?.[name];
+  return device.kind === 'wirelessRouter'
+    ? homeRouterIos(device.config).accessLists[name]
     : undefined;
+}
 
 /**
  * Whether the device's list `name` permits the flow, counting the hit on the entry that decided.
@@ -160,6 +164,7 @@ type FilterSettings = Pick<RoutedInterface, 'accessGroupIn' | 'accessGroupOut' |
  * interfaces. A host has none.
  */
 export function filterSettings(device: Device, iface: IpInterface): FilterSettings | undefined {
+  if (device.kind === 'wirelessRouter') return homeRouterIos(device.config).interfaces[iface.name];
   if (device.kind !== 'router' && device.kind !== 'switch') return undefined;
   const { config } = device;
   const tables = [

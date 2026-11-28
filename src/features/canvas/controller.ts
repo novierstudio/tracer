@@ -62,11 +62,11 @@ import {
   toggleCableTool,
   toggleDrawTool,
 } from './edit';
-import type { CableFlowEdge, CanvasNode } from './flow';
+import type { CanvasEdge, CanvasNode } from './flow';
 import { GRID, snapCentre } from './geometry';
 
 type CanvasHandle = {
-  flow: ReactFlowInstance<CanvasNode, CableFlowEdge>;
+  flow: ReactFlowInstance<CanvasNode, CanvasEdge>;
   element: HTMLElement;
 };
 

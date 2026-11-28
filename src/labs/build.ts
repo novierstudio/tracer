@@ -8,6 +8,8 @@ import type { DeviceModelId } from '@/devices/catalog';
 import { createDevice } from '@/devices/create';
 import {
   addAnnotation,
+  autoCable,
+  cableEnd,
   addDevice,
   addLink,
   AnnotationId,
@@ -40,7 +42,7 @@ const cidr = (text: string) => {
   return Ipv4Cidr.parse({ address, prefixLength: Number(prefixLength) });
 };
 
-type Cable = { cable: 'straight' | 'crossover' | 'console' } | { cable: 'serial'; dce: 'a' | 'b' };
+type Cable = { cable: 'console' } | { cable: 'serial'; dce: 'a' | 'b' };
 
 function labBuilder(id: string) {
   const sample = SAMPLE_LABS.find((lab) => lab.id === id)!;
@@ -96,10 +98,21 @@ function labBuilder(id: string) {
     },
 
     /** A server with a static address and the services its Services tab would set. */
-    server(name: string, x: number, y: number, address: string, services: ServerServices) {
+    server(
+      name: string,
+      x: number,
+      y: number,
+      address: string,
+      services: ServerServices,
+      gateway?: string,
+    ) {
       add(name, 'server', x, y, (device) => {
         if (device.kind !== 'server') throw new Error(`${name} is not a server`);
-        device.config.ipv4 = { mode: 'static', address: cidr(address) };
+        device.config.ipv4 = {
+          mode: 'static',
+          address: cidr(address),
+          ...(gateway !== undefined && { gateway: Ipv4Address.parse(gateway) }),
+        };
         device.config.services = services;
       });
     },
@@ -113,6 +126,40 @@ function labBuilder(id: string) {
       });
     },
 
+    /** Any catalog device, as `edit` leaves it after the factory settings. */
+    device(
+      name: string,
+      model: DeviceModelId,
+      x: number,
+      y: number,
+      edit?: (device: Device) => void,
+    ) {
+      add(name, model, x, y, edit);
+    },
+
+    /**
+     * A laptop with a wireless card in place of its Ethernet one, set to DHCP. `ssid` and
+     * `passphrase`, when given, are the network its PC Wireless app has joined.
+     */
+    wirelessLaptop(
+      name: string,
+      x: number,
+      y: number,
+      join?: { ssid: string; passphrase: string },
+    ) {
+      add(name, 'laptop', x, y, (device) => {
+        if (device.kind !== 'pc') throw new Error(`${name} is not a PC`);
+        const [card] = device.ports;
+        if (!card || card.kind === 'serial') throw new Error(`${name} has no Ethernet card`);
+        device.ports = [{ kind: 'wireless', id: PortId.parse('Wireless0'), mac: card.mac }];
+        device.config.ipv4 = { mode: 'dhcp' };
+        if (join) {
+          const security = { mode: 'wpa2-psk' as const, passphrase: join.passphrase };
+          device.config.wireless = { ssid: join.ssid, security };
+        }
+      });
+    },
+
     /** A PC that asks a DHCP server for its address. */
     dhcpPc(name: string, x: number, y: number) {
       add(name, 'pc', x, y, (device) => {
@@ -121,18 +168,20 @@ function labBuilder(id: string) {
       });
     },
 
-    /** `suffix` tells apart two cables between the same devices, as an EtherChannel has. */
-    cable(
-      a: [string, string],
-      b: [string, string],
-      kind: Cable = { cable: 'straight' },
-      suffix = '',
-    ) {
-      const link = {
-        id: LinkId.parse(`lnk_${tag}${a[0]}${b[0]}${suffix}`),
+    /**
+     * A cable from port to port: by default the network cable Packet Tracer's automatic cable
+     * picks. `suffix` tells apart two cables between the same devices, as an EtherChannel has.
+     */
+    cable(a: [string, string], b: [string, string], kind?: Cable, suffix = '') {
+      const ends = {
         a: { device: deviceId(a[0]), port: PortId.parse(a[1]) },
         b: { device: deviceId(b[0]), port: PortId.parse(b[1]) },
-        ...kind,
+      };
+      const auto = autoCable(cableEnd(topology, ends.a)!, cableEnd(topology, ends.b)!);
+      const link = {
+        id: LinkId.parse(`lnk_${tag}${a[0]}${b[0]}${suffix}`),
+        ...ends,
+        ...(kind ?? { cable: auto }),
       } as Link;
       topology = unwrap(addLink(topology, link));
     },
@@ -217,9 +266,9 @@ function staticRoutesSerial() {
   ]);
   lab.pc('PC1', 40, 232, '192.168.1.10/24', '192.168.1.1');
   lab.pc('PC2', 808, 232, '192.168.2.10/24', '192.168.2.1');
-  lab.cable(['PC1', 'FastEthernet0'], ['R1', 'GigabitEthernet0/0'], { cable: 'crossover' });
+  lab.cable(['PC1', 'FastEthernet0'], ['R1', 'GigabitEthernet0/0']);
   lab.cable(['R1', 'Serial0/0/0'], ['R2', 'Serial0/0/0'], { cable: 'serial', dce: 'a' });
-  lab.cable(['R2', 'GigabitEthernet0/0'], ['PC2', 'FastEthernet0'], { cable: 'crossover' });
+  lab.cable(['R2', 'GigabitEthernet0/0'], ['PC2', 'FastEthernet0']);
   lab.note(
     'serial',
     328,
@@ -458,12 +507,12 @@ function ospfThreeRouters() {
   lab.pc('PC1', 40, 424, '192.168.1.10/24', '192.168.1.1');
   lab.pc('PC2', 424, 40, '192.168.2.10/24', '192.168.2.1');
   lab.pc('PC3', 808, 424, '192.168.3.10/24', '192.168.3.1');
-  lab.cable(['R1', 'GigabitEthernet0/1'], ['R2', 'GigabitEthernet0/1'], { cable: 'crossover' });
-  lab.cable(['R2', 'GigabitEthernet0/2'], ['R3', 'GigabitEthernet0/1'], { cable: 'crossover' });
+  lab.cable(['R1', 'GigabitEthernet0/1'], ['R2', 'GigabitEthernet0/1']);
+  lab.cable(['R2', 'GigabitEthernet0/2'], ['R3', 'GigabitEthernet0/1']);
   lab.cable(['R1', 'Serial0/0/0'], ['R3', 'Serial0/0/0'], { cable: 'serial', dce: 'a' });
-  lab.cable(['PC1', 'FastEthernet0'], ['R1', 'GigabitEthernet0/0'], { cable: 'crossover' });
-  lab.cable(['PC2', 'FastEthernet0'], ['R2', 'GigabitEthernet0/0'], { cable: 'crossover' });
-  lab.cable(['PC3', 'FastEthernet0'], ['R3', 'GigabitEthernet0/0'], { cable: 'crossover' });
+  lab.cable(['PC1', 'FastEthernet0'], ['R1', 'GigabitEthernet0/0']);
+  lab.cable(['PC2', 'FastEthernet0'], ['R2', 'GigabitEthernet0/0']);
+  lab.cable(['PC3', 'FastEthernet0'], ['R3', 'GigabitEthernet0/0']);
   lab.note(
     'area',
     600,
@@ -540,12 +589,12 @@ function eigrpFeasibleSuccessor() {
   lab.pc('PC1', 40, 424, '192.168.1.10/24', '192.168.1.1');
   lab.pc('PC2', 424, 40, '192.168.2.10/24', '192.168.2.1');
   lab.pc('PC3', 808, 424, '192.168.3.10/24', '192.168.3.1');
-  lab.cable(['R1', 'GigabitEthernet0/1'], ['R2', 'GigabitEthernet0/1'], { cable: 'crossover' });
-  lab.cable(['R2', 'GigabitEthernet0/2'], ['R3', 'GigabitEthernet0/1'], { cable: 'crossover' });
+  lab.cable(['R1', 'GigabitEthernet0/1'], ['R2', 'GigabitEthernet0/1']);
+  lab.cable(['R2', 'GigabitEthernet0/2'], ['R3', 'GigabitEthernet0/1']);
   lab.cable(['R1', 'Serial0/0/0'], ['R3', 'Serial0/0/0'], { cable: 'serial', dce: 'a' });
-  lab.cable(['PC1', 'FastEthernet0'], ['R1', 'GigabitEthernet0/0'], { cable: 'crossover' });
-  lab.cable(['PC2', 'FastEthernet0'], ['R2', 'GigabitEthernet0/0'], { cable: 'crossover' });
-  lab.cable(['PC3', 'FastEthernet0'], ['R3', 'GigabitEthernet0/0'], { cable: 'crossover' });
+  lab.cable(['PC1', 'FastEthernet0'], ['R1', 'GigabitEthernet0/0']);
+  lab.cable(['PC2', 'FastEthernet0'], ['R2', 'GigabitEthernet0/0']);
+  lab.cable(['PC3', 'FastEthernet0'], ['R3', 'GigabitEthernet0/0']);
   lab.note(
     'as',
     600,
@@ -645,7 +694,7 @@ function patAcl() {
   lab.cable(['PC2', 'FastEthernet0'], ['SW1', 'FastEthernet0/2']);
   lab.cable(['PC3', 'FastEthernet0'], ['SW1', 'FastEthernet0/3']);
   lab.cable(['SW1', 'GigabitEthernet0/1'], ['R1', 'GigabitEthernet0/0']);
-  lab.cable(['R1', 'GigabitEthernet0/1'], ['Server', 'GigabitEthernet0'], { cable: 'crossover' });
+  lab.cable(['R1', 'GigabitEthernet0/1'], ['Server', 'GigabitEthernet0']);
   lab.note(
     'pat',
     520,
@@ -821,6 +870,91 @@ function portSecurityLab() {
   return lab.topology;
 }
 
+function hubCollisions() {
+  const lab = labBuilder('hub-collisions');
+  lab.device('Hub1', 'hub', 424, 40);
+  lab.pc('PC1', 104, 232, '192.168.1.10/24');
+  lab.pc('PC2', 424, 232, '192.168.1.11/24');
+  lab.pc('PC3', 744, 232, '192.168.1.12/24');
+  lab.cable(['PC1', 'FastEthernet0'], ['Hub1', 'Port0']);
+  lab.cable(['PC2', 'FastEthernet0'], ['Hub1', 'Port1']);
+  lab.cable(['PC3', 'FastEthernet0'], ['Hub1', 'Port2']);
+  lab.note(
+    'repeat',
+    600,
+    -16,
+    'Hub1 repeats every frame out of every other port, so each PC sees all traffic, even frames for someone else.',
+  );
+  lab.note(
+    'collide',
+    264,
+    344,
+    'Its ports share one segment. In Simulation mode, ping PC3 from PC1, then from PC2, before you step: both ARP requests reach Hub1 at once, collide, and are lost.',
+  );
+  return lab.topology;
+}
+
+function homeWireless() {
+  const lab = labBuilder('home-wireless');
+  lab.ios('ISP', 'router-2g2s', 584, 40, [
+    'ip dhcp excluded-address 203.0.113.1 203.0.113.9',
+    'ip dhcp pool CUSTOMERS',
+    ' network 203.0.113.0 255.255.255.0',
+    ' default-router 203.0.113.1',
+    ' dns-server 198.51.100.10',
+    'interface GigabitEthernet0/0',
+    ' ip address 203.0.113.1 255.255.255.0',
+    ' no shutdown',
+    'interface GigabitEthernet0/1',
+    ' ip address 198.51.100.1 255.255.255.0',
+    ' no shutdown',
+  ]);
+  lab.server(
+    'Server1',
+    904,
+    40,
+    '198.51.100.10/24',
+    {
+      dns: { enabled: false, records: [] },
+      http: { enabled: true, indexHtml: '<h1>Hello from the Internet</h1>\n' },
+    },
+    '198.51.100.1',
+  );
+  lab.device('HomeRouter', 'wireless-router', 584, 264, (device) => {
+    if (device.kind !== 'wirelessRouter') throw new Error('HomeRouter is not a wireless router');
+    device.config.radio = {
+      ssid: 'HomeNet',
+      security: { mode: 'wpa2-psk', passphrase: 'tracer123' },
+      channel: 6,
+    };
+  });
+  lab.wirelessLaptop('Laptop1', 264, 456);
+  lab.wirelessLaptop('Laptop2', 584, 488, { ssid: 'HomeNet', passphrase: 'tracer123' });
+  lab.dhcpPc('PC1', 904, 456);
+  lab.cable(['HomeRouter', 'Internet'], ['ISP', 'GigabitEthernet0/0']);
+  lab.cable(['ISP', 'GigabitEthernet0/1'], ['Server1', 'GigabitEthernet0']);
+  lab.cable(['PC1', 'FastEthernet0'], ['HomeRouter', 'Ethernet1']);
+  lab.note(
+    'wan',
+    104,
+    120,
+    'HomeRouter’s Internet port takes 203.0.113.x from the ISP by DHCP. Its LAN, 192.168.0.0/24, reaches the Internet through PAT on that address.',
+  );
+  lab.note(
+    'join',
+    40,
+    560,
+    'Laptop1 has a wireless card but has joined no network. Open its PC Wireless app, join HomeNet with the key tracer123, and it gets an address by DHCP.',
+  );
+  lab.note(
+    'server',
+    904,
+    232,
+    'Server1 at 198.51.100.10 stands for the Internet. Ping it, or browse to it, from any laptop.',
+  );
+  return lab.topology;
+}
+
 export const BUILDERS: Record<string, () => Topology> = {
   'two-pcs-switch': twoPcsSwitch,
   'two-lans-router': twoLansRouter,
@@ -837,4 +971,6 @@ export const BUILDERS: Record<string, () => Topology> = {
   'remote-management': remoteManagement,
   etherchannel: etherchannelLab,
   'port-security': portSecurityLab,
+  'hub-collisions': hubCollisions,
+  'home-wireless': homeWireless,
 };

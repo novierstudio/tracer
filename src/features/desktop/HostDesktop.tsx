@@ -5,6 +5,7 @@ import {
   MonitorCogIcon,
   PowerIcon,
   SquareTerminalIcon,
+  WifiIcon,
   type LucideIcon,
 } from 'lucide-react';
 import { useState } from 'react';
@@ -14,20 +15,21 @@ import { HostAddressForm } from '@/features/inspector/HostAddressForm';
 import { HostIpv6Form } from '@/features/inspector/HostIpv6Form';
 import { formatCidr } from '@/features/inspector/ipv4';
 import { useHostAddressing } from '@/features/simulation/hostAddresses';
-import { linkAt, type DeviceId } from '@/model';
+import type { DeviceId } from '@/model';
 import { useEditor } from '@/model/react';
 import { editorStore } from '@/model/store';
 import { Button } from '@/ui/button';
 import { cn } from '@/ui/cn';
 import { EmptyState } from '@/ui/empty-state';
 import { Kbd } from '@/ui/kbd';
-import { addressPort, configAddressing, type HostDevice } from './format';
+import { addressPort, configAddressing, nicConnected, type HostDevice } from './format';
 import { HostPrompt } from './HostPrompt';
 import { hostBackend } from './registry';
 import { TerminalApp } from './TerminalApp';
 import { WebBrowser } from './WebBrowser';
+import { WirelessApp } from './WirelessApp';
 
-type App = 'ip' | 'prompt' | 'terminal' | 'browser';
+type App = 'ip' | 'prompt' | 'terminal' | 'browser' | 'wireless';
 
 const APPS: Record<App, { title: string; blurb: string; icon: LucideIcon; tile: string }> = {
   ip: {
@@ -53,6 +55,12 @@ const APPS: Record<App, { title: string; blurb: string; icon: LucideIcon; tile: 
     blurb: 'Open pages from HTTP servers',
     icon: GlobeIcon,
     tile: 'bg-proto-icmp text-surface-1',
+  },
+  wireless: {
+    title: 'PC Wireless',
+    blurb: 'Join a wireless network',
+    icon: WifiIcon,
+    tile: 'bg-proto-dhcp text-surface-1',
   },
 };
 
@@ -119,6 +127,8 @@ function Desktop({ device, focusPrompt }: Props) {
         </div>
       ) : app === 'browser' ? (
         <WebBrowser device={device.id} backend={hostBackend} />
+      ) : app === 'wireless' ? (
+        <WirelessApp device={device} />
       ) : app === 'terminal' ? (
         <TerminalApp device={device.id} autoFocus={openedNow || focusPrompt} />
       ) : (
@@ -175,9 +185,8 @@ function Home({ device, onOpen }: { device: HostDevice; onOpen: (app: App) => vo
 /** What a student checks first: is it plugged in, and what address does it have. */
 function NetworkCard({ device }: { device: HostDevice }) {
   const port = addressPort(device);
-  const connected = useEditor(
-    ({ topology }) => !!port && !!linkAt(topology, { device: device.id, port: port.id }),
-  );
+  const connected = useEditor(({ topology }) => nicConnected(topology, device));
+  const radio = port?.kind === 'wireless';
   const { ipv4 } = device.config;
   const leased = useHostAddressing(device.id);
   // A DHCP host's address is whatever the simulation says it got.
@@ -198,7 +207,7 @@ function NetworkCard({ device }: { device: HostDevice }) {
             connected ? 'bg-ok' : 'border-[1.5px] border-fg-3 bg-transparent',
           )}
         />
-        {connected ? 'Connected' : 'No cable'}
+        {connected ? (radio ? 'Associated' : 'Connected') : radio ? 'Not associated' : 'No cable'}
         {port && <span className="font-mono text-fg-3">{port.id}</span>}
       </p>
       <p className="font-mono text-sm text-fg-1 tabular-nums">

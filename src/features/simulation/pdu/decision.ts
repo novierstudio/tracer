@@ -56,6 +56,10 @@ import type { ControlPdu } from './control';
  */
 export type Decision =
   | { kind: 'lost' }
+  /** It reached a hub at the same instant as another frame, and both were lost. */
+  | { kind: 'collision' }
+  /** A hub sent it out of every other port that is up, as it does every frame. */
+  | { kind: 'repeated'; out: readonly PortId[] }
   | { kind: 'link-test' }
   | { kind: 'spanning-tree'; out: readonly PortId[] }
   /** A device running CDP or LLDP on the port read an advertisement and keeps its sender as a neighbour. */
@@ -310,6 +314,15 @@ const isGroup = (mac: MacAddress) => (parseInt(mac.slice(0, 2), 16) & 1) === 1;
 /** Every IPv4 address the device answers on, from its config. */
 export function ownAddresses(device: Device): Ipv4Address[] {
   switch (device.kind) {
+    case 'hub':
+    case 'accessPoint':
+      return [];
+    case 'wirelessRouter': {
+      const { wan, lan } = device.config;
+      return wan.mode === 'static' && wan.address
+        ? [lan.address, wan.address.address]
+        : [lan.address];
+    }
     case 'pc':
     case 'server':
       return device.config.ipv4.mode === 'static' && device.config.ipv4.address
@@ -664,6 +677,9 @@ function ownIpv6Addresses(device: Device): Ipv6Address[] {
       );
     }
     case 'switch':
+    case 'hub':
+    case 'accessPoint':
+    case 'wirelessRouter':
       return [];
   }
 }
@@ -840,7 +856,7 @@ function decideLinkControl(
       ? { kind: 'spanning-tree', out: sent.map((s) => s.port) }
       : { kind: 'ignored', reason: { kind: 'bpdu' } };
   }
-  if (device.kind === 'pc' || device.kind === 'server') {
+  if (device.kind !== 'router' && device.kind !== 'switch') {
     return { kind: 'ignored', reason: { kind: 'host-control', protocol: payload.kind } };
   }
   const { config } = device;
@@ -884,7 +900,10 @@ function decideLinkControl(
 /** What `device`, the frame's receiver, did with it. Undefined when the device is gone. */
 export function decide(event: FrameEvent, device: Device | undefined): Decision | undefined {
   if (event.outcome === 'link-down') return { kind: 'lost' };
+  if (event.outcome === 'collision') return { kind: 'collision' };
   const { frame } = event;
+  if (device?.kind === 'hub')
+    return { kind: 'repeated', out: (event.sent ?? []).map((s) => s.port) };
   if (frame.kind === 'hello') return { kind: 'link-test' };
   if (!device) return undefined;
   const sent = event.sent ?? [];
@@ -924,6 +943,7 @@ export function decide(event: FrameEvent, device: Device | undefined): Decision 
 /** The short reason the canvas shows on a drop marker, for decisions that are drops. */
 export function dropLabel(decision: Decision | undefined): string | undefined {
   if (decision?.kind === 'lost') return 'Link down';
+  if (decision?.kind === 'collision') return 'Collision';
   if (decision?.kind !== 'dropped') return undefined;
   switch (decision.reason.kind) {
     case 'ttl-expired':
@@ -1228,6 +1248,12 @@ export function describeDecision(decision: Decision, name: string): string {
   switch (decision.kind) {
     case 'lost':
       return `The link was down, so it never reached ${name}.`;
+    case 'collision':
+      return `It reached ${name} at the same instant as another frame. They collided on the shared segment, and neither got through.`;
+    case 'repeated':
+      return decision.out.length > 0
+        ? `${name} is a hub: it repeated the frame out ${list(decision.out)}, reading no address.`
+        : `${name} is a hub, but no other port is up, so the frame went nowhere.`;
     case 'link-test':
       return `A link test: ${name} only notes that the link works.`;
     case 'spanning-tree':

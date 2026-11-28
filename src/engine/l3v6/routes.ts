@@ -52,6 +52,9 @@ function configuredRoutes(
       ];
     }
     case 'switch':
+    case 'hub':
+    case 'accessPoint':
+    case 'wirelessRouter':
       return [];
     default: {
       const exhaustive: never = device;

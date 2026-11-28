@@ -4,7 +4,7 @@ import type { ModuleContext } from '../module';
 import type { Ipv4Packet } from '../pdu';
 import type { DhcpClient, DhcpListener } from './dhcpClient';
 import type { DhcpBinding } from './dhcpServer';
-import { hostAddressing, isHost, type HostAddressing } from './hostAddress';
+import { addressedPort, hostAddressing, type HostAddressing } from './hostAddress';
 import { ipInterfaces, type IpInterface } from './interfaces';
 import type { PingSession } from './ping';
 import type { NatTable } from './nat';
@@ -102,9 +102,14 @@ export function parseTimer(key: string): IpTimer | undefined {
   }
 }
 
-/** A host's live IPv4 settings. Undefined for a router or a switch. */
-export const hostAddressingOf = (ctx: IpContext): HostAddressing | undefined =>
-  isHost(ctx.device) ? hostAddressing(ctx.device, ctx.state.dhcp) : undefined;
+/**
+ * A host's live IPv4 settings, or a home router's on its Internet port. Undefined for a router or
+ * a switch.
+ */
+export function hostAddressingOf(ctx: IpContext): HostAddressing | undefined {
+  const own = addressedPort(ctx.device);
+  return own && hostAddressing(own.ipv4, ctx.state.dhcp);
+}
 
 export const interfacesOf = (ctx: IpContext): IpInterface[] =>
   ipInterfaces(ctx.device, ctx, hostAddressingOf(ctx));

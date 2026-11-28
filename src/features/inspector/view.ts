@@ -1,6 +1,8 @@
-import { findDeviceModel, type DeviceIconName } from '@/devices/catalog';
+import { findDeviceModel, KIND_ICONS, type DeviceIconName } from '@/devices/catalog';
 import {
+  cableWorks,
   linkAt,
+  WAN_PORT,
   type Annotation,
   type Device,
   type DeviceKind,
@@ -42,13 +44,9 @@ export const KIND_LABELS: Record<DeviceKind, { one: string; many: string }> = {
   switch: { one: 'Switch', many: 'Switches' },
   pc: { one: 'PC', many: 'PCs' },
   server: { one: 'Server', many: 'Servers' },
-};
-
-const KIND_ICONS: Record<DeviceKind, DeviceIconName> = {
-  router: 'router',
-  switch: 'switch',
-  pc: 'pc',
-  server: 'server',
+  hub: { one: 'Hub', many: 'Hubs' },
+  accessPoint: { one: 'Access point', many: 'Access points' },
+  wirelessRouter: { one: 'Wireless router', many: 'Wireless routers' },
 };
 
 /** Catalog name and icon, falling back to the kind for models the catalog does not know. */
@@ -61,12 +59,14 @@ export const PORT_KIND_NAMES: Record<PortKind, string> = {
   fastEthernet: 'FastEthernet',
   gigabitEthernet: 'GigabitEthernet',
   serial: 'Serial',
+  wireless: 'Wireless',
 };
 
 const PORT_ABBREVIATIONS: Record<PortKind, string> = {
   fastEthernet: 'Fa',
   gigabitEthernet: 'Gi',
   serial: 'Se',
+  wireless: 'Wl',
 };
 
 /** `GigabitEthernet0/1` → `Gi0/1`, as IOS abbreviates in `show` output. */
@@ -95,6 +95,8 @@ export type PortRow = {
   | { layer: 'routed'; ipv4: Ipv4Cidr | undefined }
   | { layer: 'host'; ipv4: Ipv4Cidr | undefined }
   | { layer: 'switched'; vlan: string }
+  /** A port with no address or VLAN, as a hub's: `label` says what it does. */
+  | { layer: 'plain'; label: string }
 );
 
 function adminState(device: Device, port: PortId): 'up' | 'down' | undefined {
@@ -121,7 +123,7 @@ export function linkState(topology: Topology, link: Link): Exclude<PortState, 'f
     const device = topology.devices[end.device];
     return device ? enabled(device, end.port) : false;
   });
-  return ends.every(Boolean) ? 'up' : 'down';
+  return ends.every(Boolean) && cableWorks(topology, link) ? 'up' : 'down';
 }
 
 /** The host's single address belongs to its first Ethernet port. */
@@ -159,6 +161,14 @@ export function portRows(topology: Topology, device: Device): PortRow[] {
         const address = ipv4.mode === 'static' && port.id === hostPort ? ipv4.address : undefined;
         return { ...base, layer: 'host', ipv4: address };
       }
+      case 'hub':
+        return { ...base, layer: 'plain', label: 'Repeats' };
+      case 'accessPoint':
+        return { ...base, layer: 'plain', label: port.kind === 'wireless' ? 'Radio' : 'Bridged' };
+      case 'wirelessRouter':
+        return port.kind === 'wireless' || port.id !== WAN_PORT
+          ? { ...base, layer: 'plain', label: port.kind === 'wireless' ? 'Radio, LAN' : 'LAN' }
+          : { ...base, layer: 'plain', label: 'Internet' };
       default: {
         const exhaustive: never = device;
         return exhaustive;
@@ -170,6 +180,7 @@ export function portRows(topology: Topology, device: Device): PortRow[] {
 export const CABLE_LABELS: Record<Link['cable'], string> = {
   straight: 'Copper straight-through',
   crossover: 'Copper crossover',
+  fiber: 'Fiber',
   serial: 'Serial DCE/DTE',
   console: 'Console',
 };

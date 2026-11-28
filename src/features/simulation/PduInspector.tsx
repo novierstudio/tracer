@@ -37,6 +37,8 @@ type Tone = 'accent' | 'ok' | 'err' | 'muted';
 const DECISION_LOOK: Record<Decision['kind'], { icon: LucideIcon; tone: Tone; layer: LayerId[] }> =
   {
     lost: { icon: CircleXIcon, tone: 'err', layer: ['physical'] },
+    collision: { icon: CircleXIcon, tone: 'err', layer: ['physical'] },
+    repeated: { icon: NetworkIcon, tone: 'accent', layer: ['physical'] },
     'link-test': { icon: ActivityIcon, tone: 'muted', layer: ['hello'] },
     'spanning-tree': { icon: NetworkIcon, tone: 'accent', layer: ['bpdu'] },
     neighbor: { icon: BookmarkCheckIcon, tone: 'accent', layer: ['cdp', 'lldp'] },

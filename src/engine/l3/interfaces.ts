@@ -8,7 +8,9 @@ import type {
   SubinterfaceId,
   VlanId,
 } from '@/model';
+import { WAN_PORT } from '@/model/cabling';
 import { parentPort } from '@/model/vlans';
+import { bridgedPorts, HOME_LAN } from '@/model/wireless';
 import { egressFrame, ingressVlan, vlanPorts } from '../l2/switching';
 import type { DeviceContext } from '../module';
 import type { EthernetFrame } from '../pdu';
@@ -50,7 +52,9 @@ export type Links = Pick<DeviceContext, 'portUp' | 'forwards'>;
  * switch with `ip routing`. Every other device only sends and receives its own packets.
  */
 export const routesPackets = (device: Device): boolean =>
-  device.kind === 'router' || (device.kind === 'switch' && device.config.ipRouting === true);
+  device.kind === 'router' ||
+  device.kind === 'wirelessRouter' ||
+  (device.kind === 'switch' && device.config.ipRouting === true);
 
 /** Each port with an address and its link up, as a routed interface. */
 function routedPorts(
@@ -162,11 +166,44 @@ export function ipInterfaces(
       };
       return [...routedPorts(device, routedAddress, links), ...svis(device, links)];
     }
+    case 'wirelessRouter':
+      return homeRouterInterfaces(device, links, host);
+    case 'hub':
+    case 'accessPoint':
+      return [];
     default: {
       const exhaustive: never = device;
       return exhaustive;
     }
   }
+}
+
+/**
+ * A home router routes between two interfaces: its Internet port, with the address it was set or
+ * leased, and its LAN, which its LAN ports and radio switch between as one VLAN. The LAN answers
+ * with the first LAN port's MAC, and stays up while the router runs, as a built-in switch does.
+ */
+function homeRouterInterfaces(
+  device: Extract<Device, { kind: 'wirelessRouter' }>,
+  links: Links,
+  host: HostAddressing | undefined,
+): IpInterface[] {
+  const found: IpInterface[] = [];
+  const wan = device.ports.find((port) => port.id === WAN_PORT);
+  const address = host && addressOf(host);
+  if (wan && wan.kind !== 'serial' && address && links.portUp(wan.id)) {
+    found.push({
+      name: wan.id,
+      cidr: address,
+      medium: { kind: 'ethernet', port: wan.id, mac: wan.mac },
+    });
+  }
+  const lan = device.ports.find((port) => port.id !== WAN_PORT);
+  if (lan && lan.kind !== 'serial') {
+    const medium = { kind: 'svi', vlan: 1 as VlanId, mac: lan.mac } as const;
+    found.push({ name: HOME_LAN, cidr: device.config.lan, medium });
+  }
+  return found;
 }
 
 /** An interface on an Ethernet LAN: it has a MAC address and resolves neighbours with ARP. */
@@ -194,6 +231,9 @@ export function lanInterfaceFor(
   frame: EthernetFrame,
 ): LanInterface | undefined {
   const { device } = ctx;
+  if (device.kind === 'wirelessRouter' && port !== WAN_PORT) {
+    return interfaces.find((iface): iface is LanInterface => iface.medium.kind === 'svi');
+  }
   const switchport = device.kind === 'switch' && device.config.interfaces[port]?.switchport;
   if (switchport) {
     const vlan = ingressVlan(switchport, frame);
@@ -231,6 +271,12 @@ export function sendOnLan(
     return;
   }
   const { device } = ctx;
+  if (device.kind === 'wirelessRouter') {
+    for (const out of bridgedPorts(device)) {
+      if ((port === undefined || out === port) && ctx.portUp(out)) ctx.send(out, frame);
+    }
+    return;
+  }
   if (device.kind !== 'switch') return;
   const bundles = new Set<string>();
   for (const out of vlanPorts(device, medium.vlan)) {

@@ -1,11 +1,14 @@
 import { addressOf, gatewayOf } from '@/engine/l3/hostAddress';
 import type { UnreachableCode } from '@/engine/pdu';
 import {
+  associations,
   formatSubnetMask,
+  linkAt,
   type Device,
   type Ipv4Address,
   type MacAddress,
   type Port,
+  type Topology,
 } from '@/model';
 import {
   iosAddress,
@@ -36,6 +39,14 @@ export type EthernetPort = Exclude<Port, { kind: 'serial' }>;
 /** The host's one address belongs to its first Ethernet port, as in the inspector. */
 export function addressPort(device: HostDevice): EthernetPort | undefined {
   return device.ports.find((port): port is EthernetPort => port.kind !== 'serial');
+}
+
+/** Whether the host's network card is connected: a cable in its port, or its radio associated. */
+export function nicConnected(topology: Topology, device: HostDevice): boolean {
+  const port = addressPort(device);
+  if (!port) return false;
+  if (port.kind !== 'wireless') return !!linkAt(topology, { device: device.id, port: port.id });
+  return associations(Object.values(topology.devices)).some((link) => link.a.device === device.id);
 }
 
 /** `02:00:00:00:00:0a` → `02-00-00-00-00-0A`, as Windows prints a MAC. */

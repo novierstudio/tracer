@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "meta": {
     "name": "EtherChannel between switches",
     "createdAt": "2026-11-25T00:00:00.000Z",
@@ -1036,7 +1036,7 @@
         "device": "dev_eSW2",
         "port": "GigabitEthernet0/1"
       },
-      "cable": "straight"
+      "cable": "crossover"
     },
     "lnk_eSW1SW22": {
       "id": "lnk_eSW1SW22",
@@ -1048,7 +1048,7 @@
         "device": "dev_eSW2",
         "port": "GigabitEthernet0/2"
       },
-      "cable": "straight"
+      "cable": "crossover"
     },
     "lnk_ePC1SW1": {
       "id": "lnk_ePC1SW1",

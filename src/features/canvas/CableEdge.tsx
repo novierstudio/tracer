@@ -6,6 +6,7 @@ import {
   type CableEdgeData,
   type CableFlowEdge,
   type DeviceNodeData,
+  type WirelessFlowEdge,
 } from './flow';
 import { footprint, layoutCable, type Size, type Vec } from './geometry';
 import { useLinkLights, type LinkLight } from './lights';
@@ -91,6 +92,31 @@ export const CableEdge = memo(function CableEdge(props: EdgeProps<CableFlowEdge>
           <PortLabel at={layout.labels[1]} text={ports[1]} />
         </>
       )}
+    </g>
+  );
+});
+
+/**
+ * A host's association with an access point or home router: a dotted line between the two tiles
+ * with radio arcs at the host's end, drawn while the link is up, as Packet Tracer draws its waves.
+ */
+export const WirelessEdge = memo(function WirelessEdge(props: EdgeProps<WirelessFlowEdge>) {
+  const { id, sourceX, sourceY, targetX, targetY } = props;
+  const lights = useLinkLights(id as LinkId);
+  if (lights.a === 'down') return null;
+  const length = Math.hypot(targetX - sourceX, targetY - sourceY) || 1;
+  const ux = (targetX - sourceX) / length;
+  const uy = (targetY - sourceY) / length;
+  const reach = Math.min(34, length / 2);
+  const from = { x: sourceX + ux * reach, y: sourceY + uy * reach };
+  const to = { x: targetX - ux * reach, y: targetY - uy * reach };
+  const angle = (Math.atan2(uy, ux) * 180) / Math.PI;
+  return (
+    <g className="wireless" data-state={lights.a}>
+      <path className="wireless-path" d={`M${from.x},${from.y}L${to.x},${to.y}`} />
+      <g transform={`translate(${from.x} ${from.y}) rotate(${angle})`}>
+        <path className="wireless-waves" d="M4,-4a6,6 0 0 1 0,8M8,-7a10,10 0 0 1 0,14" />
+      </g>
     </g>
   );
 });

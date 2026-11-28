@@ -71,11 +71,15 @@ const KIND_NAME: Record<DeviceKind, string> = {
   switch: 'switch',
   pc: 'PC',
   server: 'server',
+  hub: 'hub',
+  accessPoint: 'access point',
+  wirelessRouter: 'wireless router',
 };
 
 const CABLE_NAME: Record<Cable, string> = {
   straight: 'straight-through',
   crossover: 'crossover',
+  fiber: 'fiber',
   serial: 'serial',
   console: 'console',
 };
@@ -142,11 +146,6 @@ export function summarizeReport(report: ImportReport, topology: Topology): Repor
       case 'device-approximated':
         add('approximated', {
           label: `${name(entry.device)}: ${entry.ptType} imported as a ${KIND_NAME[entry.as]}`,
-        });
-        break;
-      case 'port-approximated':
-        add('approximated', {
-          label: `${at(name(entry.device), entry.port)}: fiber port imported as copper`,
         });
         break;
       case 'port-names-guessed':

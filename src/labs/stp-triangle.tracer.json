@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "meta": {
     "name": "Spanning tree triangle",
     "createdAt": "2026-11-25T00:00:00.000Z",
@@ -1470,7 +1470,7 @@
         "device": "dev_stSW2",
         "port": "GigabitEthernet0/1"
       },
-      "cable": "straight"
+      "cable": "crossover"
     },
     "lnk_stSW1SW3": {
       "id": "lnk_stSW1SW3",
@@ -1482,7 +1482,7 @@
         "device": "dev_stSW3",
         "port": "GigabitEthernet0/1"
       },
-      "cable": "straight"
+      "cable": "crossover"
     },
     "lnk_stSW2SW3": {
       "id": "lnk_stSW2SW3",
@@ -1494,7 +1494,7 @@
         "device": "dev_stSW3",
         "port": "GigabitEthernet0/2"
       },
-      "cable": "straight"
+      "cable": "crossover"
     },
     "lnk_stPC1SW2": {
       "id": "lnk_stPC1SW2",

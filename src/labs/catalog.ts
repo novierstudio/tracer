@@ -251,6 +251,36 @@ export const SAMPLE_LABS: readonly SampleLab[] = [
     ],
     load: () => import('./port-security.tracer.json?raw').then(text),
   },
+  {
+    id: 'hub-collisions',
+    title: 'Hub and collisions',
+    description:
+      'Three PCs on a hub. The hub repeats every frame to every port, and its ports share one segment, so two frames that meet there collide.',
+    difficulty: 'beginner',
+    devices: { hub: 1, pc: 3 },
+    tryThis: [
+      'Ping PC2 (192.168.1.11) from PC1, and watch the hub copy each frame to PC3 too',
+      'Switch to Simulation mode',
+      'Type `ping 192.168.1.12` on PC1, then on PC2, before stepping',
+      'Step: both ARP requests reach Hub1 at once and collide, and both pings time out',
+    ],
+    load: () => import('./hub-collisions.tracer.json?raw').then(text),
+  },
+  {
+    id: 'home-wireless',
+    title: 'Home wireless network',
+    description:
+      'A home wireless router between laptops and an ISP. It takes its Internet address by DHCP, lends addresses on its LAN and wireless, and translates them to the Internet.',
+    difficulty: 'beginner',
+    devices: { router: 1, server: 1, wirelessRouter: 1, pc: 3 },
+    tryThis: [
+      'Open Laptop1’s PC Wireless app and join HomeNet with the key `tracer123`',
+      'Run `ipconfig` on Laptop1: it leased an address from HomeRouter',
+      'Ping Server1 (198.51.100.10) from Laptop1',
+      'Change HomeRouter’s passphrase in its Config tab, and watch the laptops drop off',
+    ],
+    load: () => import('./home-wireless.tracer.json?raw').then(text),
+  },
 ];
 
 export const DIFFICULTY_LABELS: Record<Difficulty, string> = {

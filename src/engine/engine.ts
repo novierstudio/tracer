@@ -1,6 +1,7 @@
 import { DEFAULT_LAB_SETTINGS, labSettings } from '@/model/defaults';
 import type { Device, DeviceId, Endpoint, LabSettings, Link, LinkId, Topology } from '@/model';
 import { err, ok, type Result } from '@/model/result';
+import { associations, type Association } from '@/model/wireless';
 import { cloneState } from './core/clone';
 import { createEventLog, type EventLog } from './core/log';
 import { createEventQueue, type QueueEntry, type SavedEntry } from './core/queue';
@@ -8,7 +9,7 @@ import { drawRandom } from './core/random';
 import { after, ms, START, type SimDuration, type SimTime } from './core/time';
 import type { EventId, SentFrame, SimEvent } from './events';
 import type { Frame } from './frame';
-import { endUp, linkSyslog } from './l1';
+import { linkSyslog, linkUp } from './l1';
 import type { DeviceUnavailable, ModuleContext, SimModule, Stacks } from './module';
 import type { TopologyPatch } from './patch';
 
@@ -40,6 +41,11 @@ export type Engine = {
   ): Result<R, DeviceUnavailable>;
   /** What each end of each link in the simulation is doing now. */
   linkStates(): Record<LinkId, LinkStatus>;
+  /**
+   * Whether frames that reach a shared segment, such as a hub, at the same instant collide, as in
+   * Packet Tracer's Simulation mode. Off, as in realtime, each arrives in turn.
+   */
+  detectCollisions(on: boolean): void;
   /** Everything the run depends on now, so `restore` can return to this moment. */
   snapshot(): EngineSnapshot;
   /**
@@ -82,7 +88,10 @@ type Slot = {
   timers: Map<string, QueueEntry<Scheduled>>;
 };
 
-type LinkState = { link: Link; up: boolean; generation: number };
+/** A cable from the topology, or a host's association with a radio, which the devices imply. */
+type SimLink = Link | Association;
+
+type LinkState = { link: SimLink; up: boolean; generation: number };
 
 type Scheduled =
   | {
@@ -101,7 +110,7 @@ const endpointKey = ({ device, port }: Endpoint) => `${device} ${port}`;
 const sameEndpoint = (left: Endpoint, right: Endpoint) =>
   left.device === right.device && left.port === right.port;
 
-const sameWiring = (left: Link, right: Link) =>
+const sameWiring = (left: SimLink, right: SimLink) =>
   left.cable === right.cable && sameEndpoint(left.a, right.a) && sameEndpoint(left.b, right.b);
 
 export function createEngine({
@@ -114,7 +123,8 @@ export function createEngine({
   const log = createEventLog(logCapacity);
   const devices = new Map<DeviceId, Device>();
   const links = new Map<LinkId, LinkState>();
-  const portLinks = new Map<string, LinkState>();
+  // A cabled port has one link. A radio has one per client associated with it.
+  const portLinks = new Map<string, LinkState[]>();
   const running = new Map<DeviceId, Slot[]>();
   let randomState = seed >>> 0;
   let now = START;
@@ -124,6 +134,9 @@ export function createEngine({
   let loading = false;
   // What the device handling an arriving frame sends, while it handles it.
   let handling: SentFrame[] | undefined;
+  // The frame being handled and where it came from, so a radio relaying it skips its sender.
+  let relaying: { frame: Frame; from: Endpoint } | undefined;
+  let collisions = false;
 
   function random() {
     const draw = drawRandom(randomState);
@@ -131,34 +144,42 @@ export function createEngine({
     return draw.value;
   }
 
+  /**
+   * Puts a frame on the port's link, or on each of a radio's associations: a radio is a medium its
+   * clients share. A frame it relays never goes back to the client it heard the frame from.
+   */
   function send(from: Endpoint, frame: Frame) {
-    const state = portLinks.get(endpointKey(from));
-    if (!state) return;
-    const { link } = state;
-    const to = sameEndpoint(link.a, from) ? link.b : link.a;
+    const states = portLinks.get(endpointKey(from));
+    if (!states) return;
     handling?.push({ port: from.port, frame });
-    if (!state.up) {
-      log.append({
-        kind: 'frame',
-        time: now,
-        sentAt: now,
+    for (const state of states) {
+      const { link } = state;
+      const to = sameEndpoint(link.a, from) ? link.b : link.a;
+      const echo = relaying?.frame === frame && sameEndpoint(to, relaying.from);
+      if (link.cable === 'wireless' && echo) continue;
+      if (!state.up) {
+        log.append({
+          kind: 'frame',
+          time: now,
+          sentAt: now,
+          link: link.id,
+          from,
+          to,
+          frame,
+          outcome: 'link-down',
+        });
+        continue;
+      }
+      queue.push(after(now, linkDelay), {
+        kind: 'arrival',
         link: link.id,
+        generation: state.generation,
         from,
         to,
         frame,
-        outcome: 'link-down',
+        sentAt: now,
       });
-      return;
     }
-    queue.push(after(now, linkDelay), {
-      kind: 'arrival',
-      link: link.id,
-      generation: state.generation,
-      from,
-      to,
-      frame,
-      sentAt: now,
-    });
   }
 
   function createSlot(id: DeviceId, module: SimModule): Slot {
@@ -178,7 +199,8 @@ export function createEngine({
         get settings() {
           return settings;
         },
-        portUp: (port) => portLinks.get(endpointKey({ device: id, port }))?.up ?? false,
+        portUp: (port) =>
+          portLinks.get(endpointKey({ device: id, port }))?.some((state) => state.up) ?? false,
         forwards: (port, vlan) =>
           slot.ctx.portUp(port) &&
           !(running.get(id) ?? []).some((other) => other.module.holdsVlan?.(other.ctx, port, vlan)),
@@ -229,7 +251,7 @@ export function createEngine({
     running.delete(id);
   }
 
-  function linkChanged(link: Link, up: boolean) {
+  function linkChanged(link: SimLink, up: boolean) {
     log.append({ kind: 'link', time: now, link: link.id, up });
     // Devices booting with a lab print nothing: their consoles open on a running network.
     if (!loading) {
@@ -252,14 +274,13 @@ export function createEngine({
   }
 
   /** Brings the chosen links up or down as their ends allow, and returns those that changed. */
-  function linkTransitions(chosen: (link: Link) => boolean): [Link, boolean][] {
-    const transitions: [Link, boolean][] = [];
+  function linkTransitions(chosen: (link: SimLink) => boolean): [SimLink, boolean][] {
+    const transitions: [SimLink, boolean][] = [];
     for (const state of links.values()) {
       if (!chosen(state.link)) continue;
-      const { a, b, cable } = state.link;
+      const { a, b } = state.link;
       const up =
-        endUp(devices.get(a.device), a.port, cable) &&
-        endUp(devices.get(b.device), b.port, cable) &&
+        linkUp(state.link, devices.get(a.device), devices.get(b.device)) &&
         !disabled(a) &&
         !disabled(b);
       if (up === state.up) continue;
@@ -270,16 +291,27 @@ export function createEngine({
     return transitions;
   }
 
-  function relink(chosen: (link: Link) => boolean) {
+  function relink(chosen: (link: SimLink) => boolean) {
     for (const [link, up] of linkTransitions(chosen)) linkChanged(link, up);
   }
 
   function indexPorts() {
     portLinks.clear();
     for (const state of links.values()) {
-      portLinks.set(endpointKey(state.link.a), state);
-      portLinks.set(endpointKey(state.link.b), state);
+      for (const end of [state.link.a, state.link.b]) {
+        const key = endpointKey(end);
+        portLinks.set(key, [...(portLinks.get(key) ?? []), state]);
+      }
     }
+  }
+
+  /** The associations the devices make now, and those that ended, as a patch to the links. */
+  function wirelessPatch(): Record<LinkId, Association | null> {
+    const wanted = associations(devices.values());
+    const patch: Record<LinkId, Association | null> = {};
+    for (const [id, state] of links) if (state.link.cable === 'wireless') patch[id] = null;
+    for (const association of wanted) patch[association.id] = association;
+    return patch;
   }
 
   function applyPatch(patch: TopologyPatch) {
@@ -297,8 +329,9 @@ export function createEngine({
       else devices.delete(id);
     }
 
-    const transitions: [Link, boolean][] = [];
-    for (const [id, next] of Object.entries(patch.links) as [LinkId, Link | null][]) {
+    const transitions: [SimLink, boolean][] = [];
+    const changes = { ...patch.links, ...wirelessPatch() };
+    for (const [id, next] of Object.entries(changes) as [LinkId, SimLink | null][]) {
       const current = links.get(id);
       if (current?.up && !(next && sameWiring(current.link, next))) {
         transitions.push([current.link, false]);
@@ -348,11 +381,53 @@ export function createEngine({
     }
   }
 
+  type Arrival = Extract<Scheduled, { kind: 'arrival' }>;
+
+  function deliverable(item: Arrival) {
+    const state = links.get(item.link);
+    return state?.up === true && state.generation === item.generation;
+  }
+
+  /**
+   * The frames that collide with `item` on a shared segment: those reaching another port of its
+   * device at this same instant. They leave the queue, since none of them arrives.
+   */
+  function rivals(item: Arrival): Arrival[] {
+    const device = devices.get(item.to.device);
+    if (!collisions || !device || !stacks[device.kind].some((module) => module.sharedMedium)) {
+      return [];
+    }
+    const taken = queue.take(
+      ({ time, value }) =>
+        time === now &&
+        value.kind === 'arrival' &&
+        value.to.device === item.to.device &&
+        value.to.port !== item.to.port &&
+        deliverable(value),
+    );
+    return taken.map((entry) => entry.value as Arrival);
+  }
+
   function process(item: Scheduled) {
     switch (item.kind) {
       case 'arrival': {
-        const state = links.get(item.link);
-        const delivered = state?.up === true && state.generation === item.generation;
+        const delivered = deliverable(item);
+        const collided = delivered ? rivals(item) : [];
+        if (collided.length > 0) {
+          for (const { link, from, to, frame, sentAt } of [item, ...collided]) {
+            log.append({
+              kind: 'frame',
+              time: now,
+              sentAt,
+              link,
+              from,
+              to,
+              frame,
+              outcome: 'collision',
+            });
+          }
+          return;
+        }
         const { link, from, to, frame, sentAt } = item;
         // The device's sends fill in `sent` as it handles the frame, before the event leaves
         // the engine.
@@ -370,10 +445,12 @@ export function createEngine({
         });
         if (!delivered) return;
         handling = sent;
+        relaying = { frame, from };
         for (const slot of running.get(to.device) ?? []) {
           slot.module.onFrame?.(slot.ctx, to.port, frame);
         }
         handling = undefined;
+        relaying = undefined;
         return;
       }
       case 'timer':
@@ -522,5 +599,8 @@ export function createEngine({
     snapshot,
     restore,
     linkStates,
+    detectCollisions: (on) => {
+      collisions = on;
+    },
   };
 }

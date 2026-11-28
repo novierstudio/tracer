@@ -54,6 +54,11 @@ export interface ModuleContext<S> extends DeviceContext {
  */
 export interface SimModule<S = unknown> {
   readonly id: string;
+  /**
+   * The device's ports share one half-duplex segment, as a hub's do: while the engine detects
+   * collisions, frames that reach two of its ports at the same instant collide and none arrives.
+   */
+  readonly sharedMedium?: true;
   /** Called when the device boots: on load, when it is added, and when it powers on. */
   init(ctx: DeviceContext): S;
   /** A frame arrived on a port. Every module in the device's stack sees every frame, in order. */

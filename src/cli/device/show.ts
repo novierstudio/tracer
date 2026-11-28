@@ -502,6 +502,7 @@ const PORT_LABEL: Record<Port['kind'], [singular: string, plural: string]> = {
   fastEthernet: ['FastEthernet interface', 'FastEthernet interfaces'],
   gigabitEthernet: ['Gigabit Ethernet interface', 'Gigabit Ethernet interfaces'],
   serial: ['Serial interface', 'Serial interfaces'],
+  wireless: ['Wireless interface', 'Wireless interfaces'],
 };
 
 export function showVersion(device: IosDevice): string[] {
