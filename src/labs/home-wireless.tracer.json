@@ -1,0 +1,475 @@
+{
+  "version": 2,
+  "meta": {
+    "name": "Home wireless network",
+    "createdAt": "2026-11-25T00:00:00.000Z",
+    "updatedAt": "2026-11-25T00:00:00.000Z"
+  },
+  "devices": {
+    "dev_hwISP": {
+      "id": "dev_hwISP",
+      "model": "router-2g2s",
+      "position": {
+        "x": 584,
+        "y": 40
+      },
+      "powered": true,
+      "ports": [
+        {
+          "kind": "gigabitEthernet",
+          "id": "GigabitEthernet0/0",
+          "mac": "5a:14:b9:f8:ef:0d"
+        },
+        {
+          "kind": "gigabitEthernet",
+          "id": "GigabitEthernet0/1",
+          "mac": "ae:69:4e:8c:0a:9f"
+        },
+        {
+          "kind": "serial",
+          "id": "Serial0/0/0"
+        },
+        {
+          "kind": "serial",
+          "id": "Serial0/0/1"
+        }
+      ],
+      "kind": "router",
+      "config": {
+        "hostname": "ISP",
+        "virtualInterfaces": {},
+        "servicePasswordEncryption": false,
+        "domainLookup": true,
+        "unknownLines": [],
+        "interfaces": {
+          "GigabitEthernet0/0": {
+            "shutdown": false,
+            "ipv4": {
+              "address": "203.0.113.1",
+              "prefixLength": 24
+            }
+          },
+          "GigabitEthernet0/1": {
+            "shutdown": false,
+            "ipv4": {
+              "address": "198.51.100.1",
+              "prefixLength": 24
+            }
+          },
+          "Serial0/0/0": {
+            "shutdown": true
+          },
+          "Serial0/0/1": {
+            "shutdown": true
+          }
+        },
+        "subinterfaces": {},
+        "lines": {
+          "console": {
+            "login": "none",
+            "transportInput": {
+              "ssh": true,
+              "telnet": true
+            }
+          },
+          "aux": {
+            "login": "none",
+            "transportInput": {
+              "ssh": true,
+              "telnet": true
+            }
+          },
+          "vty": [
+            {
+              "login": "password",
+              "transportInput": {
+                "ssh": true,
+                "telnet": true
+              }
+            },
+            {
+              "login": "password",
+              "transportInput": {
+                "ssh": true,
+                "telnet": true
+              }
+            },
+            {
+              "login": "password",
+              "transportInput": {
+                "ssh": true,
+                "telnet": true
+              }
+            },
+            {
+              "login": "password",
+              "transportInput": {
+                "ssh": true,
+                "telnet": true
+              }
+            },
+            {
+              "login": "password",
+              "transportInput": {
+                "ssh": true,
+                "telnet": true
+              }
+            },
+            {
+              "login": "password",
+              "transportInput": {
+                "ssh": true,
+                "telnet": true
+              }
+            },
+            {
+              "login": "password",
+              "transportInput": {
+                "ssh": true,
+                "telnet": true
+              }
+            },
+            {
+              "login": "password",
+              "transportInput": {
+                "ssh": true,
+                "telnet": true
+              }
+            },
+            {
+              "login": "password",
+              "transportInput": {
+                "ssh": true,
+                "telnet": true
+              }
+            },
+            {
+              "login": "password",
+              "transportInput": {
+                "ssh": true,
+                "telnet": true
+              }
+            },
+            {
+              "login": "password",
+              "transportInput": {
+                "ssh": true,
+                "telnet": true
+              }
+            },
+            {
+              "login": "password",
+              "transportInput": {
+                "ssh": true,
+                "telnet": true
+              }
+            },
+            {
+              "login": "password",
+              "transportInput": {
+                "ssh": true,
+                "telnet": true
+              }
+            },
+            {
+              "login": "password",
+              "transportInput": {
+                "ssh": true,
+                "telnet": true
+              }
+            },
+            {
+              "login": "password",
+              "transportInput": {
+                "ssh": true,
+                "telnet": true
+              }
+            },
+            {
+              "login": "password",
+              "transportInput": {
+                "ssh": true,
+                "telnet": true
+              }
+            }
+          ]
+        },
+        "staticRoutes": [],
+        "dhcp": {
+          "pools": {
+            "CUSTOMERS": {
+              "network": {
+                "address": "203.0.113.0",
+                "prefixLength": 24
+              },
+              "defaultRouters": [
+                "203.0.113.1"
+              ],
+              "dnsServers": [
+                "198.51.100.10"
+              ]
+            }
+          },
+          "excluded": [
+            {
+              "first": "203.0.113.1",
+              "last": "203.0.113.9"
+            }
+          ]
+        }
+      }
+    },
+    "dev_hwServer1": {
+      "id": "dev_hwServer1",
+      "model": "server",
+      "position": {
+        "x": 904,
+        "y": 40
+      },
+      "powered": true,
+      "ports": [
+        {
+          "kind": "gigabitEthernet",
+          "id": "GigabitEthernet0",
+          "mac": "46:78:77:6e:42:f5"
+        }
+      ],
+      "kind": "server",
+      "config": {
+        "ipv4": {
+          "mode": "static",
+          "address": {
+            "address": "198.51.100.10",
+            "prefixLength": 24
+          },
+          "gateway": "198.51.100.1"
+        },
+        "hostname": "Server1",
+        "services": {
+          "dns": {
+            "enabled": false,
+            "records": []
+          },
+          "http": {
+            "enabled": true,
+            "indexHtml": "<h1>Hello from the Internet</h1>\n"
+          }
+        }
+      }
+    },
+    "dev_hwHomeRouter": {
+      "id": "dev_hwHomeRouter",
+      "model": "wireless-router",
+      "position": {
+        "x": 584,
+        "y": 264
+      },
+      "powered": true,
+      "ports": [
+        {
+          "kind": "fastEthernet",
+          "id": "Internet",
+          "mac": "76:22:7d:f9:f8:da"
+        },
+        {
+          "kind": "fastEthernet",
+          "id": "Ethernet1",
+          "mac": "ee:09:e0:fa:1e:fa"
+        },
+        {
+          "kind": "fastEthernet",
+          "id": "Ethernet2",
+          "mac": "b6:f1:08:f7:ab:2a"
+        },
+        {
+          "kind": "fastEthernet",
+          "id": "Ethernet3",
+          "mac": "6a:0d:95:77:83:0d"
+        },
+        {
+          "kind": "fastEthernet",
+          "id": "Ethernet4",
+          "mac": "22:4c:bf:73:3e:26"
+        },
+        {
+          "kind": "wireless",
+          "id": "Wireless",
+          "mac": "5a:19:36:29:29:19"
+        }
+      ],
+      "kind": "wirelessRouter",
+      "config": {
+        "wan": {
+          "mode": "dhcp"
+        },
+        "lan": {
+          "address": "192.168.0.1",
+          "prefixLength": 24
+        },
+        "dhcp": {
+          "enabled": true,
+          "start": "192.168.0.100",
+          "maxUsers": 50
+        },
+        "radio": {
+          "ssid": "HomeNet",
+          "security": {
+            "mode": "wpa2-psk",
+            "passphrase": "tracer123"
+          },
+          "channel": 6
+        },
+        "hostname": "HomeRouter"
+      }
+    },
+    "dev_hwLaptop1": {
+      "id": "dev_hwLaptop1",
+      "model": "laptop",
+      "position": {
+        "x": 264,
+        "y": 456
+      },
+      "powered": true,
+      "ports": [
+        {
+          "kind": "wireless",
+          "id": "Wireless0",
+          "mac": "62:aa:9a:2c:c5:e2"
+        }
+      ],
+      "kind": "pc",
+      "config": {
+        "ipv4": {
+          "mode": "dhcp"
+        },
+        "hostname": "Laptop1"
+      }
+    },
+    "dev_hwLaptop2": {
+      "id": "dev_hwLaptop2",
+      "model": "laptop",
+      "position": {
+        "x": 584,
+        "y": 488
+      },
+      "powered": true,
+      "ports": [
+        {
+          "kind": "wireless",
+          "id": "Wireless0",
+          "mac": "e6:02:1d:29:21:fb"
+        }
+      ],
+      "kind": "pc",
+      "config": {
+        "ipv4": {
+          "mode": "dhcp"
+        },
+        "hostname": "Laptop2",
+        "wireless": {
+          "ssid": "HomeNet",
+          "security": {
+            "mode": "wpa2-psk",
+            "passphrase": "tracer123"
+          }
+        }
+      }
+    },
+    "dev_hwPC1": {
+      "id": "dev_hwPC1",
+      "model": "pc",
+      "position": {
+        "x": 904,
+        "y": 456
+      },
+      "powered": true,
+      "ports": [
+        {
+          "kind": "fastEthernet",
+          "id": "FastEthernet0",
+          "mac": "b2:1f:56:da:90:69"
+        }
+      ],
+      "kind": "pc",
+      "config": {
+        "ipv4": {
+          "mode": "dhcp"
+        },
+        "hostname": "PC1"
+      }
+    }
+  },
+  "links": {
+    "lnk_hwHomeRouterISP": {
+      "id": "lnk_hwHomeRouterISP",
+      "a": {
+        "device": "dev_hwHomeRouter",
+        "port": "Internet"
+      },
+      "b": {
+        "device": "dev_hwISP",
+        "port": "GigabitEthernet0/0"
+      },
+      "cable": "crossover"
+    },
+    "lnk_hwISPServer1": {
+      "id": "lnk_hwISPServer1",
+      "a": {
+        "device": "dev_hwISP",
+        "port": "GigabitEthernet0/1"
+      },
+      "b": {
+        "device": "dev_hwServer1",
+        "port": "GigabitEthernet0"
+      },
+      "cable": "crossover"
+    },
+    "lnk_hwPC1HomeRouter": {
+      "id": "lnk_hwPC1HomeRouter",
+      "a": {
+        "device": "dev_hwPC1",
+        "port": "FastEthernet0"
+      },
+      "b": {
+        "device": "dev_hwHomeRouter",
+        "port": "Ethernet1"
+      },
+      "cable": "straight"
+    }
+  },
+  "annotations": {
+    "ann_hwwan": {
+      "id": "ann_hwwan",
+      "kind": "note",
+      "position": {
+        "x": 104,
+        "y": 120
+      },
+      "text": "HomeRouter’s Internet port takes 203.0.113.x from the ISP by DHCP. Its LAN, 192.168.0.0/24, reaches the Internet through PAT on that address.",
+      "width": 192,
+      "color": "amber"
+    },
+    "ann_hwjoin": {
+      "id": "ann_hwjoin",
+      "kind": "note",
+      "position": {
+        "x": 40,
+        "y": 560
+      },
+      "text": "Laptop1 has a wireless card but has joined no network. Open its PC Wireless app, join HomeNet with the key tracer123, and it gets an address by DHCP.",
+      "width": 192,
+      "color": "amber"
+    },
+    "ann_hwserver": {
+      "id": "ann_hwserver",
+      "kind": "note",
+      "position": {
+        "x": 904,
+        "y": 232
+      },
+      "text": "Server1 at 198.51.100.10 stands for the Internet. Ping it, or browse to it, from any laptop.",
+      "width": 192,
+      "color": "amber"
+    }
+  }
+}

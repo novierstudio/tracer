@@ -1,0 +1,198 @@
+{
+  "version": 2,
+  "meta": {
+    "name": "Hub and collisions",
+    "createdAt": "2026-11-25T00:00:00.000Z",
+    "updatedAt": "2026-11-25T00:00:00.000Z"
+  },
+  "devices": {
+    "dev_hcHub1": {
+      "id": "dev_hcHub1",
+      "model": "hub",
+      "position": {
+        "x": 424,
+        "y": 40
+      },
+      "powered": true,
+      "ports": [
+        {
+          "kind": "fastEthernet",
+          "id": "Port0",
+          "mac": "5a:14:b9:f8:ef:0d"
+        },
+        {
+          "kind": "fastEthernet",
+          "id": "Port1",
+          "mac": "ae:69:4e:8c:0a:9f"
+        },
+        {
+          "kind": "fastEthernet",
+          "id": "Port2",
+          "mac": "1e:01:9b:e2:6a:a0"
+        },
+        {
+          "kind": "fastEthernet",
+          "id": "Port3",
+          "mac": "1a:6d:0e:7d:d4:cd"
+        },
+        {
+          "kind": "fastEthernet",
+          "id": "Port4",
+          "mac": "ce:1d:a4:71:63:76"
+        },
+        {
+          "kind": "fastEthernet",
+          "id": "Port5",
+          "mac": "22:32:40:a5:22:15"
+        }
+      ],
+      "kind": "hub",
+      "config": {
+        "hostname": "Hub1"
+      }
+    },
+    "dev_hcPC1": {
+      "id": "dev_hcPC1",
+      "model": "pc",
+      "position": {
+        "x": 104,
+        "y": 232
+      },
+      "powered": true,
+      "ports": [
+        {
+          "kind": "fastEthernet",
+          "id": "FastEthernet0",
+          "mac": "46:78:77:6e:42:f5"
+        }
+      ],
+      "kind": "pc",
+      "config": {
+        "ipv4": {
+          "mode": "static",
+          "address": {
+            "address": "192.168.1.10",
+            "prefixLength": 24
+          }
+        },
+        "hostname": "PC1"
+      }
+    },
+    "dev_hcPC2": {
+      "id": "dev_hcPC2",
+      "model": "pc",
+      "position": {
+        "x": 424,
+        "y": 232
+      },
+      "powered": true,
+      "ports": [
+        {
+          "kind": "fastEthernet",
+          "id": "FastEthernet0",
+          "mac": "76:22:7d:f9:f8:da"
+        }
+      ],
+      "kind": "pc",
+      "config": {
+        "ipv4": {
+          "mode": "static",
+          "address": {
+            "address": "192.168.1.11",
+            "prefixLength": 24
+          }
+        },
+        "hostname": "PC2"
+      }
+    },
+    "dev_hcPC3": {
+      "id": "dev_hcPC3",
+      "model": "pc",
+      "position": {
+        "x": 744,
+        "y": 232
+      },
+      "powered": true,
+      "ports": [
+        {
+          "kind": "fastEthernet",
+          "id": "FastEthernet0",
+          "mac": "62:aa:9a:2c:c5:e2"
+        }
+      ],
+      "kind": "pc",
+      "config": {
+        "ipv4": {
+          "mode": "static",
+          "address": {
+            "address": "192.168.1.12",
+            "prefixLength": 24
+          }
+        },
+        "hostname": "PC3"
+      }
+    }
+  },
+  "links": {
+    "lnk_hcPC1Hub1": {
+      "id": "lnk_hcPC1Hub1",
+      "a": {
+        "device": "dev_hcPC1",
+        "port": "FastEthernet0"
+      },
+      "b": {
+        "device": "dev_hcHub1",
+        "port": "Port0"
+      },
+      "cable": "straight"
+    },
+    "lnk_hcPC2Hub1": {
+      "id": "lnk_hcPC2Hub1",
+      "a": {
+        "device": "dev_hcPC2",
+        "port": "FastEthernet0"
+      },
+      "b": {
+        "device": "dev_hcHub1",
+        "port": "Port1"
+      },
+      "cable": "straight"
+    },
+    "lnk_hcPC3Hub1": {
+      "id": "lnk_hcPC3Hub1",
+      "a": {
+        "device": "dev_hcPC3",
+        "port": "FastEthernet0"
+      },
+      "b": {
+        "device": "dev_hcHub1",
+        "port": "Port2"
+      },
+      "cable": "straight"
+    }
+  },
+  "annotations": {
+    "ann_hcrepeat": {
+      "id": "ann_hcrepeat",
+      "kind": "note",
+      "position": {
+        "x": 600,
+        "y": -16
+      },
+      "text": "Hub1 repeats every frame out of every other port, so each PC sees all traffic, even frames for someone else.",
+      "width": 192,
+      "color": "amber"
+    },
+    "ann_hccollide": {
+      "id": "ann_hccollide",
+      "kind": "note",
+      "position": {
+        "x": 264,
+        "y": 344
+      },
+      "text": "Its ports share one segment. In Simulation mode, ping PC3 from PC1, then from PC2, before you step: both ARP requests reach Hub1 at once, collide, and are lost.",
+      "width": 192,
+      "color": "amber"
+    }
+  }
+}
