@@ -37,7 +37,8 @@ import {
   type Topology,
 } from '@/model';
 import { applyLines, type IosDevice } from '@/cli';
-import { findDeviceModel, type DeviceModelId } from '@/devices/catalog';
+import { findDeviceModel, findDeviceModelByName, type DeviceModelId } from '@/devices/catalog';
+import { inferModules, storedModules } from '@/devices/modules';
 import { decryptPkt, type DecryptError } from './codec';
 import {
   readPtNetwork,
@@ -106,17 +107,18 @@ export function mapPktXml(xml: string, options: MapOptions = {}): Result<PktImpo
   return network.ok ? ok(mapNetwork(network.value, options)) : network;
 }
 
-/** `model` replaces Packet Tracer's model name where Tracer needs its own to tell what a device can do. */
+/** `model` is the catalog model for a device whose Packet Tracer model the catalog lacks. */
 type KindRule = {
   readonly kind: DeviceKind;
   readonly approximated: boolean;
   readonly model?: DeviceModelId;
 };
 
-// A MultiLayerSwitch, such as a 3560-24PS, is Tracer's multilayer switch, so its `ip routing`,
-// routed ports and static routes replay. A hub, an AccessPoint-PT and a WRT300N take Tracer's own
-// models and their ports in order; the file's wireless settings are not read, so the radios ship
-// with factory settings. Types missing here, such as Printer, are skipped.
+// Each device takes the catalog model of its Packet Tracer model name, such as 2911 or 3650-24PS.
+// A MultiLayerSwitch the catalog lacks is a 3560-24PS, so its `ip routing`, routed ports and static
+// routes replay. A hub, repeater, bridge, access point and home router take its catalog model's
+// ports in order; the file's wireless settings are not read, so the radios ship with factory
+// settings. Types missing here, such as Printer, are skipped.
 const DEVICE_KINDS = new Map<string, KindRule>([
   ['Router', { kind: 'router', approximated: false }],
   ['Switch', { kind: 'switch', approximated: false }],
@@ -125,6 +127,8 @@ const DEVICE_KINDS = new Map<string, KindRule>([
   ['Laptop', { kind: 'pc', approximated: false }],
   ['Server', { kind: 'server', approximated: false }],
   ['Hub', { kind: 'hub', approximated: false, model: 'hub' }],
+  ['Repeater', { kind: 'hub', approximated: false, model: 'repeater-pt' }],
+  ['Bridge', { kind: 'hub', approximated: true, model: 'bridge-pt' }],
   ['AccessPoint', { kind: 'accessPoint', approximated: true, model: 'access-point' }],
   ['WirelessRouter', { kind: 'wirelessRouter', approximated: true, model: 'wireless-router' }],
 ]);
@@ -284,15 +288,19 @@ function mapDevice(pt: PtDevice, rule: KindRule, position: Point, ctx: Context):
     entries.push({ kind: 'hostname-changed', device: id, name: pt.name, hostname });
   }
 
-  // A hub's, an access point's and a home router's ports are its Tracer model's, in order.
-  const model = rule.model && kind !== 'switch' ? findDeviceModel(rule.model) : undefined;
-  const named = model
+  const named = findDeviceModelByName(pt.model);
+  const catalog =
+    (named?.kind === kind ? named : undefined) ??
+    (rule.model ? findDeviceModel(rule.model) : undefined);
+  // A hub's, an access point's and a home router's ports are its catalog model's, in order.
+  const model = kind === 'router' || kind === 'switch' ? undefined : catalog;
+  const listed = model
     ? model.ports.map((port) => port.id)
     : kind === 'router' || kind === 'switch'
       ? configPortNames(pt)
       : hostPortNames(pt);
-  if (!named) entries.push({ kind: 'port-names-guessed', device: id });
-  const names = named ?? slotPortNames(pt);
+  if (!listed) entries.push({ kind: 'port-names-guessed', device: id });
+  const names = listed ?? slotPortNames(pt);
   const kindOf = (name: string, index: number) =>
     model ? model.ports[index]?.kind : PORT_KINDS.get(interfaceType(name));
 
@@ -320,12 +328,15 @@ function mapDevice(pt: PtDevice, rule: KindRule, position: Point, ctx: Context):
     ports.push({ port, pt: ptPort });
   });
 
+  const devicePorts = ports.map(({ port }) => port);
   const fields = {
     id,
-    model: rule.model ?? (pt.model || pt.type),
+    model: catalog?.id ?? (pt.model || pt.type),
     position,
     powered: pt.power,
-    ports: ports.map(({ port }) => port),
+    ports: devicePorts,
+    // The file lists ports, not modules: each slot gets the module whose ports it has.
+    ...(catalog?.slots && { modules: storedModules(inferModules(catalog, devicePorts)) }),
   };
   // "!" lines only separate blocks in a running-config.
   const lines = pt.runningConfig.filter((line) => !/^\s*!?\s*$/.test(line));
