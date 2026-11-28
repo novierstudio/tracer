@@ -8,6 +8,7 @@ import { importFile, type FileProblem, type ImportStage } from './importers';
 import {
   newLabId,
   openLabStorage,
+  requestPersistentStorage,
   type LabId,
   type LabStorage,
   type LabSummary,
@@ -95,7 +96,10 @@ export function createFileSession({
     delayMs,
     now,
     onStatus: (status) => state.setState({ status }),
-    onWrite: () => void refreshRecents(),
+    onWrite: () => {
+      void refreshRecents();
+      void requestPersistentStorage();
+    },
   });
 
   const replaceTopology = (topology: Topology) => {
