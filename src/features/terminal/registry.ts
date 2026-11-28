@@ -57,11 +57,8 @@ export function trackSyslog(client: Pick<SimClient, 'onBatch'>, registry: Consol
   });
 }
 
-/** The client's calls a console makes, and the simulated clock as its batches report it. */
-function linkTo({ sim, onBatch, ping, traceroute, openTerminal }: SimClient): SimLink {
-  let now = 0;
-  // A playing simulation sends a batch every frame, and a paused one's clock stands still.
-  onBatch((batch) => void (now = batch.now));
+/** The client's calls a console makes. */
+function linkTo({ sim, ping, traceroute, openTerminal }: SimClient): SimLink {
   return {
     routes: (device) => sim.routes(device),
     arpTable: (device) => sim.arpTable(device),
@@ -77,6 +74,7 @@ function linkTo({ sim, onBatch, ping, traceroute, openTerminal }: SimClient): Si
     layer2Status: (device) => sim.layer2Status(device),
     standbyStatus: (device) => sim.standbyStatus(device),
     now: () => now,
+    ntpStatus: (device) => sim.ntpStatus(device),
     ping,
     traceroute,
     cancel: (handle) => sim.cancel(handle),

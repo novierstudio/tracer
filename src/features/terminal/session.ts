@@ -55,13 +55,12 @@ export type SimQueries = {
       | 'ipv6Status'
       | 'layer2Status'
       | 'standbyStatus'
+      | 'ntpStatus'
   ]: Remote<SimAPI[K]>;
 };
 
 /** What a console reads from the simulation. */
 export type SimLink = SimQueries & {
-  /** The simulated clock as of the latest batch, in milliseconds since the run started. */
-  readonly now: () => number;
   readonly ping: (...args: Parameters<SimAPI['ping']>) => Promise<ReturnType<SimAPI['ping']>>;
   readonly traceroute: (
     ...args: Parameters<SimAPI['traceroute']>
@@ -90,7 +89,7 @@ export function engineSource(sim: SimLink, device: DeviceId, remote?: RemoteHook
     arp: () => sim.arpTable(device).then(valueOf),
     macTable: () => sim.macTable(device).then(valueOf),
     ports: () => sim.portStates(device).then(valueOf),
-    clock: async () => sim.now(),
+    ntp: () => sim.ntpStatus(device).then(valueOf),
     spanningTree: () => sim.spanningTree(device).then(valueOf),
     dhcpBindings: () => sim.dhcpBindings(device).then(valueOf),
     protocols: () => sim.routingProtocols(device).then(valueOf),

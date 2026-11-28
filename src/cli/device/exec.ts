@@ -109,12 +109,12 @@ export const execCommands = [
   command({
     modes: EXEC,
     path: [show, keyword('clock', 'Display the system clock')],
-    // The simulated clock counts from boot; with no simulation, the wall clock stands in.
+    // The clock counts from boot until NTP sets it; with no simulation, the wall clock stands in.
     run: (_a, ctx) =>
-      ctx.query('clock', (elapsed) => [
-        elapsed === undefined
+      ctx.query('ntp', (status) => [
+        status === undefined
           ? formatClock(new Date(), true)
-          : formatClock(new Date(BOOT + elapsed), false),
+          : formatClock(new Date(status.clock), status.synced),
       ]),
   }),
 ];

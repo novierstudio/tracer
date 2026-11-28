@@ -8,6 +8,7 @@ import type {
   Layer2Status,
   MacTableEntry,
   NatTranslationEntry,
+  NtpStatus,
   PingListener,
   PingOptions,
   ProbeHandle,
@@ -42,8 +43,8 @@ export interface EngineAnswers {
   readonly arp: readonly ArpTableEntry[];
   readonly macTable: readonly MacTableEntry[];
   readonly ports: PortStates;
-  /** The simulated clock, in milliseconds since the run started. */
-  readonly clock: number;
+  /** The device's clock and its NTP associations, for `show clock` and `show ntp`. */
+  readonly ntp: NtpStatus;
   readonly spanningTree: readonly SpanningTreeVlan[];
   /** A router's DHCP leases in force. */
   readonly dhcpBindings: readonly DhcpBindingEntry[];
