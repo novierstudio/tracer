@@ -44,6 +44,7 @@ const DECISION_LOOK: Record<Decision['kind'], { icon: LucideIcon; tone: Tone; la
     neighbor: { icon: BookmarkCheckIcon, tone: 'accent', layer: ['cdp', 'lldp'] },
     channel: { icon: NetworkIcon, tone: 'accent', layer: ['lacp', 'pagp'] },
     vtp: { icon: NetworkIcon, tone: 'accent', layer: ['vtp'] },
+    hsrp: { icon: RouteIcon, tone: 'accent', layer: ['hsrp'] },
     routed: { icon: ArrowRightIcon, tone: 'accent', layer: ['ipv4', 'ipv6'] },
     switched: { icon: ArrowRightIcon, tone: 'accent', layer: ['dot1q', 'ethernet'] },
     flooded: { icon: Share2Icon, tone: 'accent', layer: ['dot1q', 'ethernet'] },
