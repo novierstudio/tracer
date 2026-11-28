@@ -22,6 +22,7 @@ import type { EventId } from './events';
 import { createHistory, stepInstant, type History, type Input } from './history';
 import { discoveryModule, discoveryStatus } from './l2/discovery';
 import { macTable, spanningTreeOf, switchingModule, switchL2Status } from './l2/switching';
+import { vtpModule, vtpStatus } from './l2/vtp';
 import { aclHits } from './l3/acl';
 import { arpTable, clearArp } from './l3/arp';
 import { hostAddressingOf, routesOf, type IpContext } from './l3/context';
@@ -417,10 +418,12 @@ export function createSimService({
       const ports = engine.withModule(device, discoveryModule, (ctx) =>
         Object.fromEntries(ctx.device.ports.map((port) => [port.id, ctx.portUp(port.id)])),
       );
+      const vtp = engine.withModule(device, vtpModule, vtpStatus);
       const none = { etherchannels: [], portSecurity: [], errDisabled: [] };
       return ok({
         ...discovery.value,
         ...(switched.ok ? switched.value : none),
+        ...(vtp.ok && vtp.value && { vtp: vtp.value }),
         ports: ports.ok ? ports.value : {},
         clock: engine.now,
       });

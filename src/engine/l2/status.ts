@@ -4,6 +4,7 @@ import type {
   MacAddress,
   PortId,
   PortSecurityViolation,
+  VirtualInterfaceId,
   VlanId,
 } from '@/model';
 import type { ChannelProtocol } from '@/model/l2';
@@ -128,12 +129,23 @@ export type SwitchL2Status = {
   readonly errDisabled: readonly ErrDisabledPort[];
 };
 
+/** What `show vtp status` reads from VTP as it runs, beyond the config. */
+export type VtpStatus = {
+  /** Who made the change the VLAN database is at: 0.0.0.0 until one. */
+  readonly lastModifiedBy: Ipv4Address;
+  /** When, as `yymmddhhmmss`: all zeros until a change. */
+  readonly lastModifiedAt: string;
+  /** The lowest-numbered VLAN interface that has an address and is up, which a change here carries. */
+  readonly localUpdater?: { readonly interface: VirtualInterfaceId; readonly address: Ipv4Address };
+};
+
 /**
- * Everything layer 2 beyond switching, for the show commands of CDP, LLDP, EtherChannel and port
- * security. A router has no EtherChannels or secure ports.
+ * Everything layer 2 beyond switching, for the show commands of CDP, LLDP, EtherChannel, port
+ * security and VTP. A router has no EtherChannels, secure ports or VTP.
  */
 export type Layer2Status = DiscoveryStatus &
   SwitchL2Status & {
+    readonly vtp?: VtpStatus;
     /** Whether each port's link is up now. */
     readonly ports: Readonly<Partial<Record<PortId, boolean>>>;
     /** The simulated clock, for the ages show commands print. */

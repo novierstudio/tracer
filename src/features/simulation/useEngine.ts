@@ -5,6 +5,7 @@ import { exposeSimClient } from './devHandle';
 import { trackHostAddresses } from './hostAddresses';
 import { trackLinkStates } from './linkState';
 import { trackStickyMacs } from './stickyMacs';
+import { trackVlanDatabases } from './vlanDatabase';
 import { consoles, trackSyslog } from '@/features/terminal/registry';
 
 export type EngineState = 'starting' | 'ready' | 'failed';
@@ -22,6 +23,7 @@ export function useEngine(): EngineState {
     let stopTracking: (() => void) | undefined;
     let stopAddresses: (() => void) | undefined;
     let stopSticky: (() => void) | undefined;
+    let stopVlans: (() => void) | undefined;
     let stopSyslog: (() => void) | undefined;
     let disconnect: (() => void) | undefined;
     import('@/engine/client')
@@ -32,6 +34,7 @@ export function useEngine(): EngineState {
           stopTracking = trackLinkStates(client);
           stopAddresses = trackHostAddresses(client, editorStore);
           stopSticky = trackStickyMacs(client, editorStore);
+          stopVlans = trackVlanDatabases(client, editorStore);
           stopSyslog = trackSyslog(client, consoles);
           disconnect = connectSimulation(client);
           exposeSimClient(client);
@@ -47,6 +50,7 @@ export function useEngine(): EngineState {
       stopTracking?.();
       stopAddresses?.();
       stopSticky?.();
+      stopVlans?.();
       stopSyslog?.();
       disconnect?.();
     };

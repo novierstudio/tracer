@@ -23,6 +23,7 @@ import type {
   LldpNeighbor,
   PortSecurityStatus,
   SecureAddressEntry,
+  VtpStatus,
 } from './l2/status';
 import type { PortRole, PortState, SpanningTreePort, StpTimes } from './l2/stp';
 import type { AclHits } from './l3/acl';
@@ -81,6 +82,7 @@ export type {
   LldpNeighbor,
   PortSecurityStatus,
   SecureAddressEntry,
+  VtpStatus,
   DhcpBindingEntry,
   DhcpListener,
   DhcpOutcome,
