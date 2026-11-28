@@ -38,6 +38,7 @@ import { ipv6InterfaceLines, ipv6RouteLine } from './ipv6Config';
 import { sshLines, usernameLines } from './remote';
 import { eigrpLines } from './eigrpConfig';
 import { accessListLines, natLines } from './showAclNat';
+import { standbyLines } from './hsrpConfig';
 import { transparentVlanLines, vtpConfigLines } from './vtpConfig';
 
 export const UNSUPPORTED_MARKER = '! unsupported in Tracer';
@@ -242,6 +243,7 @@ function interfaceBlock(entry: InterfaceEntry): string[] {
     if (ospfCost !== undefined) lines.push(` ip ospf cost ${ospfCost}`);
     if (ospfPriority !== undefined) lines.push(` ip ospf priority ${ospfPriority}`);
     if (delay !== undefined) lines.push(` delay ${delay}`);
+    lines.push(...standbyLines(entry.config));
   }
   if (entry.kind !== 'subinterface') {
     if (entry.config.duplex) lines.push(` duplex ${entry.config.duplex}`);

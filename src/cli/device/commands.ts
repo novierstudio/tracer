@@ -68,6 +68,7 @@ import {
   removePortChannel,
 } from './etherchannel';
 import { portSecurityCommands } from './portSecurity';
+import { hsrpCommands } from './hsrp';
 import { countVlanChange, isVtpClient, VTP_CLIENT_REFUSAL, vtpCommands } from './vtp';
 import {
   showInterfacesSwitchport,
@@ -857,6 +858,7 @@ export const routerCommands = [
   ...helperAddressCommands(),
   ...dhcpCommands,
   ...ospfCommands,
+  ...hsrpCommands,
   ...eigrpCommands,
   ...ripCommands,
   ...aclCommands,
@@ -1194,6 +1196,7 @@ export const switchCommands = [
   ...etherchannelCommands,
   ...portSecurityCommands,
   ...vtpCommands,
+  ...hsrpCommands,
   switchCommand({
     modes: GLOBAL,
     path: [keyword('vlan', 'Vlan commands'), num('vlan', 1, 4094, 'ISL VLAN IDs 1-1005')],

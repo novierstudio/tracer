@@ -460,7 +460,12 @@ function onTick(ctx: HsrpContext, key: string) {
     case 'speak':
       if (waited) {
         const standby = !run.standby || !outranks(run.standby, run, iface);
-        enter(ctx, iface, group, run, !run.active ? 'active' : standby ? 'standby' : 'listen');
+        if (!run.active) {
+          // With no active router the group's standby takes over at once, logged as two steps
+          // as Packet Tracer does: Speak -> Standby, then Standby -> Active.
+          enter(ctx, undefined, group, run, 'standby');
+          enter(ctx, iface, group, run, 'active');
+        } else enter(ctx, iface, group, run, standby ? 'standby' : 'listen');
         return;
       }
       break;
