@@ -42,13 +42,6 @@ export type ReportEntry =
       readonly port: string;
       readonly ptType: string;
     }
-  /** A fiber port imported as copper. */
-  | {
-      readonly kind: 'port-approximated';
-      readonly device: DeviceId;
-      readonly port: PortId;
-      readonly ptType: string;
-    }
   /** The running-config did not name the ports, so they were named from their slots. */
   | { readonly kind: 'port-names-guessed'; readonly device: DeviceId }
   /** The port had no valid MAC address, so it got a generated one. */
@@ -83,7 +76,6 @@ export const ENTRY_OUTCOME: { readonly [K in ReportEntry['kind']]: ImportOutcome
   'device-approximated': 'approximated',
   'hostname-changed': 'approximated',
   'port-skipped': 'skipped',
-  'port-approximated': 'approximated',
   'port-names-guessed': 'approximated',
   'mac-generated': 'approximated',
   'value-ignored': 'skipped',

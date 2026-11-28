@@ -148,11 +148,6 @@ export function summarizeReport(report: ImportReport, topology: Topology): Repor
           label: `${name(entry.device)}: ${entry.ptType} imported as a ${KIND_NAME[entry.as]}`,
         });
         break;
-      case 'port-approximated':
-        add('approximated', {
-          label: `${at(name(entry.device), entry.port)}: fiber port imported as copper`,
-        });
-        break;
       case 'port-names-guessed':
         add('approximated', {
           label: `${name(entry.device)}: ports named from their slots, as the config did not name them`,

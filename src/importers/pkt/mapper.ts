@@ -37,7 +37,7 @@ import {
   type Topology,
 } from '@/model';
 import { applyLines, type IosDevice } from '@/cli';
-import type { DeviceModelId } from '@/devices/catalog';
+import { findDeviceModel, type DeviceModelId } from '@/devices/catalog';
 import { decryptPkt, type DecryptError } from './codec';
 import {
   readPtNetwork,
@@ -114,8 +114,9 @@ type KindRule = {
 };
 
 // A MultiLayerSwitch, such as a 3560-24PS, is Tracer's multilayer switch, so its `ip routing`,
-// routed ports and static routes replay. Types missing here, such as Printer or AccessPoint, are
-// skipped.
+// routed ports and static routes replay. A hub, an AccessPoint-PT and a WRT300N take Tracer's own
+// models and their ports in order; the file's wireless settings are not read, so the radios ship
+// with factory settings. Types missing here, such as Printer, are skipped.
 const DEVICE_KINDS = new Map<string, KindRule>([
   ['Router', { kind: 'router', approximated: false }],
   ['Switch', { kind: 'switch', approximated: false }],
@@ -123,6 +124,9 @@ const DEVICE_KINDS = new Map<string, KindRule>([
   ['Pc', { kind: 'pc', approximated: false }],
   ['Laptop', { kind: 'pc', approximated: false }],
   ['Server', { kind: 'server', approximated: false }],
+  ['Hub', { kind: 'hub', approximated: false, model: 'hub' }],
+  ['AccessPoint', { kind: 'accessPoint', approximated: true, model: 'access-point' }],
+  ['WirelessRouter', { kind: 'wirelessRouter', approximated: true, model: 'wireless-router' }],
 ]);
 
 const KIND_LABEL: Record<DeviceKind, string> = {
@@ -146,15 +150,22 @@ const PT_PORT_TYPES = new Map<string, { readonly prefix: string; readonly fiber:
   ['eSmartSerial', { prefix: 'Serial', fiber: false }],
 ]);
 
+/** A port's type, by its PORT/TYPE. Any wireless card is a host's radio, `Wireless0`. */
+const ptPortType = (type: string) =>
+  PT_PORT_TYPES.get(type) ??
+  (/wireless/i.test(type) ? { prefix: 'Wireless', fiber: false } : undefined);
+
 const PORT_KINDS = new Map<string, PortKind>([
   ['FastEthernet', 'fastEthernet'],
   ['GigabitEthernet', 'gigabitEthernet'],
   ['Serial', 'serial'],
+  ['Wireless', 'wireless'],
 ]);
 
 const CABLES = new Map<string, Cable>([
   ['eStraightThrough', 'straight'],
   ['eCrossOver', 'crossover'],
+  ['eFiber', 'fiber'],
   ['eSerial', 'serial'],
   // A console cable is a rollover cable.
   ['eRollOver', 'console'],
@@ -273,31 +284,39 @@ function mapDevice(pt: PtDevice, rule: KindRule, position: Point, ctx: Context):
     entries.push({ kind: 'hostname-changed', device: id, name: pt.name, hostname });
   }
 
-  const named = kind === 'router' || kind === 'switch' ? configPortNames(pt) : hostPortNames(pt);
+  // A hub's, an access point's and a home router's ports are its Tracer model's, in order.
+  const model = rule.model && kind !== 'switch' ? findDeviceModel(rule.model) : undefined;
+  const named = model
+    ? model.ports.map((port) => port.id)
+    : kind === 'router' || kind === 'switch'
+      ? configPortNames(pt)
+      : hostPortNames(pt);
   if (!named) entries.push({ kind: 'port-names-guessed', device: id });
   const names = named ?? slotPortNames(pt);
+  const kindOf = (name: string, index: number) =>
+    model ? model.ports[index]?.kind : PORT_KINDS.get(interfaceType(name));
 
   const ports: { readonly port: Port; readonly pt: PtPort }[] = [];
   pt.ports.forEach((ptPort, index) => {
     const name = names[index] ?? '';
-    const portKind = PORT_KINDS.get(interfaceType(name));
+    const portKind = kindOf(name, index);
     const portId = PortId.safeParse(name);
     if (!portKind || !portId.success) {
       entries.push({ kind: 'port-skipped', device: id, port: name, ptType: ptPort.type });
       return;
     }
-    if (PT_PORT_TYPES.get(ptPort.type)?.fiber) {
-      entries.push({
-        kind: 'port-approximated',
-        device: id,
-        port: portId.data,
-        ptType: ptPort.type,
-      });
-    }
+    const mac = () => macAddress(ptPort, id, portId.data, ctx);
     const port: Port =
       portKind === 'serial'
         ? { kind: portKind, id: portId.data }
-        : { kind: portKind, id: portId.data, mac: macAddress(ptPort, id, portId.data, ctx) };
+        : portKind === 'wireless'
+          ? { kind: portKind, id: portId.data, mac: mac() }
+          : {
+              kind: portKind,
+              id: portId.data,
+              mac: mac(),
+              ...(ptPortType(ptPort.type)?.fiber && { fiber: true }),
+            };
     ports.push({ port, pt: ptPort });
   });
 
@@ -392,7 +411,7 @@ function configPortNames(pt: PtDevice): readonly string[] | undefined {
   const fits =
     names.length === pt.ports.length &&
     pt.ports.every((port, index) => {
-      const prefix = PT_PORT_TYPES.get(port.type)?.prefix;
+      const prefix = ptPortType(port.type)?.prefix;
       return prefix === undefined || interfaceType(names[index] ?? '') === prefix;
     });
   return fits ? names : undefined;
@@ -402,7 +421,7 @@ function configPortNames(pt: PtDevice): readonly string[] | undefined {
 function hostPortNames(pt: PtDevice): readonly (string | undefined)[] {
   const counts = new Map<string, number>();
   return pt.ports.map((port) => {
-    const prefix = PT_PORT_TYPES.get(port.type)?.prefix;
+    const prefix = ptPortType(port.type)?.prefix;
     if (!prefix) return undefined;
     const count = counts.get(prefix) ?? 0;
     counts.set(prefix, count + 1);
@@ -413,7 +432,7 @@ function hostPortNames(pt: PtDevice): readonly (string | undefined)[] {
 /** Port 1 of the module in slot 0 is GigabitEthernet0/1. Right for routers, but switches count from 1. */
 function slotPortNames(pt: PtDevice): readonly (string | undefined)[] {
   return pt.ports.map((port) => {
-    const prefix = PT_PORT_TYPES.get(port.type)?.prefix;
+    const prefix = ptPortType(port.type)?.prefix;
     return prefix && `${prefix}${port.address.join('/')}`;
   });
 }
@@ -526,8 +545,11 @@ function resolveEnd(
   const console = CONSOLE_PORT_NAMES.test(end.port) && consolePortOf(device.kind);
   if (console) return ok({ endpoint: { device: device.id, port: console.id }, kind: console.kind });
   // Packet Tracer 5.x names a host's only port without a number: FastEthernet for FastEthernet0.
+  // A hub's `Port 0` and a home router's `Ethernet 1` are Tracer's Port0 and Ethernet1.
   const port =
-    ports.get(end.port) ?? (/\d$/.test(end.port) ? undefined : ports.get(`${end.port}0`));
+    ports.get(end.port) ??
+    ports.get(end.port.replace(/\s+/g, '')) ??
+    (/\d$/.test(end.port) ? undefined : ports.get(`${end.port}0`));
   if (!port) return err({ kind: 'port-not-imported' });
   return ok({ endpoint: { device: device.id, port: port.id }, kind: port.kind });
 }
