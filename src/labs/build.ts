@@ -1,7 +1,7 @@
 /**
  * Builds each sample lab the way a student would: real catalog devices, IOS config typed line by
- * line, cables and notes. `labs.test.ts` checks every `.tracer.json` file against this, and
- * `pnpm test src/labs -u` rewrites them. Tests import it; the app never does.
+ * line, cables and notes. The committed `.tracer.json` files were written from it; the app never
+ * imports it.
  */
 import { applyLines, toConfigUpdate, type IosDevice } from '@/cli';
 import type { DeviceModelId } from '@/devices/catalog';

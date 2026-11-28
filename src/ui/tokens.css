@@ -1,6 +1,6 @@
 /*
  * Design tokens. Components use the Tailwind names from the @theme block in app.css.
- * Text tokens must keep WCAG AA (4.5:1) on surface-0..2; tokens.test.ts enforces it.
+ * Text tokens must keep WCAG AA (4.5:1) on surface-0..2.
  * `.light` and `.dark` also work on any element, so a subtree can render in the other theme.
  */
 

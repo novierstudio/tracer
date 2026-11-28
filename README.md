@@ -20,13 +20,12 @@ pnpm preview      # serve the built app
 pnpm typecheck
 pnpm lint
 pnpm format
-pnpm test         # unit tests (Vitest)
 pnpm test:e2e     # browser tests (Playwright)
 ```
 
 Before the first `pnpm test:e2e`, install the browser with `pnpm exec playwright install chromium`. Set `E2E_PORT` to run it on a port other than 4173.
 
-The design system gallery at `#/dev/ui` shows every colour token and UI component in both themes. Colour tokens live in `src/ui/tokens.css`, and a unit test fails if a text colour drops below WCAG AA contrast.
+The design system gallery at `#/dev/ui` shows every colour token and UI component in both themes. Colour tokens live in `src/ui/tokens.css`. Text colours must keep WCAG AA contrast.
 
 ## Disclaimer
 
