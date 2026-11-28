@@ -1,5 +1,6 @@
 import {
   ChevronLeftIcon,
+  FileTextIcon,
   GlobeIcon,
   NetworkIcon,
   MonitorCogIcon,
@@ -26,10 +27,11 @@ import { addressPort, configAddressing, nicConnected, type HostDevice } from './
 import { HostPrompt } from './HostPrompt';
 import { hostBackend } from './registry';
 import { TerminalApp } from './TerminalApp';
+import { TextEditor } from './TextEditor';
 import { WebBrowser } from './WebBrowser';
 import { WirelessApp } from './WirelessApp';
 
-type App = 'ip' | 'prompt' | 'terminal' | 'browser' | 'wireless';
+type App = 'ip' | 'prompt' | 'terminal' | 'browser' | 'wireless' | 'editor';
 
 const APPS: Record<App, { title: string; blurb: string; icon: LucideIcon; tile: string }> = {
   ip: {
@@ -61,6 +63,12 @@ const APPS: Record<App, { title: string; blurb: string; icon: LucideIcon; tile: 
     blurb: 'Join a wireless network',
     icon: WifiIcon,
     tile: 'bg-proto-dhcp text-surface-1',
+  },
+  editor: {
+    title: 'Text Editor',
+    blurb: 'Write and edit files on this disk',
+    icon: FileTextIcon,
+    tile: 'bg-proto-arp text-surface-1',
   },
 };
 
@@ -125,6 +133,8 @@ function Desktop({ device, focusPrompt }: Props) {
           <h4 className="border-t border-line pt-3 text-2xs font-medium text-fg-3">IPv6</h4>
           <HostIpv6Form device={device} ipv6Status={hostBackend.ipv6Status} />
         </div>
+      ) : app === 'editor' ? (
+        <TextEditor device={device} />
       ) : app === 'browser' ? (
         <WebBrowser device={device.id} backend={hostBackend} />
       ) : app === 'wireless' ? (
