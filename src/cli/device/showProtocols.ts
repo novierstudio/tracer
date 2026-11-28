@@ -2,6 +2,7 @@ import type { OspfStatus, RipStatus, RoutingProtocols } from '../../engine/api';
 import type { OspfConfig, RipConfig } from '../../model';
 import type { IosDevice } from './context';
 import { eigrpSection } from './showEigrp';
+import { areaCount, redistributionLines, roleLines } from './showOspf';
 import { NO_ENGINE, routeAge } from './showRouting';
 
 /** What RIP sends and accepts: v1 and either version without `version`, else only the one set. */
@@ -17,13 +18,14 @@ function versionControl(rip: RipConfig) {
 }
 
 function ospfSection(ospf: OspfConfig, status: OspfStatus): string[] {
-  const areas = new Set(status.interfaces.map((entry) => entry.area)).size;
   return [
     `Routing Protocol is "ospf ${ospf.processId}"`,
     '  Outgoing update filter list for all interfaces is not set',
     '  Incoming update filter list for all interfaces is not set',
     `  Router ID ${status.routerId ?? '0.0.0.0'}`,
-    `  Number of areas in this router is ${areas}. ${areas} normal 0 stub 0 nssa`,
+    ...roleLines(status, '  '),
+    ...redistributionLines(ospf, ' '),
+    `  ${areaCount(status, ospf)}`,
     '  Maximum path: 4',
     '  Routing for Networks:',
     ...ospf.networks.map(

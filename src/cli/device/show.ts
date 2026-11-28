@@ -14,7 +14,6 @@ import {
   type InterfaceId,
   type InterfaceType,
   type LineConfig,
-  type OspfConfig,
   type Port,
   type PortChannelId,
   type PortChannelInterface,
@@ -37,6 +36,7 @@ import type { PortStates } from './query';
 import { ipv6InterfaceLines, ipv6RouteLine } from './ipv6Config';
 import { sshLines, usernameLines } from './remote';
 import { eigrpLines } from './eigrpConfig';
+import { ospfLines } from './ospfConfig';
 import { accessListLines, natLines } from './showAclNat';
 import { standbyLines } from './hsrpConfig';
 import { transparentVlanLines, vtpConfigLines } from './vtpConfig';
@@ -309,18 +309,6 @@ function discoveryGlobalLines(config: IosDevice['config']): string[] {
   ];
 }
 
-/** `router ospf` and its settings, in IOS's order. */
-function ospfBlock(ospf: OspfConfig): string[] {
-  return [
-    `router ospf ${ospf.processId}`,
-    ...(ospf.routerId === undefined ? [] : [` router-id ${ospf.routerId}`]),
-    ...ospf.passiveInterfaces.map((id) => ` passive-interface ${id}`),
-    ...ospf.networks.map(
-      ({ address, wildcard, area }) => ` network ${address} ${wildcard} area ${area}`,
-    ),
-  ];
-}
-
 /** `router rip` and the settings that differ from its defaults, in IOS's order. */
 function ripBlock(rip: RipConfig): string[] {
   return [
@@ -459,7 +447,7 @@ export function runningConfig(device: IosDevice): string[] {
   }
   for (const entry of interfaceEntries(device)) out.push(...interfaceBlock(entry), '!');
   if (config.eigrp) out.push(...eigrpLines(config.eigrp), '!');
-  if (config.ospf) out.push(...ospfBlock(config.ospf), '!');
+  if (config.ospf) out.push(...ospfLines(config.ospf), '!');
   if (config.rip) out.push(...ripBlock(config.rip), '!');
   if (device.kind === 'router' && device.config.nat) out.push(...natLines(device.config.nat), '!');
   const staticRoutes = config.staticRoutes ?? [];
