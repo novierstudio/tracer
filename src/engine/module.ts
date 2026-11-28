@@ -1,4 +1,14 @@
-import type { Device, DeviceKind, LabSettings, MacAddress, PortId, VlanId } from '@/model';
+import type {
+  Device,
+  DeviceKind,
+  InterfaceId,
+  Ipv4Address,
+  LabSettings,
+  MacAddress,
+  PortId,
+  VlanDatabase,
+  VlanId,
+} from '@/model';
 import type { SimDuration, SimTime } from './core/time';
 import type { Frame } from './frame';
 import type { LearnedRoute } from './l3/routes';
@@ -33,11 +43,25 @@ export interface DeviceContext {
   syslog(text: string): void;
   /** Adds a sticky secure address to the port's config, as IOS writes it into the running-config. */
   learnSticky(port: PortId, mac: MacAddress): void;
+  /** Stores a VTP update's VLANs and revision in the switch's config, as IOS writes vlan.dat. */
+  storeVlans(database: VlanDatabase): void;
   /** A module's `disablesPort` answer changed: bring the device's links in line with it. */
   relink(): void;
   /** The routes every module on the device offers now, for its routing table. See `routes`. */
   learnedRoutes(): readonly LearnedRoute[];
+  /** The virtual addresses every module answers for now. See `virtualAddresses`. */
+  virtualAddresses(): readonly VirtualAddress[];
 }
+
+/**
+ * An address an interface answers for besides its own, as an active HSRP router does for its
+ * group's virtual IP and MAC: it replies to ARP for the IP and takes frames sent to the MAC.
+ */
+export type VirtualAddress = {
+  readonly interface: InterfaceId;
+  readonly address: Ipv4Address;
+  readonly mac: MacAddress;
+};
 
 export interface ModuleContext<S> extends DeviceContext {
   /**
@@ -95,6 +119,11 @@ export interface SimModule<S = unknown> {
    * other, by administrative distance then metric. It must not call `learnedRoutes`.
    */
   routes?(ctx: ModuleContext<S>): readonly LearnedRoute[];
+  /**
+   * The virtual addresses the module answers for now, as HSRP does while active. The device's IP
+   * layer replies to ARP for them and takes their frames. It must not call `virtualAddresses`.
+   */
+  virtualAddresses?(ctx: ModuleContext<S>): readonly VirtualAddress[];
 }
 
 /** Why a module cannot run on a device: no such device, it is off, or its kind does not run the module. */

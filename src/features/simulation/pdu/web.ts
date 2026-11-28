@@ -20,6 +20,7 @@ const PORT_NAMES: Record<number, string> = {
   [TCP_PORT.telnet]: 'Telnet',
   [TCP_PORT.ssh]: 'SSH',
   [UDP_PORT.rip]: 'RIP',
+  [UDP_PORT.hsrp]: 'HSRP',
 };
 
 export const portName = (port: number) => {

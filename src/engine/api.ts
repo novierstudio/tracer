@@ -23,6 +23,7 @@ import type {
   LldpNeighbor,
   PortSecurityStatus,
   SecureAddressEntry,
+  VtpStatus,
 } from './l2/status';
 import type { PortRole, PortState, SpanningTreePort, StpTimes } from './l2/stp';
 import type { AclHits } from './l3/acl';
@@ -46,6 +47,7 @@ import type {
   Ipv6Status,
   NeighborState,
 } from './l3v6/status';
+import type { HsrpGroupStatus, HsrpPeerStatus, HsrpTrackStatus } from './l3/hsrp';
 import type { DeviceUnavailable } from './module';
 import type {
   OspfDesignated,
@@ -81,6 +83,7 @@ export type {
   LldpNeighbor,
   PortSecurityStatus,
   SecureAddressEntry,
+  VtpStatus,
   DhcpBindingEntry,
   DhcpListener,
   DhcpOutcome,
@@ -102,6 +105,9 @@ export type {
   Ipv6NeighborEntry,
   Ipv6Route,
   Ipv6Status,
+  HsrpGroupStatus,
+  HsrpPeerStatus,
+  HsrpTrackStatus,
   LearnedRoute,
   Layer2Status,
   Lease,
@@ -324,6 +330,8 @@ export interface SimAPI {
    * ones SLAAC formed, its routing table and its neighbour cache. `unsupported` for a switch.
    */
   ipv6Status(device: DeviceId): Result<Ipv6Status, DeviceUnavailable>;
+  /** A router or multilayer switch's HSRP groups as they run now, for `show standby`. */
+  standbyStatus(device: DeviceId): Result<readonly HsrpGroupStatus[], DeviceUnavailable>;
   /** Sets the one batch listener. Calling it again replaces the previous listener. */
   subscribe(listener: (batch: SimEventBatch) => void): void;
 }

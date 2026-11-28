@@ -281,6 +281,38 @@ export const SAMPLE_LABS: readonly SampleLab[] = [
     ],
     load: () => import('./home-wireless.tracer.json?raw').then(text),
   },
+  {
+    id: 'vtp-server-clients',
+    title: 'VTP server and clients',
+    description:
+      'SW1 is the VTP server for domain CCNA and holds VLANs 10 and 20. SW2 and SW3 are clients: they learn both VLANs over their trunks, so their access ports come up.',
+    difficulty: 'intermediate',
+    devices: { switch: 3, pc: 4 },
+    tryThis: [
+      'Run `show vtp status` on SW1, then on SW2: same domain, same revision',
+      'Run `show vlan brief` on SW3 to see the VLANs it learned',
+      'Ping PC2 (192.168.10.12) from PC1, across SW1',
+      'Type `vlan 30` in global config on SW2: a client refuses it',
+      'Add `vlan 30` with `name Guests` on SW1 and watch the revision climb on SW2 and SW3',
+    ],
+    load: () => import('./vtp-server-clients.tracer.json?raw').then(text),
+  },
+  {
+    id: 'hsrp-gateway',
+    title: 'HSRP gateway redundancy',
+    description:
+      'R1 and R2 share the virtual gateway 192.168.1.1 with HSRP. R1 is active, R2 stands by, and OSPF carries the LAN to R3 both ways, so PC1 keeps reaching the server when R1 fails.',
+    difficulty: 'intermediate',
+    devices: { router: 3, switch: 1, pc: 2 },
+    tryThis: [
+      'Run `show standby brief` on R1 and R2: R1 is active, R2 standby',
+      'Ping the server (192.168.2.10) from PC1, then run `arp -a`: the gateway is 0000.0c07.ac01',
+      'Delete the cable between R1 and SW1, wait ten seconds, and ping again: R2 took over',
+      'Put it back: R1 preempts and is active again',
+      'Shut R1’s Gig0/1: tracking drops its priority to 90 and R2 takes over',
+    ],
+    load: () => import('./hsrp-gateway.tracer.json?raw').then(text),
+  },
 ];
 
 export const DIFFICULTY_LABELS: Record<Difficulty, string> = {

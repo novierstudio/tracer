@@ -5,12 +5,17 @@ import type {
   LacpPdu,
   LldpPacket,
   PagpPdu,
+  VtpPdu,
 } from '@/engine/pdu';
 import type { MacAddress } from '@/model';
 import { hex, internetChecksum, ipBytes, macBytes, u16, u32, type Part } from './encode';
+import { vtpParts, vtpSummary } from './vtp';
 
-/** What a device sends only to the device at the other end of the link: discovery and EtherChannel. */
-export type ControlPdu = CdpPacket | LldpPacket | LacpPdu | PagpPdu;
+/**
+ * What a device sends only to the device at the other end of the link: discovery, EtherChannel
+ * and VTP, which each switch reads and sends on itself.
+ */
+export type ControlPdu = CdpPacket | LldpPacket | LacpPdu | PagpPdu | VtpPdu;
 
 export type ControlSection = {
   readonly id: ControlPdu['kind'];
@@ -446,5 +451,12 @@ export function controlSection(pdu: ControlPdu): ControlSection {
       return lacpSection(pdu);
     case 'pagp':
       return pagpSection(pdu);
+    case 'vtp':
+      return {
+        id: 'vtp',
+        name: `VTPv${pdu.version}`,
+        summary: vtpSummary(pdu),
+        parts: vtpParts(pdu),
+      };
   }
 }

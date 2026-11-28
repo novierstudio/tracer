@@ -18,12 +18,18 @@ import {
   type OspfPacket,
   type RipMessage,
   type RipVersion,
+  type HsrpMessage,
+  type HsrpOpcode,
+  type HsrpState,
+  type VtpPdu,
 } from '@/engine/pdu';
 import { isNdp, type Ipv6Packet, type RouterAdvertisement } from '@/engine/pdu6';
 import type { TcpSegment } from '@/engine/tcp';
 import { shortPortName } from '@/features/canvas/cables';
 import {
   channelProtocol,
+  vtpMode,
+  hsrpVirtualMac,
   type Device,
   type Ipv4Address,
   type MacAddress,
@@ -72,6 +78,8 @@ export type Decision =
     }
   /** A port in a channel group of LACP or PAgP's mode read a packet of that protocol. */
   | { kind: 'channel'; protocol: 'lacp' | 'pagp'; group: number; port: PortId }
+  | { kind: 'vtp'; code: VtpPdu['code']; transparent: boolean; out: readonly PortId[] }
+  | { kind: 'hsrp'; opcode: HsrpOpcode; group: number; state: HsrpState }
   | { kind: 'routed'; out: PortId; ttl: readonly [number, number] }
   /** IPv6 has a hop limit where IPv4 has a TTL. */
   | { kind: 'routed'; out: PortId; hopLimit: readonly [number, number] }
@@ -174,6 +182,8 @@ export type IgnoreReason =
   | { kind: 'host-control'; protocol: ControlPdu['kind'] }
   /** CDP or LLDP is off on the port, or the port is in no channel group of the protocol. */
   | { kind: 'control-off'; protocol: ControlPdu['kind']; port: PortId }
+  | { kind: 'no-vtp' }
+  | { kind: 'no-hsrp'; group: number }
   | { kind: 'dhcp-for-other'; client: MacAddress }
   | { kind: 'dhcp-not-server'; message: DhcpMessage['type'] }
   | { kind: 'no-rip' }
@@ -345,6 +355,41 @@ export function ownAddresses(device: Device): Ipv4Address[] {
 
 const ownMac = (device: Device, mac: MacAddress) =>
   device.ports.some((port) => port.kind !== 'serial' && port.mac === mac);
+
+/** The HSRP groups configured on the device's interfaces, with each one's version. */
+function hsrpGroups(device: Device): { group: number; version: 1 | 2 }[] {
+  if (device.kind !== 'router' && device.kind !== 'switch') return [];
+  const interfaces = [
+    ...Object.values(device.config.virtualInterfaces),
+    ...(device.kind === 'router'
+      ? [...Object.values(device.config.interfaces), ...Object.values(device.config.subinterfaces)]
+      : []),
+  ];
+  return interfaces.flatMap((config) =>
+    Object.keys(config?.standby ?? {}).map((group) => ({
+      group: Number(group),
+      version: config?.standbyVersion ?? 1,
+    })),
+  );
+}
+
+/** A frame to one of the device's HSRP virtual MACs, which only the active router takes. */
+const virtualMac = (device: Device, mac: MacAddress) =>
+  hsrpGroups(device).some(({ group, version }) => hsrpVirtualMac(version, group) === mac);
+
+function hsrpFor(frame: Frame): HsrpMessage | undefined {
+  const payload = ipv4Of(frame)?.payload;
+  return payload?.kind === 'udp' && payload.payload.kind === 'hsrp' ? payload.payload : undefined;
+}
+
+function decideHsrp(device: Device, message: HsrpMessage): Decision {
+  const member = hsrpGroups(device).some(
+    ({ group, version }) => group === message.group && version === message.version,
+  );
+  return member
+    ? { kind: 'hsrp', opcode: message.opcode, group: message.group, state: message.state }
+    : { kind: 'ignored', reason: { kind: 'no-hsrp', group: message.group } };
+}
 
 /** The same packet, one router further on. */
 const isForwardOf = (packet: Ipv4Packet, next: Ipv4Packet) =>
@@ -894,6 +939,15 @@ function decideLinkControl(
         ? { kind: 'channel', protocol: payload.kind, group: group.group, port }
         : off;
     }
+    case 'vtp':
+      return device.kind === 'switch'
+        ? {
+            kind: 'vtp',
+            code: payload.code,
+            transparent: vtpMode(device.config) === 'transparent',
+            out: sent.map((s) => s.port),
+          }
+        : { kind: 'ignored', reason: { kind: 'no-vtp' } };
   }
 }
 
@@ -916,11 +970,17 @@ export function decide(event: FrameEvent, device: Device | undefined): Decision 
   }
   const packet6 = ipv6Of(frame);
   if (packet6) return decideIpv6(device, frame, event.to.port, packet6, sent);
+  const hsrp = hsrpFor(frame);
+  if (hsrp) return decideHsrp(device, hsrp);
   const rip = ripFor(device, frame);
   const ospf = ospfFor(device, frame);
   const eigrp = eigrpFor(device, frame);
+  // The active router takes frames for its virtual MAC, and passes them on; the others ignore them.
   const local =
-    frame.kind !== 'ethernet' || frame.dst === BROADCAST_MAC || ownMac(device, frame.dst);
+    frame.kind !== 'ethernet' ||
+    frame.dst === BROADCAST_MAC ||
+    ownMac(device, frame.dst) ||
+    (virtualMac(device, frame.dst) && sent.length > 0);
   // Every device sees the RIPv2, OSPF and EIGRP groups' frames, so it can say whether it runs them.
   if (
     !local &&
@@ -1139,6 +1199,10 @@ function describeIgnore(name: string, reason: IgnoreReason) {
       return `${name} ignored it: only switches run spanning tree.`;
     case 'host-control':
       return `${name} ignored it: hosts do not run ${PROTOCOLS[reason.protocol].label}.`;
+    case 'no-vtp':
+      return `${name} ignored it: only switches run VTP.`;
+    case 'no-hsrp':
+      return `${name} ignored it: ${name} is in no HSRP group ${reason.group}.`;
     case 'control-off': {
       const protocol = PROTOCOLS[reason.protocol].label;
       const port = shortPortName(reason.port);
@@ -1243,6 +1307,24 @@ function describeEigrp(
   return `${read} and sent ${what.join(' and ')}.`;
 }
 
+const VTP_MESSAGES: Record<VtpPdu['code'], string> = {
+  summary: 'summary advertisement',
+  subset: 'subset advertisement',
+  request: 'advertisement request',
+};
+
+function describeVtp(name: string, { code, transparent, out }: Extract<Decision, { kind: 'vtp' }>) {
+  const message = `VTP ${VTP_MESSAGES[code]}`;
+  if (transparent) {
+    return out.length > 0
+      ? `${name} is in VTP transparent mode: it passed the ${message} on out ${list(out)} without taking its VLANs.`
+      : `${name} is in VTP transparent mode, so it keeps its own VLANs and did not take the ${message}.`;
+  }
+  return out.length > 0
+    ? `${name} read the ${message} and sent VTP messages out ${list(out)}.`
+    : `${name} read the ${message}.`;
+}
+
 /** The decision as one sentence a student can read, with `name` the device's hostname. */
 export function describeDecision(decision: Decision, name: string): string {
   switch (decision.kind) {
@@ -1264,6 +1346,10 @@ export function describeDecision(decision: Decision, name: string): string {
       return `${name} read the ${PROTOCOLS[decision.protocol].label} advertisement on ${shortPortName(decision.port)} and keeps ${decision.neighbor} as a neighbour for ${decision.holdtime} s.`;
     case 'channel':
       return `${name} read the ${PROTOCOLS[decision.protocol].label} packet on ${shortPortName(decision.port)} and uses it to bundle the port into Port-channel${decision.group}.`;
+    case 'vtp':
+      return describeVtp(name, decision);
+    case 'hsrp':
+      return `${name} read the HSRP ${decision.opcode} for group ${decision.group}, from a router in ${decision.state} state, and weighs it in the group's election.`;
     case 'routed': {
       const [counter, [before, after]] =
         'hopLimit' in decision ? ['hop limit', decision.hopLimit] : ['TTL', decision.ttl];

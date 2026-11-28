@@ -152,10 +152,17 @@ export function onArp(ctx: IpContext, iface: LanInterface, port: PortId, arp: Ar
   if (forUs || ctx.state.arp.has(arp.senderIp)) {
     learn(ctx, iface, port, arp.senderIp, arp.senderMac);
   }
+  // An active HSRP router answers for its group's virtual IP with the virtual MAC.
+  const virtual = ctx
+    .virtualAddresses()
+    .find((entry) => entry.interface === iface.name && entry.address === arp.targetIp);
   const answers =
-    forUs || proxies(ctx, iface, arp.targetIp) || answersArpFor(ctx, iface, arp.targetIp);
+    forUs ||
+    virtual !== undefined ||
+    proxies(ctx, iface, arp.targetIp) ||
+    answersArpFor(ctx, iface, arp.targetIp);
   if (arp.op !== 'request' || !answers) return;
-  const { mac } = iface.medium;
+  const mac = virtual?.mac ?? iface.medium.mac;
   const reply: ArpPacket = {
     kind: 'arp',
     op: 'reply',

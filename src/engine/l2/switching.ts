@@ -120,9 +120,13 @@ export function vlanPorts(device: Switch, vlan: VlanId) {
   });
 }
 
-/** A frame for one of the switch's own addresses is for its management interface, not to switch. */
-const ownAddress = (device: Device, mac: MacAddress) =>
-  device.ports.some((port) => port.kind !== 'serial' && port.mac === mac);
+/**
+ * A frame for one of the switch's own addresses, or a virtual MAC it answers for as the active
+ * HSRP router, is for its own interfaces, not to switch.
+ */
+const ownAddress = (ctx: DeviceContext, mac: MacAddress) =>
+  ctx.device.ports.some((port) => port.kind !== 'serial' && port.mac === mac) ||
+  ctx.virtualAddresses().some((entry) => entry.mac === mac);
 
 function forget(state: SwitchState, drop: (entry: Learned) => boolean) {
   for (const [key, entry] of state.table) if (drop(entry)) state.table.delete(key);
@@ -263,7 +267,7 @@ export const switchingModule: SimModule<SwitchState> = {
         learnedAt: now,
       });
     }
-    if (arrivedState !== 'forwarding' || ownAddress(device, frame.dst)) return;
+    if (arrivedState !== 'forwarding' || ownAddress(ctx, frame.dst)) return;
     const known = isGroup(frame.dst) ? undefined : state.table.get(tableKey(vlan, frame.dst));
     const out = known ? [known.port] : logicalPorts(device, state.channel);
 

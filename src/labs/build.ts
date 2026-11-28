@@ -955,6 +955,161 @@ function homeWireless() {
   return lab.topology;
 }
 
+function vtpServerClients() {
+  const lab = labBuilder('vtp-server-clients');
+  const trunks = (...ports: string[]) =>
+    ports.flatMap((port) => [`interface ${port}`, ' switchport mode trunk']);
+  const access = (port: string, vlan: number) => [
+    `interface ${port}`,
+    ' switchport mode access',
+    ` switchport access vlan ${vlan}`,
+  ];
+  lab.ios('SW1', 'switch-24', 424, 40, [
+    'vtp domain CCNA',
+    'vlan 10',
+    ' name Sales',
+    'vlan 20',
+    ' name Engineering',
+    ...trunks('GigabitEthernet0/1', 'GigabitEthernet0/2'),
+  ]);
+  for (const [name, x] of [
+    ['SW2', 232],
+    ['SW3', 616],
+  ] as const) {
+    lab.ios(name, 'switch-24', x, 232, [
+      'vtp mode client',
+      'vtp domain CCNA',
+      ...trunks('GigabitEthernet0/1'),
+      ...access('FastEthernet0/1', 10),
+      ...access('FastEthernet0/2', 20),
+    ]);
+  }
+  lab.pc('PC1', 136, 424, '192.168.10.11/24');
+  lab.pc('PC3', 328, 424, '192.168.20.11/24');
+  lab.pc('PC2', 520, 424, '192.168.10.12/24');
+  lab.pc('PC4', 712, 424, '192.168.20.12/24');
+  lab.cable(['SW1', 'GigabitEthernet0/1'], ['SW2', 'GigabitEthernet0/1']);
+  lab.cable(['SW1', 'GigabitEthernet0/2'], ['SW3', 'GigabitEthernet0/1']);
+  lab.cable(['PC1', 'FastEthernet0'], ['SW2', 'FastEthernet0/1']);
+  lab.cable(['PC3', 'FastEthernet0'], ['SW2', 'FastEthernet0/2']);
+  lab.cable(['PC2', 'FastEthernet0'], ['SW3', 'FastEthernet0/1']);
+  lab.cable(['PC4', 'FastEthernet0'], ['SW3', 'FastEthernet0/2']);
+  lab.note(
+    'server',
+    600,
+    -64,
+    'SW1 is a VTP server: each VLAN change adds one to its revision. VLANs live in vlan.dat, so show running-config does not list them.',
+  );
+  lab.note(
+    'clients',
+    -40,
+    136,
+    'SW2 and SW3 are clients in domain CCNA. They cannot create VLANs, and take SW1’s over the trunks.',
+  );
+  return lab.topology;
+}
+
+function hsrpRouter(
+  id: number,
+  lan: string | undefined,
+  standby: readonly string[],
+  links: readonly [name: string, address: string][],
+  networks: readonly string[],
+) {
+  return [
+    ...(lan
+      ? [
+          'interface GigabitEthernet0/0',
+          ` ip address ${lan} 255.255.255.0`,
+          ...standby,
+          ' no shutdown',
+        ]
+      : []),
+    ...links.flatMap(([name, address]) => [
+      `interface ${name}`,
+      ` ip address ${address}`,
+      ' no shutdown',
+    ]),
+    'router ospf 1',
+    ` router-id ${id}.${id}.${id}.${id}`,
+    ...networks.map((network) => ` network ${network} area 0`),
+  ];
+}
+
+function hsrpGateway() {
+  const lab = labBuilder('hsrp-gateway');
+  lab.ios(
+    'R1',
+    'router-2g2s',
+    232,
+    232,
+    hsrpRouter(
+      1,
+      '192.168.1.2',
+      [
+        ' standby 1 ip 192.168.1.1',
+        ' standby 1 priority 110',
+        ' standby 1 preempt',
+        ' standby 1 track GigabitEthernet0/1 20',
+      ],
+      [['GigabitEthernet0/1', '10.0.1.1 255.255.255.252']],
+      ['192.168.1.0 0.0.0.255', '10.0.1.0 0.0.0.3'],
+    ),
+  );
+  lab.ios(
+    'R2',
+    'router-2g2s',
+    616,
+    232,
+    hsrpRouter(
+      2,
+      '192.168.1.3',
+      [' standby 1 ip 192.168.1.1', ' standby 1 preempt'],
+      [['GigabitEthernet0/1', '10.0.2.1 255.255.255.252']],
+      ['192.168.1.0 0.0.0.255', '10.0.2.0 0.0.0.3'],
+    ),
+  );
+  lab.ios(
+    'R3',
+    'router-4g',
+    424,
+    40,
+    hsrpRouter(
+      3,
+      undefined,
+      [],
+      [
+        ['GigabitEthernet0/0', '10.0.1.2 255.255.255.252'],
+        ['GigabitEthernet0/1', '10.0.2.2 255.255.255.252'],
+        ['GigabitEthernet0/2', '192.168.2.1 255.255.255.0'],
+      ],
+      ['10.0.1.0 0.0.0.3', '10.0.2.0 0.0.0.3', '192.168.2.0 0.0.0.255'],
+    ),
+  );
+  lab.ios('SW1', 'switch-24', 424, 424, []);
+  lab.pc('PC1', 424, 616, '192.168.1.10/24', '192.168.1.1');
+  lab.pc('Server', 808, 40, '192.168.2.10/24', '192.168.2.1');
+  lab.cable(['R1', 'GigabitEthernet0/1'], ['R3', 'GigabitEthernet0/0']);
+  lab.cable(['R2', 'GigabitEthernet0/1'], ['R3', 'GigabitEthernet0/1']);
+  lab.cable(['R1', 'GigabitEthernet0/0'], ['SW1', 'GigabitEthernet0/1']);
+  lab.cable(['R2', 'GigabitEthernet0/0'], ['SW1', 'GigabitEthernet0/2']);
+  lab.cable(['PC1', 'FastEthernet0'], ['SW1', 'FastEthernet0/1']);
+  lab.cable(['Server', 'FastEthernet0'], ['R3', 'GigabitEthernet0/2']);
+  lab.note(
+    'vip',
+    -40,
+    424,
+    'PC1’s gateway is 192.168.1.1, the HSRP group’s virtual IP. Whichever router is active answers for it with the virtual MAC 0000.0c07.ac01.',
+  );
+  lab.note(
+    'track',
+    40,
+    40,
+    'R1 has priority 110 and preempts. It tracks Gig0/1: if that uplink goes down its priority drops by 20 to 90, below R2’s 100.',
+  );
+  return lab.topology;
+}
+
 export const BUILDERS: Record<string, () => Topology> = {
   'two-pcs-switch': twoPcsSwitch,
   'two-lans-router': twoLansRouter,
@@ -973,4 +1128,6 @@ export const BUILDERS: Record<string, () => Topology> = {
   'port-security': portSecurityLab,
   'hub-collisions': hubCollisions,
   'home-wireless': homeWireless,
+  'vtp-server-clients': vtpServerClients,
+  'hsrp-gateway': hsrpGateway,
 };

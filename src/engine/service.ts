@@ -22,6 +22,7 @@ import type { EventId } from './events';
 import { createHistory, stepInstant, type History, type Input } from './history';
 import { discoveryModule, discoveryStatus } from './l2/discovery';
 import { macTable, spanningTreeOf, switchingModule, switchL2Status } from './l2/switching';
+import { vtpModule, vtpStatus } from './l2/vtp';
 import { aclHits } from './l3/acl';
 import { arpTable, clearArp } from './l3/arp';
 import { hostAddressingOf, routesOf, type IpContext } from './l3/context';
@@ -34,6 +35,7 @@ import { clearNat, natTranslations } from './l3/nat';
 import { pingSummary, startPing } from './l3/ping';
 import { closeTerminal, closeVty, sendTerminal, startTerminal, terminalEnds } from './l3/terminal';
 import { startTrace } from './l3/traceroute';
+import { hsrpModule, hsrpStatus } from './l3/hsrp';
 import { ipv6Module, ipv6Status, startPing6, startTrace6, stopProbe6 } from './l3v6/ipv6';
 import type { ModuleContext, SimModule } from './module';
 import { eigrpModule, eigrpStatus } from './routing/eigrp/eigrp';
@@ -417,10 +419,12 @@ export function createSimService({
       const ports = engine.withModule(device, discoveryModule, (ctx) =>
         Object.fromEntries(ctx.device.ports.map((port) => [port.id, ctx.portUp(port.id)])),
       );
+      const vtp = engine.withModule(device, vtpModule, vtpStatus);
       const none = { etherchannels: [], portSecurity: [], errDisabled: [] };
       return ok({
         ...discovery.value,
         ...(switched.ok ? switched.value : none),
+        ...(vtp.ok && vtp.value && { vtp: vtp.value }),
         ports: ports.ok ? ports.value : {},
         clock: engine.now,
       });
@@ -467,6 +471,7 @@ export function createSimService({
         (ctx, once) => startFetch(ctx, target, once),
       ),
     ipv6Status: (device) => engine.withModule(device, ipv6Module, ipv6Status),
+    standbyStatus: (device) => engine.withModule(device, hsrpModule, hsrpStatus),
     openTerminal(device, target, protocol, listener) {
       const handle = nextHandle++ as TerminalHandle;
       let id = 0;

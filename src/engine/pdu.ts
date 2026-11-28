@@ -30,10 +30,10 @@ export type EthernetFrame = {
 };
 
 export type EthernetPayload =
-  ArpPacket | Ipv4Packet | Ipv6Packet | Bpdu | CdpPacket | LldpPacket | LacpPdu | PagpPdu;
+  ArpPacket | Ipv4Packet | Ipv6Packet | Bpdu | CdpPacket | LldpPacket | LacpPdu | PagpPdu | VtpPdu;
 
 /** The payloads that ride in an 802.3 frame with an LLC and SNAP header instead of an EtherType. */
-export type SnapPayload = Bpdu | CdpPacket | PagpPdu;
+export type SnapPayload = Bpdu | CdpPacket | PagpPdu | VtpPdu;
 
 export const ETHER_TYPE = {
   arp: 0x0806,
@@ -111,10 +111,10 @@ export type UdpDatagram = {
   readonly payload: UdpPayload;
 };
 
-export type UdpPayload = DhcpMessage | RipMessage | DnsMessage;
+export type UdpPayload = DhcpMessage | RipMessage | DnsMessage | HsrpMessage;
 
 /** Well-known ports. RIP sends from and to 520. */
-export const UDP_PORT = { dns: 53, dhcpServer: 67, dhcpClient: 68, rip: 520 } as const;
+export const UDP_PORT = { dns: 53, dhcpServer: 67, dhcpClient: 68, rip: 520, hsrp: 1985 } as const;
 
 /** Option 53, which says what a DHCP message is for. */
 export type DhcpMessageType = DhcpMessage['type'];
@@ -367,6 +367,75 @@ export type PagpPdu = {
   /** Desirable ports start the conversation; auto ones only answer. */
   readonly desirable: boolean;
   readonly partner?: { readonly device: MacAddress; readonly port: number };
+};
+
+/** A VLAN as a VTP subset advertisement lists it. */
+export type VtpVlanInfo = { readonly id: VlanId; readonly name: string };
+
+/**
+ * A VTP message. It goes to CDP_MAC with SNAP PID 0x2003, out of trunk ports only, and every
+ * switch reads it itself: a server or client takes a newer revision and sends it on, and a
+ * transparent switch passes it through unread.
+ */
+export type VtpPdu =
+  /** Says the sender's domain and revision, and how many subset advertisements follow. */
+  | {
+      readonly kind: 'vtp';
+      readonly code: 'summary';
+      readonly version: 1 | 2;
+      readonly domain: string;
+      readonly revision: number;
+      readonly followers: number;
+      /** The address of the switch that made the change. */
+      readonly updater: Ipv4Address;
+      /** When it made it, as `yymmddhhmmss`. */
+      readonly timestamp: string;
+      /** The MD5 digest of the password and the VLANs, 16 bytes in hex. */
+      readonly digest: string;
+    }
+  /** The VLANs themselves, at the revision the summary before it gave. */
+  | {
+      readonly kind: 'vtp';
+      readonly code: 'subset';
+      readonly version: 1 | 2;
+      readonly domain: string;
+      readonly revision: number;
+      readonly sequence: number;
+      readonly vlans: readonly VtpVlanInfo[];
+    }
+  /** Asks a neighbour for its VLANs, from VLAN `start` on. */
+  | {
+      readonly kind: 'vtp';
+      readonly code: 'request';
+      readonly version: 1 | 2;
+      readonly domain: string;
+      readonly start: number;
+    };
+
+export type HsrpOpcode = 'hello' | 'coup' | 'resign';
+
+/** An HSRP router's state, as hellos carry it. */
+export type HsrpState = 'init' | 'learn' | 'listen' | 'speak' | 'standby' | 'active';
+
+/**
+ * An HSRP message, in UDP 1985 to 224.0.0.2 (version 1) or 224.0.0.102 (version 2). The active
+ * router sends from the group's virtual MAC, the others from their own.
+ */
+export type HsrpMessage = {
+  readonly kind: 'hsrp';
+  readonly version: 1 | 2;
+  readonly opcode: HsrpOpcode;
+  readonly state: HsrpState;
+  readonly group: number;
+  readonly priority: number;
+  /** Seconds. */
+  readonly helloTime: number;
+  readonly holdTime: number;
+  readonly virtualIp: Ipv4Address;
+  /** The plain-text password, `cisco` by default. */
+  readonly authentication: string;
+  /** Version 2 only: the sender's own MAC address. */
+  readonly identifier?: MacAddress;
 };
 
 /** A frame on a serial link. Cisco HDLC needs no addresses: the link has one peer. */

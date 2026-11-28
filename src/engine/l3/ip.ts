@@ -112,7 +112,8 @@ function receive(ctx: IpContext, arrived: Ipv4Packet, arrival: IpInterface) {
   if (filtered(ctx, arrival, 'in', arrived)) return;
   const packet = natIn(ctx, arrived, arrival);
   const { interfaces, routes } = routesOf(ctx);
-  if (packet.dst === LIMITED_BROADCAST || ownsAddress(interfaces, packet.dst)) {
+  const virtual = ctx.virtualAddresses().some((entry) => entry.address === packet.dst);
+  if (packet.dst === LIMITED_BROADCAST || ownsAddress(interfaces, packet.dst) || virtual) {
     deliver(ctx, packet, arrival);
     return;
   }
@@ -181,7 +182,10 @@ export const ipModule: SimModule<IpState> = {
         // A LAN interface takes frames of its VLAN for its own MAC or broadcast.
         const iface = lanInterfaceFor(ctx, interfacesOf(ctx), port, frame);
         if (!iface) return;
-        if (frame.dst !== iface.medium.mac && frame.dst !== BROADCAST_MAC) return;
+        const virtual = ctx
+          .virtualAddresses()
+          .some((entry) => entry.interface === iface.name && entry.mac === frame.dst);
+        if (frame.dst !== iface.medium.mac && frame.dst !== BROADCAST_MAC && !virtual) return;
         if (frame.payload.kind === 'arp') onArp(ctx, iface, port, frame.payload);
         else if (frame.payload.kind === 'ipv4') receive(ctx, frame.payload, iface);
         return;
