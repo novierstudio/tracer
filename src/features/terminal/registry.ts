@@ -73,7 +73,6 @@ function linkTo({ sim, ping, traceroute, openTerminal, tftp }: SimClient): SimLi
     ipv6Status: (device) => sim.ipv6Status(device),
     layer2Status: (device) => sim.layer2Status(device),
     standbyStatus: (device) => sim.standbyStatus(device),
-    now: () => now,
     ntpStatus: (device) => sim.ntpStatus(device),
     ping,
     traceroute,
