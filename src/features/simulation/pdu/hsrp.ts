@@ -85,7 +85,8 @@ function commonParts(message: HsrpMessage, codes: Record<HsrpState, number>) {
       id: 'hsrp.authentication',
       label: 'Authentication',
       value: message.authentication,
-      explain: 'A plain-text password, cisco unless configured. Routers ignore hellos without theirs.',
+      explain:
+        'A plain-text password, cisco unless configured. Routers ignore hellos without theirs.',
       bytes,
     }),
   };
@@ -141,7 +142,8 @@ export function hsrpParts(message: HsrpMessage): Part[] {
       id: 'hsrp.version',
       label: 'Version',
       value: '2',
-      explain: 'HSRP version 2: groups up to 4095, timers in milliseconds, and its own multicast group.',
+      explain:
+        'HSRP version 2: groups up to 4095, timers in milliseconds, and its own multicast group.',
       bytes: [2],
     },
     common.opcode,

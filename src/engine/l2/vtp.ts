@@ -205,7 +205,8 @@ const flood = (ctx: Ctx, device: Switch, payloads: readonly VtpPdu[], except?: P
 };
 
 /** Whether the switch advertises: a server or client in a domain. */
-const advertises = (state: VtpState) => state.mode !== 'transparent' && state.database.domain !== '';
+const advertises = (state: VtpState) =>
+  state.mode !== 'transparent' && state.database.domain !== '';
 
 /**
  * The address a server stamps its changes with: its lowest-numbered VLAN interface's that has an
@@ -263,7 +264,8 @@ function onConfig(ctx: Ctx, device: Switch) {
   const stale = config.domain === before.domain && config.revision < before.revision;
   const changed = !stale && !sameDatabase(config, before);
   if (changed) state.database = config;
-  const edited = config.revision > before.revision || vlanKey(config.vlans) !== vlanKey(before.vlans);
+  const edited =
+    config.revision > before.revision || vlanKey(config.vlans) !== vlanKey(before.vlans);
   if (changed && mode === 'server' && edited) {
     state.updater = localUpdater(ctx, device)?.address ?? NO_ADDRESS;
     state.timestamp = vtpTimestamp(ctx.now);
@@ -283,7 +285,12 @@ function hearSummary(ctx: Ctx, port: PortId, pdu: Summary) {
 }
 
 /** Takes the subset's VLANs if they belong to the summary before it and its digest agrees. */
-function hearSubset(ctx: Ctx, device: Switch, port: PortId, pdu: Extract<VtpPdu, { code: 'subset' }>) {
+function hearSubset(
+  ctx: Ctx,
+  device: Switch,
+  port: PortId,
+  pdu: Extract<VtpPdu, { code: 'subset' }>,
+) {
   const { state } = ctx;
   const waiting = state.awaiting;
   if (!waiting || waiting.port !== port || waiting.summary.revision !== pdu.revision) return;

@@ -452,6 +452,11 @@ export function controlSection(pdu: ControlPdu): ControlSection {
     case 'pagp':
       return pagpSection(pdu);
     case 'vtp':
-      return { id: 'vtp', name: `VTPv${pdu.version}`, summary: vtpSummary(pdu), parts: vtpParts(pdu) };
+      return {
+        id: 'vtp',
+        name: `VTPv${pdu.version}`,
+        summary: vtpSummary(pdu),
+        parts: vtpParts(pdu),
+      };
   }
 }

@@ -193,13 +193,11 @@ function lineUp(ctx: DeviceContext, interfaces: readonly IpInterface[], id: Inte
 }
 
 function tracksOf(ctx: DeviceContext, interfaces: readonly IpInterface[], config: HsrpGroup) {
-  return (config.track ?? []).map(
-    (track): HsrpTrackStatus => ({
-      interface: track.interface,
-      up: lineUp(ctx, interfaces, track.interface),
-      decrement: track.decrement ?? HSRP_DEFAULT_DECREMENT,
-    }),
-  );
+  return (config.track ?? []).map((track): HsrpTrackStatus => ({
+    interface: track.interface,
+    up: lineUp(ctx, interfaces, track.interface),
+    decrement: track.decrement ?? HSRP_DEFAULT_DECREMENT,
+  }));
 }
 
 /** The configured priority less each down tracked interface's decrement, as IOS lowers it. */
@@ -281,7 +279,14 @@ function announce(ctx: HsrpContext, iface: LanInterface, group: GroupConfig) {
     kind: 'ethernet',
     dst: BROADCAST_MAC,
     src: mac,
-    payload: { kind: 'arp', op: 'reply', senderMac: mac, senderIp: ip, targetMac: BROADCAST_MAC, targetIp: ip },
+    payload: {
+      kind: 'arp',
+      op: 'reply',
+      senderMac: mac,
+      senderIp: ip,
+      targetMac: BROADCAST_MAC,
+      targetIp: ip,
+    },
   });
 }
 
@@ -634,7 +639,13 @@ export const hsrpModule: SimModule<HsrpModuleState> = {
       const run = ctx.state.groups.get(group.key);
       const ip = group.config.ip;
       if (run?.state !== 'active' || !ip) return [];
-      return [{ interface: group.interface, address: ip, mac: hsrpVirtualMac(group.version, group.group) }];
+      return [
+        {
+          interface: group.interface,
+          address: ip,
+          mac: hsrpVirtualMac(group.version, group.group),
+        },
+      ];
     });
   },
 };

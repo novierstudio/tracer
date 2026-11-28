@@ -31,7 +31,14 @@ const digestText = (digest: string) => digest.match(/../g)?.join(' ').toUpperCas
 function vlanBytes(vlan: VtpVlanInfo): number[] {
   const name = ascii(vlan.name);
   const nameField = padded(name, Math.ceil(name.length / 4) * 4);
-  const body = [0x00, 0x01, name.length, ...u16(vlan.id), ...u16(VLAN_MTU), ...u32(SAID_BASE + vlan.id)];
+  const body = [
+    0x00,
+    0x01,
+    name.length,
+    ...u16(vlan.id),
+    ...u16(VLAN_MTU),
+    ...u32(SAID_BASE + vlan.id),
+  ];
   return [body.length + 1 + nameField.length, ...body, ...nameField];
 }
 
@@ -139,15 +146,13 @@ export function vtpParts(pdu: VtpPdu): Part[] {
           bytes: [pdu.sequence],
         }),
         revisionPart(pdu.revision),
-        ...pdu.vlans.map(
-          (vlan): Part => ({
-            id: `vtp.vlan.${vlan.id}`,
-            label: `VLAN ${vlan.id}`,
-            value: `${vlan.name}, Ethernet, active, MTU ${VLAN_MTU}`,
-            explain: 'One VLAN: its status, type, number, MTU, 802.10 index and name.',
-            bytes: vlanBytes(vlan),
-          }),
-        ),
+        ...pdu.vlans.map((vlan): Part => ({
+          id: `vtp.vlan.${vlan.id}`,
+          label: `VLAN ${vlan.id}`,
+          value: `${vlan.name}, Ethernet, active, MTU ${VLAN_MTU}`,
+          explain: 'One VLAN: its status, type, number, MTU, 802.10 index and name.',
+          bytes: vlanBytes(vlan),
+        })),
       ];
     case 'request':
       return [
