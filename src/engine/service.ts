@@ -6,6 +6,9 @@ import type {
   DhcpOutcome,
   DnsLookup,
   FetchEvent,
+  FtpEvent,
+  FtpHandle,
+  MailOutcome,
   PingEvent,
   PingListener,
   ProbeHandle,
@@ -13,6 +16,7 @@ import type {
   SimEventBatch,
   TerminalEvent,
   TerminalHandle,
+  TftpEvent,
   TraceEvent,
   TraceListener,
 } from './api';
@@ -24,6 +28,10 @@ import { discoveryModule, discoveryStatus } from './l2/discovery';
 import { macTable, spanningTreeOf, switchingModule, switchL2Status } from './l2/switching';
 import { vtpModule, vtpStatus } from './l2/vtp';
 import { aclHits } from './l3/acl';
+import { closeFtp, sendFtp, startFtp } from './l3/ftp';
+import { startMail } from './l3/mail';
+import { ntpStatus } from './l3/ntp';
+import { startTftp } from './l3/tftp';
 import { arpTable, clearArp } from './l3/arp';
 import { hostAddressingOf, routesOf, type IpContext } from './l3/context';
 import { releaseDhcp, renewDhcp } from './l3/dhcpClient';
@@ -127,6 +135,22 @@ const TERMINAL_ORDER: Record<TerminalEvent['kind'], number> = {
   closed: Infinity,
 };
 
+/** A session opens, then each request's result comes in turn; it fails or closes last. */
+function ftpOrder(event: FtpEvent): number {
+  switch (event.kind) {
+    case 'open':
+      return 1;
+    case 'result':
+      return 1 + event.seq;
+    case 'failed':
+    case 'closed':
+      return Infinity;
+  }
+}
+
+/** Each block of a transfer in turn, then its end. */
+const tftpOrder = (event: TftpEvent) => (event.kind === 'block' ? event.block : Infinity);
+
 const traceOrder = (probesPerHop: number) => (event: TraceEvent) =>
   event.kind === 'done' ? Infinity : (event.hop - 1) * probesPerHop + event.probe;
 
@@ -168,6 +192,8 @@ export function createSimService({
   const cancels = new Map<ProbeHandle, () => void>();
   /** Each open Telnet or SSH session: its device, and its id in that device's IP stack. */
   const terminals = new Map<TerminalHandle, { device: DeviceId; id: () => number }>();
+  /** Each open FTP session: its device, and its client's id in that device's IP stack. */
+  const ftpSessions = new Map<FtpHandle, { device: DeviceId; id: () => number }>();
   let nextHandle = 1;
 
   /** Applies an input now. In Simulation mode the history records it, so replays repeat it. */
@@ -534,6 +560,90 @@ export function createSimService({
       input({ apply: () => void (cleared = engine.withModule(device, ipModule, clearNat)) });
       requestFrame();
       return cleared!;
+    },
+    tftp: (device, request, listener) =>
+      startListening<TftpEvent>(
+        device,
+        listener,
+        tftpOrder,
+        () => ({ kind: 'failed', why: { kind: 'cancelled' } }),
+        (ctx, once) => startTftp(ctx, request, once),
+      ),
+    ftpOpen(device, server, listener) {
+      const handle = nextHandle++ as FtpHandle;
+      let id = 0;
+      const once = hearOnce(
+        (event: FtpEvent) => {
+          if (ftpOrder(event) === Infinity) ftpSessions.delete(handle);
+          listener(event);
+        },
+        ftpOrder,
+        (): FtpEvent => ({ kind: 'failed', why: 'cancelled' }),
+      );
+      let started: Result<void, DeviceUnavailable> | undefined;
+      input({
+        apply: () => {
+          started = engine.withModule(device, ipModule, (ctx) => {
+            id = startFtp(ctx, server, once.listener);
+          });
+        },
+        forget: once.forget,
+      });
+      requestFrame();
+      if (!started!.ok) return started!;
+      ftpSessions.set(handle, { device, id: () => id });
+      return ok(handle);
+    },
+    ftpSend(handle, request) {
+      const session = ftpSessions.get(handle);
+      if (!session) return;
+      input({
+        apply: () =>
+          void engine.withModule(session.device, ipModule, (ctx) =>
+            sendFtp(ctx, session.id(), request),
+          ),
+      });
+      requestFrame();
+    },
+    ftpClose(handle) {
+      const session = ftpSessions.get(handle);
+      if (!session) return;
+      input({
+        apply: () =>
+          void engine.withModule(session.device, ipModule, (ctx) => closeFtp(ctx, session.id())),
+      });
+      requestFrame();
+    },
+    mail: (device, request, listener) =>
+      startListening<MailOutcome>(
+        device,
+        listener,
+        () => Infinity,
+        () => ({ kind: 'failed', failure: { kind: 'cancelled' } }),
+        (ctx, once) => startMail(ctx, request, once),
+      ),
+    ntpStatus: (device) => engine.withModule(device, ipModule, ntpStatus),
+    serverStatus: (device) =>
+      flatten(
+        engine.withModule(device, ipModule, (ctx) =>
+          ctx.device.kind === 'server'
+            ? {
+                clock: ntpStatus(ctx).clock,
+                syslog: [...ctx.state.apps.syslog],
+                mailboxes: Object.fromEntries(
+                  [...ctx.state.apps.mailboxes].map(([user, mails]) => [user, mails.length]),
+                ),
+              }
+            : undefined,
+        ),
+      ),
+    logMessage(device, text) {
+      let logged: Result<void, DeviceUnavailable> | undefined;
+      input({
+        apply: () => void (logged = engine.withModule(device, ipModule, (ctx) => ctx.syslog(text))),
+      });
+      requestFrame();
+      return logged!;
     },
     subscribe(next) {
       listener = next;

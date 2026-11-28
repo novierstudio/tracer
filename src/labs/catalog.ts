@@ -172,6 +172,22 @@ export const SAMPLE_LABS: readonly SampleLab[] = [
     load: () => import('./dns-web-server.tracer.json?raw').then(text),
   },
   {
+    id: 'server-services',
+    title: 'Server services: TFTP backup, FTP, email, NTP and syslog',
+    description:
+      'Server1 runs the services a lab network leans on. R1 backs its config up over TFTP, sets its clock by NTP and logs to Server1, and two PCs move files over FTP and mail each other.',
+    difficulty: 'beginner',
+    devices: { router: 1, switch: 1, pc: 2, server: 1 },
+    tryThis: [
+      'On R1, run `copy running-config tftp:` to 192.168.1.20, then find R1-confg in Server1’s TFTP service',
+      'Run `show ntp associations` and `show clock` on R1: the clock follows Server1 once NTP syncs',
+      'Shut R1’s Gi0/1 and read the %LINK and %LINEPROTO messages in Server1’s SYSLOG service',
+      'In PC1’s Command Prompt, run `ftp 192.168.1.20`, log in as cisco and `put sampleFile.txt`',
+      'Send a mail from PC1’s Email app to user2@lab.local, then press Receive on PC2',
+    ],
+    load: () => import('./server-services.tracer.json?raw').then(text),
+  },
+  {
     id: 'pat-acl',
     title: 'PAT and an access list',
     description:

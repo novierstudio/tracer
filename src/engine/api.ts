@@ -27,6 +27,11 @@ import type {
 } from './l2/status';
 import type { PortRole, PortState, SpanningTreePort, StpTimes } from './l2/stp';
 import type { AclHits } from './l3/acl';
+import type { Mail, SyslogEntry } from './l3/appState';
+import type { FtpEvent, FtpListener, FtpListing, FtpReply, FtpRequest, FtpResult } from './l3/ftp';
+import type { MailFailure, MailListener, MailOutcome, MailRequest, OutgoingMail } from './l3/mail';
+import type { NtpAssociation, NtpStatus } from './l3/ntp';
+import type { TftpEvent, TftpFailure, TftpListener, TftpRequest } from './l3/tftp';
 import type { ArpTableEntry } from './l3/arp';
 import type { DhcpListener, DhcpOutcome, Lease } from './l3/dhcpClient';
 import type { DhcpBindingEntry } from './l3/dhcpServer';
@@ -70,6 +75,25 @@ import type { TopologyPatch } from './patch';
 import type { HttpResponse } from './http';
 
 export type {
+  FtpEvent,
+  FtpListener,
+  FtpListing,
+  FtpReply,
+  FtpRequest,
+  FtpResult,
+  Mail,
+  MailFailure,
+  MailListener,
+  MailOutcome,
+  MailRequest,
+  NtpAssociation,
+  NtpStatus,
+  OutgoingMail,
+  SyslogEntry,
+  TftpEvent,
+  TftpFailure,
+  TftpListener,
+  TftpRequest,
   AclHits,
   ArpTableEntry,
   BrowseTarget,
@@ -155,6 +179,21 @@ declare const terminalHandleBrand: unique symbol;
 
 /** Names a Telnet or SSH session that `openTerminal` started. */
 export type TerminalHandle = number & { readonly [terminalHandleBrand]: true };
+
+declare const ftpHandleBrand: unique symbol;
+
+/** Names an FTP session that `ftpOpen` started. */
+export type FtpHandle = number & { readonly [ftpHandleBrand]: true };
+
+/** What a server's services hold as the simulation runs, for its Services tab. */
+export type ServerStatus = {
+  /** The server's clock now, in milliseconds since 1970 UTC: its NTP time. */
+  readonly clock: number;
+  /** What its syslog service has logged, oldest first. */
+  readonly syslog: readonly SyslogEntry[];
+  /** How many mails wait in each user's mailbox, by user name in lower case. */
+  readonly mailboxes: Readonly<Record<string, number>>;
+};
 
 export type SimMode = 'realtime' | 'simulation';
 
@@ -332,6 +371,46 @@ export interface SimAPI {
   ipv6Status(device: DeviceId): Result<Ipv6Status, DeviceUnavailable>;
   /** A router or multilayer switch's HSRP groups as they run now, for `show standby`. */
   standbyStatus(device: DeviceId): Result<readonly HsrpGroupStatus[], DeviceUnavailable>;
+  /**
+   * IOS `copy ... tftp:` or `copy tftp: ...`: stores a file on a TFTP server, or fetches one.
+   * `listener` hears each block, then `done` (with a get's file) or `failed`, once each.
+   */
+  tftp(
+    device: DeviceId,
+    request: TftpRequest,
+    listener: TftpListener,
+  ): Result<void, DeviceUnavailable>;
+  /**
+   * `ftp <address>` on a host: opens a session to the server's port 21. `listener` hears `open`
+   * with the greeting or `failed`, then a `result` for each request sent, then `closed`.
+   */
+  ftpOpen(
+    device: DeviceId,
+    server: Ipv4Address,
+    listener: FtpListener,
+  ): Result<FtpHandle, DeviceUnavailable>;
+  /** Sends a request on an open session; its `result` comes to the session's listener. */
+  ftpSend(handle: FtpHandle, request: FtpRequest): void;
+  /** Ends the session from the client's side. */
+  ftpClose(handle: FtpHandle): void;
+  /**
+   * The Email app: sends a mail by SMTP or fetches a user's mail by POP3, looking the server up
+   * with DNS when it is a name. `listener` hears the outcome once.
+   */
+  mail(
+    device: DeviceId,
+    request: MailRequest,
+    listener: MailListener,
+  ): Result<void, DeviceUnavailable>;
+  /** A router or switch's clock and NTP associations, for `show clock` and `show ntp`. */
+  ntpStatus(device: DeviceId): Result<NtpStatus, DeviceUnavailable>;
+  /** A server's syslog, mailboxes and clock now. `unsupported` for any other device. */
+  serverStatus(device: DeviceId): Result<ServerStatus, DeviceUnavailable>;
+  /**
+   * The device logs a console message of its own, as IOS logs `%SYS-5-CONFIG_I` when config mode
+   * ends. It shows on the console, and goes to the device's logging hosts.
+   */
+  logMessage(device: DeviceId, text: string): Result<void, DeviceUnavailable>;
   /** Sets the one batch listener. Calling it again replaces the previous listener. */
   subscribe(listener: (batch: SimEventBatch) => void): void;
 }

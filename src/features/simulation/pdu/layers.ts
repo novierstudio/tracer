@@ -78,6 +78,7 @@ import {
   u32,
   type Part,
 } from './encode';
+import { APP_NAMES, appParts, describeApp, type AppPayload } from './apps';
 import { controlSection, type ControlSection } from './control';
 import { hsrpParts, hsrpSummary } from './hsrp';
 import { describeIpv6GroupMac, ipv6Sections } from './ipv6';
@@ -127,7 +128,8 @@ export type LayerId =
   | 'pagp'
   | 'vtp'
   | 'hsrp'
-  | 'hello';
+  | 'hello'
+  | AppPayload['kind'];
 
 export type OsiLayer = 1 | 2 | 3 | 4 | 7;
 
@@ -467,6 +469,8 @@ function applicationParts(payload: UdpPayload): Part[] {
       return dnsParts(payload);
     case 'hsrp':
       return hsrpParts(payload);
+    default:
+      return appParts(payload);
   }
 }
 
@@ -486,7 +490,16 @@ function applicationLayer(payload: UdpPayload, fields: readonly Field[]): Layer 
         summary: hsrpSummary(payload),
         fields,
       };
+    default:
+      return appLayer(payload, fields);
   }
+}
+
+/** A server service's message as a layer: its name, and the message in one line. */
+function appLayer(payload: AppPayload, fields: readonly Field[]): Layer {
+  const name = APP_NAMES[payload.kind];
+  const summary = describeApp(payload).slice(name.length).replace(/^:? /, '');
+  return { id: payload.kind, osi: 7, name, summary, fields };
 }
 
 const capitalize = (text: string) => `${text[0]!.toUpperCase()}${text.slice(1)}`;
@@ -510,6 +523,7 @@ function tcpLayers(wire: Wire, packet: Ipv4Packet, segment: TcpSegment): Layer[]
   if (payload.kind === 'http') {
     return [tcp, { id: 'http', osi: 7, name: 'HTTP', summary: describeHttp(payload), fields }];
   }
+  if (payload.kind !== 'telnet' && payload.kind !== 'ssh') return [tcp, appLayer(payload, fields)];
   const name = payload.kind === 'telnet' ? 'Telnet' : 'SSH';
   return [tcp, { id: payload.kind, osi: 7, name, summary: describeTerminal(payload), fields }];
 }

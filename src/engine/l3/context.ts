@@ -1,4 +1,5 @@
 import type { AclName, InterfaceId, Ipv4Address, MacAddress, PortId } from '@/model';
+import type { AppState } from './appState';
 import type { SimTime } from '../core/time';
 import type { ModuleContext } from '../module';
 import type { Ipv4Packet } from '../pdu';
@@ -50,6 +51,8 @@ export type IpState = {
   readonly aclHits: Map<AclName, number[]>;
   /** A router's dynamic NAT translations. */
   nat: NatTable;
+  /** TFTP, FTP, email, NTP and syslog, as servers and as clients. */
+  readonly apps: AppState;
 };
 
 /** Something that sends echo requests and waits on their answers. */
@@ -67,7 +70,9 @@ export type IpTimer =
   /** A TCP connection that has heard nothing for too long. */
   | { readonly kind: 'tcp'; readonly id: number }
   /** A DNS query, by the port it went from, that has had no answer. */
-  | { readonly kind: 'dns'; readonly port: number };
+  | { readonly kind: 'dns'; readonly port: number }
+  /** An application's own timer, such as a TFTP transfer's or the NTP client's next poll. */
+  | { readonly kind: 'app'; readonly name: string };
 
 export function timerKey(timer: IpTimer): string {
   switch (timer.kind) {
@@ -78,6 +83,8 @@ export function timerKey(timer: IpTimer): string {
       return `${timer.kind} ${timer.id}`;
     case 'dns':
       return `dns ${timer.port}`;
+    case 'app':
+      return `app ${timer.name}`;
     case 'loopback':
     case 'dhcp':
       return timer.kind;
@@ -94,6 +101,8 @@ export function parseTimer(key: string): IpTimer | undefined {
       return { kind, id: Number(value) };
     case 'dns':
       return { kind, port: Number(value) };
+    case 'app':
+      return { kind, name: value };
     case 'loopback':
     case 'dhcp':
       return { kind };

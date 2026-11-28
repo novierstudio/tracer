@@ -226,9 +226,11 @@ export function createEngine({
         random,
         note: (text) =>
           log.append({ kind: 'note', time: now, device: id, module: module.id, text }),
-        syslog: (text) => log.append({ kind: 'syslog', time: now, device: id, text }),
+        syslog: (text) => syslog(id, text),
         learnSticky: (port, mac) =>
           log.append({ kind: 'sticky-mac', time: now, device: id, port, mac }),
+        learnFiles: (service, files) =>
+          log.append({ kind: 'server-files', time: now, device: id, service, files: [...files] }),
         relink: () => relink((link) => link.a.device === id || link.b.device === id),
         storeVlans: (database) =>
           log.append({ kind: 'vlan-database', time: now, device: id, database }),
@@ -241,6 +243,12 @@ export function createEngine({
       },
     };
     return slot;
+  }
+
+  /** Logs a console message and lets the device's modules hear it, as a logging host does. */
+  function syslog(id: DeviceId, text: string) {
+    log.append({ kind: 'syslog', time: now, device: id, text });
+    for (const slot of running.get(id) ?? []) slot.module.onSyslog?.(slot.ctx, text);
   }
 
   function start(device: Device) {
@@ -263,7 +271,7 @@ export function createEngine({
     if (!loading) {
       for (const end of [link.a, link.b]) {
         for (const text of linkSyslog(devices.get(end.device), end.port, up, disabled(end))) {
-          log.append({ kind: 'syslog', time: now, device: end.device, text });
+          syslog(end.device, text);
         }
       }
     }

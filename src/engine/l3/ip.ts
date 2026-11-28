@@ -18,6 +18,8 @@ import {
   reconcileDhcp,
   takeDhcpReply,
 } from './dhcpClient';
+import { emptyApps } from './appState';
+import { stopApps } from './appRouter';
 import { onDnsTimer, stopLookups } from './dnsResolver';
 import { matchAnswer, type EchoAnswer } from './echo';
 import { stopFetches } from './httpClient';
@@ -31,9 +33,12 @@ import {
 } from './interfaces';
 import { emptyNatTable, natIn, natOut } from './nat';
 import { originate, reportError, transmit } from './output';
+import { bootNtp, onNtpTimer, reconcileNtp } from './ntp';
 import { finishPing, onPingAnswer, onPingTimer } from './ping';
 import { nextHop } from './routes';
+import { onConsoleMessage, onSyslogTimer } from './syslog';
 import { onTcpSegment, onTcpTimer } from './tcpStack';
+import { onTftpTimer } from './tftp';
 import { finishTrace, onTraceAnswer } from './traceroute';
 import { emptyTransport } from './transport';
 import { deliverUdp } from './udp';
@@ -51,6 +56,14 @@ export function stopProbe(ctx: IpContext, id: number) {
   const probe = ctx.state.probes.get(id);
   if (probe?.kind === 'ping') finishPing(ctx, probe);
   else if (probe?.kind === 'trace') finishTrace(ctx, probe);
+}
+
+/** An application's timer: `tftp:<port>`, `ntp` or `syslog`. */
+function onAppTimer(ctx: IpContext, name: string) {
+  const [app, value] = name.split(':');
+  if (app === 'tftp') onTftpTimer(ctx, Number(value));
+  else if (app === 'ntp') onNtpTimer(ctx);
+  else if (app === 'syslog') onSyslogTimer(ctx);
 }
 
 /** A packet for this device, by what it carries. `arrival` is absent for one it sent itself. */
@@ -154,6 +167,7 @@ export const ipModule: SimModule<IpState> = {
   id: 'ipv4',
   init: (ctx) => {
     bootDhcp(ctx);
+    bootNtp(ctx);
     return {
       arp: new Map(),
       resolving: new Map(),
@@ -167,6 +181,7 @@ export const ipModule: SimModule<IpState> = {
       transport: emptyTransport(),
       aclHits: new Map(),
       nat: emptyNatTable(),
+      apps: emptyApps(),
     };
   },
   onFrame(ctx, port, frame) {
@@ -218,6 +233,9 @@ export const ipModule: SimModule<IpState> = {
       case 'dns':
         onDnsTimer(ctx, timer.port);
         return;
+      case 'app':
+        onAppTimer(ctx, timer.name);
+        return;
       case undefined:
         return;
     }
@@ -229,7 +247,9 @@ export const ipModule: SimModule<IpState> = {
   onConfigChange(ctx) {
     reconcileDhcp(ctx);
     forgetRemovedLists(ctx);
+    reconcileNtp(ctx);
   },
+  onSyslog: onConsoleMessage,
   /**
    * The device is going away: every ping and traceroute it runs ends with what it got so far,
    * and whoever waits on its DHCP client hears that nothing came.
@@ -240,5 +260,6 @@ export const ipModule: SimModule<IpState> = {
     stopFetches(ctx);
     stopTerminals(ctx);
     stopLookups(ctx);
+    stopApps(ctx);
   },
 };

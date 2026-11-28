@@ -40,6 +40,7 @@ import { eigrpLines } from './eigrpConfig';
 import { accessListLines, natLines } from './showAclNat';
 import { standbyLines } from './hsrpConfig';
 import { transparentVlanLines, vtpConfigLines } from './vtpConfig';
+import { loggingLines, ntpLines } from './servicesConfig';
 
 export const UNSUPPORTED_MARKER = '! unsupported in Tracer';
 
@@ -469,6 +470,8 @@ export function runningConfig(device: IosDevice): string[] {
   if (staticRoutes.length > 0) out.push(...staticRoutes.map(routeLine), '!');
   const ipv6Routes = device.kind === 'router' ? (device.config.ipv6StaticRoutes ?? []) : [];
   if (ipv6Routes.length > 0) out.push(...ipv6Routes.map(ipv6RouteLine), '!');
+  const logging = loggingLines(config);
+  if (logging.length > 0) out.push(...logging, '!');
   out.push(...accessListLines(device));
   if (device.kind === 'switch' && device.config.defaultGateway) {
     out.push(`ip default-gateway ${device.config.defaultGateway}`, '!');
@@ -480,6 +483,8 @@ export function runningConfig(device: IosDevice): string[] {
   if (device.kind === 'router')
     out.push('line aux 0', ...lineBody(device, device.config.lines.aux), '!');
   out.push(...vtyBlocks(device, config.lines.vty), '!');
+  const ntp = ntpLines(config);
+  if (ntp.length > 0) out.push(...ntp, '!');
   if (config.unknownLines.length > 0) out.push(UNSUPPORTED_MARKER, ...config.unknownLines, '!');
   out.push('end');
   return out;

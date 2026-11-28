@@ -1,9 +1,13 @@
 import { addressOf } from '@/engine/l3/hostAddress';
 import type { RemoteStack } from '@/features/terminal/remote';
 import type { TerminalSession } from '@/features/terminal/session';
+import { hostFiles } from '@/model/defaults';
+import type { StoredFile } from '@/model';
 import { isIpv6 } from '@/model/ipv6';
 import type { HostBackend, PingReply, TraceProbe } from './backend';
 import { HELP, parseCommand } from './commands';
+import { formatDir } from './files';
+import { FTP_FAILURE, ftpPrompt, replyLine } from './ftpPrompt';
 import {
   addressPort,
   configAddressing,
@@ -30,11 +34,18 @@ export type ShellIo = {
   write(text: string): void;
   clear(): void;
   /**
-   * Hands the keyboard to `session`, a remote login, until `done`: what it prints shows here and
-   * the keys typed go to it.
+   * Hands the keyboard to `session`, a remote login or an FTP session, until `done`: what it
+   * prints shows here and the keys typed go to it.
    */
-  attach(session: TerminalSession, done: Promise<void>): Promise<void>;
+  attach(session: TerminalSession, done: Promise<void>, options?: AttachOptions): Promise<void>;
   readonly signal: AbortSignal;
+};
+
+export type AttachOptions = {
+  /** Ctrl+C aborts the command, as FTP's does, rather than going to the session. */
+  interruptible?: boolean;
+  /** Takes the function that prints lines between the session's own, as a log message does. */
+  onLog?: (log: (lines: readonly string[]) => void) => void;
 };
 
 /** The host as the prompt sees it when a line runs. Undefined once the device is gone. */
@@ -47,6 +58,8 @@ export type ShellContext = {
   wallClock?: () => number;
   /** A fresh stack for a Telnet or SSH login. Without one, the prompt cannot log in anywhere. */
   remote?: () => RemoteStack;
+  /** Writes a file to the host's disk, as `ftp`'s `get` does. */
+  saveFile(file: StoredFile): void;
 };
 
 /** A command line, run to completion. */
@@ -80,6 +93,7 @@ export function hostShell({
   backend,
   wallClock = Date.now,
   remote,
+  saveFile,
 }: ShellContext): HostShell {
   return async (line, io) => {
     const parsed = parseCommand(line);
@@ -139,6 +153,8 @@ export function hostShell({
           return io.print(HELP);
         case 'cls':
           return io.clear();
+        case 'dir':
+          return io.print(formatDir(hostFiles(device.config)));
         case 'ipconfig':
           return io.print(await ipconfig(command.all));
         case 'ipv6config':
@@ -214,6 +230,38 @@ export function hostShell({
           await Promise.race([io.attach(stack.session, stack.emptied()), aborted(io.signal)]);
           // The device went away mid-session: hang up whatever is still open.
           while (stack.depth > 0) stack.hooks.disconnect();
+          return;
+        }
+        case 'ftp': {
+          const { target } = command;
+          io.print([`Trying to connect...${target}`]);
+          const opening = backend.ftp(device.id, target);
+          const opened = await Promise.race([opening, aborted(io.signal)]);
+          if (!opened) {
+            // Ctrl+C before the server answered: hang up whenever it does.
+            void opening.then((late) => late.kind === 'open' && late.session.close());
+            return io.print(['^C', '']);
+          }
+          if (opened.kind === 'failed') {
+            return io.print([`%Error opening ftp://${target}/ (${FTP_FAILURE[opened.why]})`, '']);
+          }
+          const { session } = opened;
+          io.print([`Connected to ${target}`, replyLine(session.greeting)]);
+          const prompt = ftpPrompt({
+            server: target,
+            session,
+            files: () => {
+              const current = host()?.device ?? device;
+              return hostFiles(current.config);
+            },
+            save: saveFile,
+          });
+          await Promise.race([
+            io.attach(prompt.terminal, prompt.done, { interruptible: true, onLog: prompt.onLog }),
+            aborted(io.signal),
+          ]);
+          session.close();
+          if (io.signal.aborted) io.print(['^C', '']);
           return;
         }
         case 'tracert': {

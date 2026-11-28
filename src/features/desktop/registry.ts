@@ -1,9 +1,10 @@
-import type { DeviceId } from '@/model';
+import type { DeviceId, StoredFile } from '@/model';
 import { editorStore, type EditorStore } from '@/model/store';
 import { appEngine, vtySessions } from '@/features/terminal/registry';
 import { deviceStack, type RemoteStack } from '@/features/terminal/remote';
 import type { HostBackend } from './backend';
 import { engineBackend } from './engineBackend';
+import { saveHostFile } from './files';
 import { isHostDevice, nicConnected } from './format';
 import { hostShell } from './shell';
 import { createHostTty, type HostTty } from './tty';
@@ -39,7 +40,9 @@ export function createHostPromptRegistry(
       const open = ttys.get(id);
       if (open) return open;
       if (!isHostDevice(store.getState().topology.devices[id])) return undefined;
-      const tty = createHostTty(hostShell({ host: host(id), backend, ...(remote && { remote }) }));
+      const saveFile = (file: StoredFile) => void saveHostFile(store, id, file);
+      const shell = hostShell({ host: host(id), backend, saveFile, ...(remote && { remote }) });
+      const tty = createHostTty(shell);
       ttys.set(id, tty);
       return tty;
     },

@@ -8,6 +8,7 @@ import {
   type TcpSegment,
   type TerminalData,
 } from '@/engine/tcp';
+import { APP_PORT_NAMES, appParts, describeApp } from './apps';
 import { formatSeconds, hex, internetChecksum, ipBytes, u16, u32, type Part } from './encode';
 
 /** Dissectors for what a browser sends: DNS to find the server, TCP to reach it, HTTP over TCP. */
@@ -21,6 +22,7 @@ const PORT_NAMES: Record<number, string> = {
   [TCP_PORT.ssh]: 'SSH',
   [UDP_PORT.rip]: 'RIP',
   [UDP_PORT.hsrp]: 'HSRP',
+  ...APP_PORT_NAMES,
 };
 
 export const portName = (port: number) => {
@@ -202,12 +204,33 @@ function terminalParts(data: TerminalData): Part[] {
   ];
 }
 
-/** What a TCP segment carries: an HTTP message, or a line of a Telnet or SSH session. */
-export const describePayload = (payload: TcpPayload) =>
-  payload.kind === 'http' ? `HTTP ${describeHttp(payload)}` : describeTerminal(payload);
+/**
+ * What a TCP segment carries: an HTTP message, a line of a Telnet or SSH session, or a line or
+ * file of FTP, SMTP or POP3.
+ */
+export function describePayload(payload: TcpPayload): string {
+  switch (payload.kind) {
+    case 'http':
+      return `HTTP ${describeHttp(payload)}`;
+    case 'telnet':
+    case 'ssh':
+      return describeTerminal(payload);
+    default:
+      return describeApp(payload);
+  }
+}
 
-const payloadParts = (payload: TcpPayload) =>
-  payload.kind === 'http' ? httpParts(payload) : terminalParts(payload);
+function payloadParts(payload: TcpPayload): Part[] {
+  switch (payload.kind) {
+    case 'http':
+      return httpParts(payload);
+    case 'telnet':
+    case 'ssh':
+      return terminalParts(payload);
+    default:
+      return appParts(payload);
+  }
+}
 
 // HTTP
 
