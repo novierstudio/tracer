@@ -56,6 +56,45 @@ const GLYPHS: Record<DeviceIconName, ReactNode> = {
       <path d="M14 24h20M17.5 20.5 14 24l3.5 3.5M30.5 20.5 34 24l-3.5 3.5" stroke={ACCENT} />
     </>
   ),
+  // A router with a square body: an ISR 4000.
+  'router-isr': (
+    <>
+      <rect x="9.5" y="9.5" width="29" height="29" rx="6" />
+      <path d="M14 24h7m0 0c4 0 5-7.5 10.5-7.5M21 24c4 0 5 7.5 10.5 7.5" />
+      <circle cx="21" cy="24" r="3" fill={ACCENT} stroke="none" />
+    </>
+  ),
+  // A generic router: a ring with four arrows in and out.
+  'router-pt': (
+    <>
+      <circle cx="24" cy="24" r="14.5" />
+      <path d="M24 13v8m0 6v8M13 24h8m6 0h8" stroke={ACCENT} />
+    </>
+  ),
+  // A switch on a DIN rail, with fins for cooling.
+  'industrial-switch': (
+    <>
+      <rect x="14" y="8" width="20" height="32" rx="3" />
+      <path d="M19 14h10M19 18h10M19 22h10" />
+      <path d="M20 29v5M24 29v5M28 29v5" stroke={ACCENT} />
+    </>
+  ),
+  // Two segments joined by a span.
+  bridge: (
+    <>
+      <path d="M7 31h34" />
+      <path d="M11 31c0-8 6-13 13-13s13 5 13 13" stroke={ACCENT} />
+      <path d="M17 31v-9M24 31v-13M31 31v-9" />
+    </>
+  ),
+  // A small box that passes the signal straight through.
+  repeater: (
+    <>
+      <rect x="15" y="17" width="18" height="14" rx="3.5" />
+      <path d="M7 24h8M33 24h8" />
+      <path d="M21 24h6m-2.5-2.5L27 24l-2.5 2.5" stroke={ACCENT} />
+    </>
+  ),
   // A puck on the ceiling, with the waves it sends.
   'access-point': (
     <>

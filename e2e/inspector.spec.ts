@@ -98,7 +98,7 @@ test('renames the selected device from the inspector, and undo restores it', asy
   const hostname = inspector.getByRole('textbox', { name: 'Hostname' });
 
   await expect(hostname).toHaveValue('R1');
-  await expect(inspector.getByText('Edge Router').first()).toBeVisible();
+  await expect(inspector.getByText('2911').first()).toBeVisible();
 
   await hostname.fill('9lives');
   await hostname.press('Enter');
