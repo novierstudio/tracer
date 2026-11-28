@@ -30,15 +30,7 @@ export type EthernetFrame = {
 };
 
 export type EthernetPayload =
-  | ArpPacket
-  | Ipv4Packet
-  | Ipv6Packet
-  | Bpdu
-  | CdpPacket
-  | LldpPacket
-  | LacpPdu
-  | PagpPdu
-  | VtpPdu;
+  ArpPacket | Ipv4Packet | Ipv6Packet | Bpdu | CdpPacket | LldpPacket | LacpPdu | PagpPdu | VtpPdu;
 
 /** The payloads that ride in an 802.3 frame with an LLC and SNAP header instead of an EtherType. */
 export type SnapPayload = Bpdu | CdpPacket | PagpPdu | VtpPdu;

@@ -835,9 +835,15 @@ export const VtpConfig = z.object({
   /** `vtp mode`. Absent means server. */
   mode: VtpMode.optional(),
   /** `vtp domain`. Absent means none: IOS shows it as NULL, and learns the first one it hears. */
-  domain: z.string().regex(/^\S{1,32}$/).optional(),
+  domain: z
+    .string()
+    .regex(/^\S{1,32}$/)
+    .optional(),
   /** `vtp password`. */
-  password: z.string().regex(/^\S{1,64}$/).optional(),
+  password: z
+    .string()
+    .regex(/^\S{1,64}$/)
+    .optional(),
   /** `vtp version 2`. Absent means version 1. */
   version: z.literal(2).optional(),
   /** The configuration revision: a server adds one per VLAN change. Absent means 0. */

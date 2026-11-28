@@ -182,9 +182,9 @@ export const ipModule: SimModule<IpState> = {
         // A LAN interface takes frames of its VLAN for its own MAC or broadcast.
         const iface = lanInterfaceFor(ctx, interfacesOf(ctx), port, frame);
         if (!iface) return;
-        const virtual = ctx.virtualAddresses().some(
-          (entry) => entry.interface === iface.name && entry.mac === frame.dst,
-        );
+        const virtual = ctx
+          .virtualAddresses()
+          .some((entry) => entry.interface === iface.name && entry.mac === frame.dst);
         if (frame.dst !== iface.medium.mac && frame.dst !== BROADCAST_MAC && !virtual) return;
         if (frame.payload.kind === 'arp') onArp(ctx, iface, port, frame.payload);
         else if (frame.payload.kind === 'ipv4') receive(ctx, frame.payload, iface);

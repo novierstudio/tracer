@@ -72,12 +72,7 @@ export type VlanDatabaseEvent = {
 };
 
 export type SimEvent =
-  | FrameEvent
-  | LinkEvent
-  | NoteEvent
-  | SyslogEvent
-  | StickyMacEvent
-  | VlanDatabaseEvent;
+  FrameEvent | LinkEvent | NoteEvent | SyslogEvent | StickyMacEvent | VlanDatabaseEvent;
 
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
 

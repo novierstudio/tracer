@@ -6,8 +6,7 @@ type VtpFields = Pick<SwitchConfig, 'vtp' | 'vlans'>;
 
 export const vtpMode = (config: Pick<SwitchConfig, 'vtp'>): VtpMode => config.vtp?.mode ?? 'server';
 
-export const vtpRevision = (config: Pick<SwitchConfig, 'vtp'>): number =>
-  config.vtp?.revision ?? 0;
+export const vtpRevision = (config: Pick<SwitchConfig, 'vtp'>): number => config.vtp?.revision ?? 0;
 
 export const vtpVersion = (config: Pick<SwitchConfig, 'vtp'>): 1 | 2 => config.vtp?.version ?? 1;
 
