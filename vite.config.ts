@@ -76,8 +76,9 @@ export default defineConfig({
         ],
       },
       workbox: {
-        // The app shell, every lazy chunk and worker, the fonts and the icons: all of it works offline.
-        globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],
+        // The app shell, every lazy chunk and worker, the fonts, the icons and the device sprites: all
+        // of it works offline.
+        globPatterns: ['**/*.{js,css,html,svg,png,webp,woff2}'],
         // The ELK layout chunk is about 1.5 MB.
         maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
       },

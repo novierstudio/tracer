@@ -128,7 +128,7 @@ function DeviceHeader({ device }: { device: Device }) {
   return (
     <header className="flex shrink-0 flex-col gap-2 px-3 pt-1 pb-3">
       <div className="flex items-start gap-3">
-        <DeviceTile device={device} className="mt-0.5 size-10" />
+        <DeviceTile device={device} sprite className="mt-0.5 size-10" />
         <div className="flex min-w-0 flex-1 flex-col">
           <HostnameField
             device={device}

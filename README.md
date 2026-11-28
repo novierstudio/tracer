@@ -28,6 +28,12 @@ Before the first `pnpm test:e2e`, install the browser with `pnpm exec playwright
 
 The design system gallery at `#/dev/ui` shows every colour token and UI component in both themes. Colour tokens live in `src/ui/tokens.css`. Text colours must keep WCAG AA contrast.
 
+Device icons are pre-rendered sprites in `public/devices/`. Their three.js models live in `scripts/icons/models/`, one factory per icon name. After changing a model, run `pnpm icons:render` and commit the sprites. Add `--sheet <file>.png` for a contact sheet of every icon at canvas size, in both themes.
+
+## Credits
+
+The device icons use the stroked-toon look from [isom3trics](https://github.com/sloemo01/isom3trics) by sloemo01, under the MIT licence.
+
 ## Disclaimer
 
 Tracer is an independent project. It is not affiliated with or endorsed by Cisco Systems. Cisco and Packet Tracer are trademarks of Cisco Systems, Inc.

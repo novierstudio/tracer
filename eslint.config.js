@@ -19,6 +19,11 @@ export default defineConfig([
     languageOptions: { globals: globals.node },
   },
   {
+    // The sprite renderer's models and its page run in the browser that the script drives.
+    files: ['scripts/icons/**/*.js'],
+    languageOptions: { globals: { ...globals.node, ...globals.browser } },
+  },
+  {
     files: ['src/engine/**', 'src/cli/**', 'src/importers/**', 'src/workers/**', 'src/model/**'],
     // The model's one React binding.
     ignores: ['src/model/react.ts'],

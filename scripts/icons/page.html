@@ -1,0 +1,17 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>Tracer device sprites</title>
+<script type="importmap">
+  {
+    "imports": { "three": "/three/build/three.module.js", "three/addons/": "/three/examples/jsm/" }
+  }
+</script>
+<script type="module">
+  import { MODELS } from './models/index.js';
+  import { createSpriteRenderer } from './renderer.js';
+
+  const renderer = createSpriteRenderer();
+  window.spriteNames = Object.keys(MODELS);
+  window.renderSprite = (name, size) => renderer.render(MODELS[name], size);
+  window.spritesReady = true;
+</script>

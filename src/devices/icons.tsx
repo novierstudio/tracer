@@ -1,4 +1,4 @@
-import type { ReactNode, SVGProps } from 'react';
+import { useState, type ReactNode, type SVGProps } from 'react';
 import type { DeviceIconName } from './catalog';
 
 const ACCENT = 'var(--accent-text)';
@@ -116,7 +116,10 @@ const GLYPHS: Record<DeviceIconName, ReactNode> = {
 
 type DeviceIconProps = Omit<SVGProps<SVGSVGElement>, 'name'> & { name: DeviceIconName };
 
-/** A device on a rounded tile. The glyph takes `currentColor`; tile and accent follow the theme. */
+/**
+ * A device as a flat glyph on a rounded tile, for spots too small for its sprite. The glyph takes
+ * `currentColor`; tile and accent follow the theme.
+ */
 export function DeviceIcon({ name, ...props }: DeviceIconProps) {
   return (
     <svg viewBox="0 0 48 48" aria-hidden="true" {...props}>
@@ -140,5 +143,33 @@ export function DeviceIcon({ name, ...props }: DeviceIconProps) {
         {GLYPHS[name]}
       </g>
     </svg>
+  );
+}
+
+// Rendered by `pnpm icons:render` from the models in scripts/icons/models/.
+const SPRITES = `${import.meta.env.BASE_URL}devices/`;
+
+type DeviceSpriteProps = {
+  name: DeviceIconName;
+  className?: string;
+  loading?: 'eager' | 'lazy';
+};
+
+/** A device as its isometric sprite. A name with no sprite yet falls back to its glyph. */
+export function DeviceSprite({ name, className, loading }: DeviceSpriteProps) {
+  const [missing, setMissing] = useState<DeviceIconName>();
+  if (missing === name) return <DeviceIcon name={name} className={className} />;
+  return (
+    <img
+      src={`${SPRITES}${name}.webp`}
+      srcSet={`${SPRITES}${name}.webp 1x, ${SPRITES}${name}@2x.webp 2x`}
+      alt=""
+      aria-hidden="true"
+      draggable={false}
+      decoding="async"
+      loading={loading}
+      onError={() => setMissing(name)}
+      className={className}
+    />
   );
 }
