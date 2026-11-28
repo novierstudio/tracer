@@ -1,13 +1,21 @@
 import { PortId, type DeviceKind, type PortKind } from '@/model';
 import type { PortSpec } from '@/model';
 
-export const DEVICE_CATEGORIES = ['routers', 'switches', 'hubs', 'end-devices', 'servers'] as const;
+export const DEVICE_CATEGORIES = [
+  'routers',
+  'switches',
+  'hubs',
+  'wireless',
+  'end-devices',
+  'servers',
+] as const;
 export type DeviceCategory = (typeof DEVICE_CATEGORIES)[number];
 
 export const CATEGORY_LABELS: Record<DeviceCategory, string> = {
   routers: 'Routers',
   switches: 'Switches',
   hubs: 'Hubs',
+  wireless: 'Wireless devices',
   'end-devices': 'End devices',
   servers: 'Servers',
 };
@@ -70,6 +78,11 @@ const numbered = (count: number): PortSpec[] =>
     kind: 'fastEthernet',
     id: PortId.parse(`Port${i}`),
   }));
+
+const radio = (name: string): PortSpec => ({ kind: 'wireless', id: PortId.parse(name) });
+
+/** The radio a PC or laptop takes in place of its Ethernet card, as Packet Tracer's WMP300N. */
+export const WIRELESS_NIC: PortSpec = radio('Wireless0');
 
 const single = (kind: PortKind): PortSpec[] => [
   { kind, id: PortId.parse(`${PORT_PREFIX[kind]}0`) },
@@ -140,6 +153,33 @@ export const DEVICE_MODELS = [
     hostnamePrefix: 'Hub',
     icon: 'hub',
     ports: numbered(6),
+  },
+  {
+    id: 'access-point',
+    name: 'Access Point',
+    category: 'wireless',
+    kind: 'accessPoint',
+    hostnamePrefix: 'AccessPoint',
+    icon: 'access-point',
+    // As Packet Tracer's AccessPoint-PT: Port 0 is Ethernet, Port 1 the radio.
+    ports: [...numbered(1), radio('Port1')],
+  },
+  {
+    id: 'wireless-router',
+    name: 'Wireless Router',
+    category: 'wireless',
+    kind: 'wirelessRouter',
+    hostnamePrefix: 'WirelessRouter',
+    icon: 'wireless-router',
+    // As Packet Tracer's WRT300N: the Internet port, four LAN ports and the radio.
+    ports: [
+      { kind: 'fastEthernet', id: PortId.parse('Internet') },
+      ...[1, 2, 3, 4].map((n): PortSpec => ({
+        kind: 'fastEthernet',
+        id: PortId.parse(`Ethernet${n}`),
+      })),
+      radio('Wireless'),
+    ],
   },
   {
     id: 'pc',

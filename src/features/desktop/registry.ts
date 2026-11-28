@@ -1,10 +1,10 @@
-import { linkAt, type DeviceId } from '@/model';
+import type { DeviceId } from '@/model';
 import { editorStore, type EditorStore } from '@/model/store';
 import { appEngine, vtySessions } from '@/features/terminal/registry';
 import { deviceStack, type RemoteStack } from '@/features/terminal/remote';
 import type { HostBackend } from './backend';
 import { engineBackend } from './engineBackend';
-import { addressPort, isHostDevice } from './format';
+import { isHostDevice, nicConnected } from './format';
 import { hostShell } from './shell';
 import { createHostTty, type HostTty } from './tty';
 
@@ -32,9 +32,7 @@ export function createHostPromptRegistry(
     const { topology } = store.getState();
     const device = topology.devices[id];
     if (!isHostDevice(device)) return undefined;
-    const port = addressPort(device);
-    const connected = !!port && !!linkAt(topology, { device: id, port: port.id });
-    return { device, connected };
+    return { device, connected: nicConnected(topology, device) };
   };
   return {
     get(id) {

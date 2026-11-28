@@ -45,7 +45,7 @@ import { cn } from '@/ui/cn';
 import { EmptyState } from '@/ui/empty-state';
 import { AreaNode, NoteNode, ShapeNode, TextNode } from './AnnotationNodes';
 import { ANNOTATION_KINDS, ANNOTATION_TOOLS, type AnnotationTool } from './annotations';
-import { CableEdge } from './CableEdge';
+import { CableEdge, WirelessEdge } from './CableEdge';
 import { CanvasContextMenu, type MenuTarget } from './CanvasContextMenu';
 import { ToolHint, Toolbar, ZoomControls } from './CanvasControls';
 import { cableTool, useCableTool } from './cableTool';
@@ -67,13 +67,14 @@ import {
   applySelectChanges,
   createAnnotationMapper,
   createEdgeMapper,
+  createWirelessEdgeMapper,
   createNodeMapper,
   isAnnotationId,
   isDeviceId,
   movesFrom,
   resizesFrom,
   usedPortCounts,
-  type CableFlowEdge,
+  type CanvasEdge,
   type CanvasNode,
 } from './flow';
 import { GRID } from './geometry';
@@ -86,7 +87,7 @@ const NODE_TYPES = {
   area: AreaNode,
   shape: ShapeNode,
 } satisfies Record<CanvasNode['type'] & string, unknown>;
-const EDGE_TYPES = { cable: CableEdge };
+const EDGE_TYPES = { cable: CableEdge, wireless: WirelessEdge };
 const MULTI_SELECT_KEYS = ['Shift', 'Meta', 'Control'];
 const MIDDLE_BUTTON = [1];
 const MINIMAP_SIZE = { width: 176, height: 112 };
@@ -132,7 +133,7 @@ const isFrameNode = (type: string | undefined) =>
  */
 function framesOutsideBox(
   changes: readonly NodeChange<CanvasNode>[],
-  state: ReactFlowState<CanvasNode, CableFlowEdge>,
+  state: ReactFlowState<CanvasNode, CanvasEdge>,
   toFlow: (point: { x: number; y: number }) => { x: number; y: number },
 ): Set<string> {
   const outside = new Set<string>();
@@ -155,7 +156,7 @@ function framesOutsideBox(
   return outside;
 }
 
-function onEdgesChange(changes: EdgeChange<CableFlowEdge>[]) {
+function onEdgesChange(changes: EdgeChange<CanvasEdge>[]) {
   const { selection, select } = editorStore.getState();
   const links = applySelectChanges<LinkId>(selection.links, changes);
   if (links) select({ ...selection, links });
@@ -191,7 +192,7 @@ function onDragOver(event: DragEvent) {
 
 // Fit once when the canvas opens on an existing lab. React Flow's own fitView prop would instead
 // wait for the first nodes and re-centre the view under the first device dropped.
-function fitOnOpen(flow: ReactFlowInstance<CanvasNode, CableFlowEdge>) {
+function fitOnOpen(flow: ReactFlowInstance<CanvasNode, CanvasEdge>) {
   if (flow.getNodes().length > 0) void flow.fitView(FIT_VIEW);
 }
 
@@ -265,21 +266,27 @@ function Flow({ element }: { element: RefObject<HTMLElement | null> }) {
   const cabling = useCableTool((state) => state.step !== null);
   const editingText = useCanvasUi((state) => state.edit !== null);
   const drawing = useCanvasUi((state) => state.drawing !== null);
-  const storeApi = useStoreApi<CanvasNode, CableFlowEdge>();
+  const storeApi = useStoreApi<CanvasNode, CanvasEdge>();
   const portLabels = usePortLabels();
   const zoomedOut = useStore((state) => state.transform[2] < 0.5);
   const connecting = useStore((state) => state.connection.inProgress);
   const altHeld = useKeyPress('Alt');
   const colorMode = useSyncExternalStore(subscribeTheme, themeClass);
-  const flow = useReactFlow<CanvasNode, CableFlowEdge>();
+  const flow = useReactFlow<CanvasNode, CanvasEdge>();
   const [menu, setMenu] = useState<MenuTarget | null>(null);
 
   const nodes = useNodes();
   const [toEdges] = useState(createEdgeMapper);
   const selectedLinks = useMemo(() => new Set(selection.links), [selection.links]);
-  const edges = useMemo(
+  const [toWirelessEdges] = useState(createWirelessEdgeMapper);
+  const cableEdges = useMemo(
     () => toEdges(links, devices, selectedLinks),
     [toEdges, links, devices, selectedLinks],
+  );
+  const wirelessEdges = useMemo(() => toWirelessEdges(devices), [toWirelessEdges, devices]);
+  const edges = useMemo<CanvasEdge[]>(
+    () => [...cableEdges, ...wirelessEdges],
+    [cableEdges, wirelessEdges],
   );
 
   useEffect(() => {
@@ -355,7 +362,8 @@ function Flow({ element }: { element: RefObject<HTMLElement | null> }) {
       event.preventDefault();
     }
   };
-  const onEdgeContextMenu = (event: MouseEvent, edge: CableFlowEdge) => {
+  const onEdgeContextMenu = (event: MouseEvent, edge: CanvasEdge) => {
+    if (edge.type !== 'cable') return;
     editorStore.getState().select({ links: [edge.id as LinkId] });
     openMenu({ kind: 'link', link: edge.id as LinkId, at: flowPoint(event) });
   };
@@ -367,7 +375,7 @@ function Flow({ element }: { element: RefObject<HTMLElement | null> }) {
         onPointerMoveCapture={(event) => trackPointer(event)}
         onPointerLeave={() => trackPointer(null)}
       >
-        <ReactFlow<CanvasNode, CableFlowEdge>
+        <ReactFlow<CanvasNode, CanvasEdge>
           nodes={nodes}
           edges={edges}
           nodeTypes={NODE_TYPES}
