@@ -132,9 +132,10 @@ export function createEngine({
   let settings = DEFAULT_LAB_SETTINGS;
   // Set while a lab loads, when links coming up are not news.
   let loading = false;
-  // What the device handling an arriving frame sends, while it handles it, and where it came from.
+  // What the device handling an arriving frame sends, while it handles it.
   let handling: SentFrame[] | undefined;
-  let handlingFrom: Endpoint | undefined;
+  // The frame being handled and where it came from, so a radio relaying it skips its sender.
+  let relaying: { frame: Frame; from: Endpoint } | undefined;
   let collisions = false;
 
   function random() {
@@ -145,7 +146,7 @@ export function createEngine({
 
   /**
    * Puts a frame on the port's link, or on each of a radio's associations: a radio is a medium its
-   * clients share. It never echoes a frame back to the client it heard the frame from.
+   * clients share. A frame it relays never goes back to the client it heard the frame from.
    */
   function send(from: Endpoint, frame: Frame) {
     const states = portLinks.get(endpointKey(from));
@@ -154,7 +155,8 @@ export function createEngine({
     for (const state of states) {
       const { link } = state;
       const to = sameEndpoint(link.a, from) ? link.b : link.a;
-      if (link.cable === 'wireless' && handlingFrom && sameEndpoint(to, handlingFrom)) continue;
+      const echo = relaying?.frame === frame && sameEndpoint(to, relaying.from);
+      if (link.cable === 'wireless' && echo) continue;
       if (!state.up) {
         log.append({
           kind: 'frame',
@@ -443,12 +445,12 @@ export function createEngine({
         });
         if (!delivered) return;
         handling = sent;
-        handlingFrom = from;
+        relaying = { frame, from };
         for (const slot of running.get(to.device) ?? []) {
           slot.module.onFrame?.(slot.ctx, to.port, frame);
         }
         handling = undefined;
-        handlingFrom = undefined;
+        relaying = undefined;
         return;
       }
       case 'timer':

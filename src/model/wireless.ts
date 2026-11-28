@@ -141,9 +141,13 @@ export type HomeRouterIos = {
 /**
  * A home router's settings as the IOS config that would do the same: a DHCP pool for its LAN
  * that lends `maxUsers` addresses from `start`, with the router as gateway and its static DNS
- * server, and PAT from the LAN to the Internet port's address.
+ * server, else the DNS servers its ISP leased it (`upstreamDns`), and PAT from the LAN to the
+ * Internet port's address.
  */
-export function homeRouterIos(config: WirelessRouterConfig): HomeRouterIos {
+export function homeRouterIos(
+  config: WirelessRouterConfig,
+  upstreamDns: readonly Ipv4Address[] = [],
+): HomeRouterIos {
   const network = lanNetwork(config.lan);
   const first = toNumber(network.address);
   const broadcast = (first | (~maskOf(network.prefixLength) >>> 0)) >>> 0;
@@ -155,7 +159,7 @@ export function homeRouterIos(config: WirelessRouterConfig): HomeRouterIos {
       ? [{ first: toAddress(last + 1), last: toAddress(broadcast - 1) }]
       : []),
   ];
-  const dns = config.wan.mode === 'static' ? config.wan.dns : undefined;
+  const dns = config.wan.mode === 'static' ? config.wan.dns : upstreamDns[0];
   const dhcp: DhcpServerConfig | undefined = config.dhcp.enabled
     ? {
         pools: {
