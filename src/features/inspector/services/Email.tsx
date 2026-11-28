@@ -55,17 +55,26 @@ export function MailDomain({ domain, onSet }: { domain: string; onSet: (domain: 
   );
 }
 
-/** The mail accounts, how many mails wait for each, and a row to add one. */
+/**
+ * The mail accounts, how many mails wait for each, and a row to add one. The IoT service's
+ * accounts use it too, named by `noun` and with no mailboxes.
+ */
 export function MailUsers({
   users,
   mailboxes,
   onChange,
+  noun = 'Mail',
 }: {
   users: readonly MailUser[];
-  /** Mails waiting, by user name in lower case; undefined while the simulation has not said. */
-  mailboxes: Readonly<Record<string, number>> | undefined;
+  /**
+   * Mails waiting, by user name in lower case; undefined while the simulation has not said, and
+   * null for accounts that have no mailbox.
+   */
+  mailboxes: Readonly<Record<string, number>> | undefined | null;
   onChange: (users: MailUser[]) => void;
+  noun?: string;
 }) {
+  const lower = noun.toLowerCase();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string>();
@@ -89,15 +98,22 @@ export function MailUsers({
   return (
     <div className="flex flex-col gap-1.5">
       <ServiceTable
-        label="Mail users"
-        columns={[['User'], ['Password'], ['Mails', 'w-12'], ['', 'w-7']]}
+        label={`${noun} users`}
+        columns={[
+          ['User'],
+          ['Password'],
+          ...(mailboxes === null ? [] : [['Mails', 'w-12'] as [string, string]]),
+          ['', 'w-7'],
+        ]}
         empty={users.length === 0 ? 'No users yet.' : undefined}
       >
         {users.map((user) => (
           <tr key={user.username} className="border-t border-line">
             <td className={cellClass}>{user.username}</td>
             <td className={cellClass}>{user.password}</td>
-            <td className={cellClass}>{mailboxes?.[user.username.toLowerCase()] ?? 0}</td>
+            {mailboxes !== null && (
+              <td className={cellClass}>{mailboxes?.[user.username.toLowerCase()] ?? 0}</td>
+            )}
             <td className="py-0.5 text-right">
               <RemoveButton
                 name={user.username}
@@ -107,10 +123,10 @@ export function MailUsers({
           </tr>
         ))}
       </ServiceTable>
-      <form aria-label="Add mail user" onSubmit={add} className="flex flex-col gap-1">
+      <form aria-label={`Add ${lower} user`} onSubmit={add} className="flex flex-col gap-1">
         <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] items-center gap-1.5">
           <input
-            aria-label="Mail user"
+            aria-label={`${noun} user`}
             value={username}
             placeholder="User"
             spellCheck={false}
@@ -124,7 +140,7 @@ export function MailUsers({
             className={inputClass(true, error !== undefined)}
           />
           <input
-            aria-label="Mail password"
+            aria-label={`${noun} password`}
             value={password}
             placeholder="Password"
             spellCheck={false}
@@ -135,7 +151,7 @@ export function MailUsers({
             }}
             className={inputClass(true, false)}
           />
-          <Button type="submit" size="sm" aria-label="Add mail user" className="px-1.5">
+          <Button type="submit" size="sm" aria-label={`Add ${lower} user`} className="px-1.5">
             <PlusIcon />
             Add
           </Button>

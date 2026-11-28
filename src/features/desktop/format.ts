@@ -1,3 +1,4 @@
+import { apBroadcastsOf, lapStatuses } from '@/features/simulation/wirelessStatus';
 import { addressOf, gatewayOf } from '@/engine/l3/hostAddress';
 import type { UnreachableCode } from '@/engine/pdu';
 import {
@@ -46,7 +47,10 @@ export function nicConnected(topology: Topology, device: HostDevice): boolean {
   const port = addressPort(device);
   if (!port) return false;
   if (port.kind !== 'wireless') return !!linkAt(topology, { device: device.id, port: port.id });
-  return associations(Object.values(topology.devices)).some((link) => link.a.device === device.id);
+  const broadcasts = apBroadcastsOf(lapStatuses.getState());
+  return associations(Object.values(topology.devices), broadcasts).some(
+    (link) => link.a.device === device.id,
+  );
 }
 
 /** `02:00:00:00:00:0a` → `02-00-00-00-00-0A`, as Windows prints a MAC. */

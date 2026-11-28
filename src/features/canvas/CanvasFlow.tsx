@@ -1,3 +1,4 @@
+import { useApBroadcasts } from '@/features/simulation/wirelessStatus';
 import '@xyflow/react/dist/base.css';
 import './canvas.css';
 import {
@@ -283,7 +284,11 @@ function Flow({ element }: { element: RefObject<HTMLElement | null> }) {
     () => toEdges(links, devices, selectedLinks),
     [toEdges, links, devices, selectedLinks],
   );
-  const wirelessEdges = useMemo(() => toWirelessEdges(devices), [toWirelessEdges, devices]);
+  const broadcasts = useApBroadcasts();
+  const wirelessEdges = useMemo(
+    () => toWirelessEdges(devices, broadcasts),
+    [toWirelessEdges, devices, broadcasts],
+  );
   const edges = useMemo<CanvasEdge[]>(
     () => [...cableEdges, ...wirelessEdges],
     [cableEdges, wirelessEdges],

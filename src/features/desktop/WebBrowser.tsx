@@ -11,7 +11,7 @@ import { Button } from '@/ui/button';
 import { cn } from '@/ui/cn';
 import type { BrowseTarget, FetchEvent, FetchFailure, HostBackend, HttpResponse } from './backend';
 import { describeFailure, formatUrl, loadingStatus, parseUrl } from './browser';
-import { plainTextPage, sanitizePage } from './sanitize';
+import { followIn, plainTextPage, sanitizePage } from './sanitize';
 
 /** Where the browser is: a blank page, a load under way, or how the last one ended. */
 type Load =
@@ -103,7 +103,7 @@ export function WebBrowser({ device, backend }: { device: DeviceId; backend: Hos
       </form>
       <Status load={load} />
       <div className="min-h-0 flex-1 overflow-hidden">
-        <View load={load} onRetry={() => go(url)} />
+        <View load={load} onRetry={() => go(url)} onNavigate={go} />
       </div>
     </div>
   );
@@ -144,7 +144,15 @@ function Status({ load }: { load: Load }) {
   );
 }
 
-function View({ load, onRetry }: { load: Load; onRetry: () => void }) {
+function View({
+  load,
+  onRetry,
+  onNavigate,
+}: {
+  load: Load;
+  onRetry: () => void;
+  onNavigate: (url: string) => void;
+}) {
   switch (load.kind) {
     case 'blank':
       return (
@@ -175,20 +183,42 @@ function View({ load, onRetry }: { load: Load; onRetry: () => void }) {
       );
     }
     case 'page':
-      return <Page response={load.response} />;
+      return (
+        <Page response={load.response} base={formatUrl(load.target)} onNavigate={onNavigate} />
+      );
   }
 }
 
-/** The server's page, sanitized, in a frame that runs no scripts and reaches no real network. */
-function Page({ response }: { response: HttpResponse }) {
+/**
+ * The server's page, sanitized, in a frame that runs no scripts and reaches no real network. Its
+ * links and forms load their pages from the simulated network, as `followIn` follows them.
+ */
+function Page({
+  response,
+  base,
+  onNavigate,
+}: {
+  response: HttpResponse;
+  base: string;
+  onNavigate: (url: string) => void;
+}) {
   const page = useMemo(
     () => (isHtml(response) ? sanitizePage(response.body) : plainTextPage(response.body)),
     [response],
   );
+  const stop = useRef<(() => void) | null>(null);
+  useEffect(() => () => stop.current?.(), []);
   return (
     <iframe
       title="Page"
-      sandbox=""
+      // Same origin lets the browser follow links in the frame; with no allow-scripts, the page
+      // still runs nothing.
+      sandbox="allow-same-origin"
+      onLoad={(event) => {
+        stop.current?.();
+        const doc = event.currentTarget.contentDocument;
+        stop.current = doc ? followIn(doc, base, onNavigate) : null;
+      }}
       srcDoc={page}
       referrerPolicy="no-referrer"
       className="block size-full border-0 bg-white"

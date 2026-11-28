@@ -1,14 +1,18 @@
 import { useId, useState, type FormEvent, type ReactNode } from 'react';
+import { findDeviceModel } from '@/devices/catalog';
 import { useHostAddressing } from '@/features/simulation/hostAddresses';
+import { useIotServerStatus } from '@/features/simulation/wirelessStatus';
 import {
   dhcpLast,
   formatSubnetMask,
+  runsIotServer,
   Ssid,
+  THING_TYPES,
   WirelessSecurity,
+  type CentralOfficeConfig,
   type Device,
   type HostIpv4,
   type WirelessRadio,
-  type WirelessRouterConfig,
 } from '@/model';
 import { editorStore } from '@/model/store';
 import { Button } from '@/ui/button';
@@ -17,7 +21,8 @@ import { Field } from './Field';
 import { formatCidr, inSubnet, parseInterfaceAddress, parseOptionalAddress } from './ipv4';
 import { Section } from './parts';
 
-type Radio = Extract<Device, { kind: 'accessPoint' | 'wirelessRouter' }>;
+type Radio = Extract<Device, { kind: 'accessPoint' | 'wirelessRouter' | 'centralOffice' }>;
+type Gateway = Extract<Device, { kind: 'wirelessRouter' | 'centralOffice' }>;
 
 type Form = {
   ssid: string;
@@ -37,12 +42,23 @@ type Form = {
 };
 type Errors = Partial<Record<keyof Form, string>>;
 
-const CHANNELS = Array.from({ length: 11 }, (_, i) => i + 1);
+const CHANNELS_24 = Array.from({ length: 11 }, (_, i) => i + 1);
+const CHANNELS_5 = [36, 40, 44, 48, 149, 153, 157, 161, 165];
+
+/** The channels a model's band offers: 1 to 11 at 2.4 GHz, the UNII channels at 5 GHz. */
+function channelsOf(band: string | undefined): number[] {
+  if (band === '5 GHz') return CHANNELS_5;
+  if (band?.includes('5')) return [...CHANNELS_24, ...CHANNELS_5];
+  return CHANNELS_24;
+}
+
+/** What the form shows for the radio a central office server does not have. */
+const NO_RADIO: WirelessRadio = { ssid: 'Default', security: { mode: 'none' }, channel: 6 };
 
 function formFrom(device: Radio): Form {
-  const { radio } = device.config;
-  const router: WirelessRouterConfig | undefined =
-    device.kind === 'wirelessRouter' ? device.config : undefined;
+  const radio = device.kind === 'centralOffice' ? NO_RADIO : device.config.radio;
+  const router: CentralOfficeConfig | undefined =
+    device.kind === 'accessPoint' ? undefined : device.config;
   const wan = router?.wan;
   return {
     ssid: radio.ssid,
@@ -81,9 +97,9 @@ function parseRadio(form: Form, errors: Errors): WirelessRadio | undefined {
 
 function parseRouter(
   form: Form,
-  current: WirelessRouterConfig,
+  current: CentralOfficeConfig,
   errors: Errors,
-): Omit<WirelessRouterConfig, 'hostname' | 'radio'> | undefined {
+): Omit<CentralOfficeConfig, 'hostname'> | undefined {
   let wan: HostIpv4 = { mode: 'dhcp' };
   if (form.wanMode === 'static') {
     const address = parseInterfaceAddress(form.wanAddress, form.wanMask);
@@ -126,7 +142,7 @@ function parseRouter(
 }
 
 /** The Internet address a home router holds now: its lease, or its static address. */
-function WanStatus({ device }: { device: Extract<Device, { kind: 'wirelessRouter' }> }) {
+function WanStatus({ device }: { device: Gateway }) {
   const addressing = useHostAddressing(device.id);
   if (device.config.wan.mode === 'static') return null;
   const text =
@@ -144,17 +160,50 @@ function Grid({ children }: { children: ReactNode }) {
   return <div className="grid grid-cols-2 gap-x-2 gap-y-2.5">{children}</div>;
 }
 
+/** The things a Home Gateway's IoT server has registered, as its web page lists them. */
+function IotDevices({ device }: { device: Gateway }) {
+  const status = useIotServerStatus(device.id);
+  const things = status?.things ?? [];
+  return (
+    <Section title="IoT devices" className="border-t border-line">
+      {things.length === 0 ? (
+        <p className="text-xs text-fg-3">No IoT devices have registered yet.</p>
+      ) : (
+        <ul aria-label="Registered IoT devices" className="flex flex-col gap-1 text-xs">
+          {things.map((thing) => (
+            <li key={thing.name} className="flex justify-between gap-2">
+              <span className="text-fg-1">{thing.name}</span>
+              <span className="text-fg-3">
+                {THING_TYPES[thing.thing].attributes
+                  .map((attribute) => `${attribute.label} ${thing.state[attribute.key] ?? ''}`)
+                  .join(', ')}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+      <p className="mt-2 text-2xs text-fg-3">
+        Browse to {device.config.lan.address} from a host on its LAN and sign in as admin, password
+        admin, to control them.
+      </p>
+    </Section>
+  );
+}
+
 /**
- * The web GUI of a home wireless router, or an access point's wireless settings, as Packet
- * Tracer's GUI tab has them: Internet setup, network setup with the DHCP server, and the wireless
- * network. Applies as one undo step.
+ * The web GUI of a home wireless router or Home Gateway, a central office server's settings, or
+ * an access point's wireless settings, as Packet Tracer's GUI tab has them: Internet (or
+ * Backbone) setup, network setup with the DHCP server, and the wireless network. Applies as one
+ * undo step.
  */
 export function WirelessConfigTab({ device }: { device: Radio }) {
   const [draft, setDraft] = useState<Form | null>(null);
   const [errors, setErrors] = useState<Errors>({});
   const id = useId();
   const form = draft ?? formFrom(device);
-  const router = device.kind === 'wirelessRouter' ? device : undefined;
+  const router = device.kind === 'accessPoint' ? undefined : device;
+  const office = device.kind === 'centralOffice';
+  const wifi = findDeviceModel(device.model)?.wifi;
 
   const edit = (patch: Partial<Form>) => {
     setDraft({ ...form, ...patch });
@@ -182,7 +231,13 @@ export function WirelessConfigTab({ device }: { device: Radio }) {
         kind: device.kind,
         config: { ...device.config, radio },
       });
-    } else if (settings) {
+    } else if (device.kind === 'centralOffice' && settings) {
+      store.updateConfig({
+        device: device.id,
+        kind: device.kind,
+        config: { ...device.config, ...settings },
+      });
+    } else if (device.kind === 'wirelessRouter' && settings) {
       store.updateConfig({
         device: device.id,
         kind: device.kind,
@@ -216,10 +271,10 @@ export function WirelessConfigTab({ device }: { device: Radio }) {
       }}
     >
       {router && (
-        <Section title="Internet setup">
+        <Section title={office ? 'Backbone' : 'Internet setup'}>
           <div className="flex flex-col gap-3">
             <Segmented
-              label="Internet connection type"
+              label={office ? 'Backbone address' : 'Internet connection type'}
               value={form.wanMode}
               onValueChange={(wanMode) => edit({ wanMode })}
               options={[
@@ -232,7 +287,11 @@ export function WirelessConfigTab({ device }: { device: Radio }) {
               <WanStatus device={router} />
             ) : (
               <Grid>
-                {field('wanAddress', 'Internet IP address', '203.0.113.2')}
+                {field(
+                  'wanAddress',
+                  office ? 'Backbone IP address' : 'Internet IP address',
+                  '203.0.113.2',
+                )}
                 {field('wanMask', 'Subnet mask', '255.255.255.0')}
                 {field('wanGateway', 'Default gateway', '203.0.113.1')}
                 {field('wanDns', 'DNS 1', '203.0.113.53')}
@@ -242,10 +301,10 @@ export function WirelessConfigTab({ device }: { device: Radio }) {
         </Section>
       )}
       {router && (
-        <Section title="Network setup" className="border-t border-line">
+        <Section title={office ? 'Cell network' : 'Network setup'} className="border-t border-line">
           <div className="flex flex-col gap-3">
             <Grid>
-              {field('lanAddress', 'Router IP', '192.168.0.1')}
+              {field('lanAddress', office ? 'Cell gateway IP' : 'Router IP', '192.168.0.1')}
               {field('lanMask', 'Subnet mask', '255.255.255.0')}
             </Grid>
             <Segmented
@@ -274,42 +333,50 @@ export function WirelessConfigTab({ device }: { device: Radio }) {
           </div>
         </Section>
       )}
-      <Section title="Wireless" className={router ? 'border-t border-line' : undefined}>
-        <div className="flex flex-col gap-3">
-          <Grid>
-            {field('ssid', 'Network name (SSID)', 'Default', true)}
-            <div className="flex min-w-0 flex-col gap-1">
-              <label htmlFor={`${id}-channel`} className="text-2xs text-fg-3">
-                Channel
-              </label>
-              <select
-                id={`${id}-channel`}
-                value={form.channel}
-                onChange={(event) => edit({ channel: event.target.value })}
-                className="h-7 rounded-md border border-line bg-surface-1 px-1.5 text-[0.6875rem] text-fg-1"
-              >
-                {CHANNELS.map((channel) => (
-                  <option key={channel} value={channel}>
-                    {channel}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </Grid>
-          <Segmented
-            label="Security mode"
-            value={form.security}
-            onValueChange={(security) => edit({ security })}
-            options={[
-              { value: 'none', label: 'Disabled' },
-              { value: 'wpa2-psk', label: 'WPA2 Personal' },
-            ]}
-            className="self-start"
-          />
-          {form.security === 'wpa2-psk' &&
-            field('passphrase', 'Passphrase', '8 to 63 characters', true)}
-        </div>
-      </Section>
+      {!office && (
+        <Section title="Wireless" className={router ? 'border-t border-line' : undefined}>
+          <div className="flex flex-col gap-3">
+            {wifi && (
+              <p className="text-2xs text-fg-3">
+                {wifi.band}, {wifi.standards.join(', ')}
+              </p>
+            )}
+            <Grid>
+              {field('ssid', 'Network name (SSID)', 'Default', true)}
+              <div className="flex min-w-0 flex-col gap-1">
+                <label htmlFor={`${id}-channel`} className="text-2xs text-fg-3">
+                  Channel
+                </label>
+                <select
+                  id={`${id}-channel`}
+                  value={form.channel}
+                  onChange={(event) => edit({ channel: event.target.value })}
+                  className="h-7 rounded-md border border-line bg-surface-1 px-1.5 text-[0.6875rem] text-fg-1"
+                >
+                  {channelsOf(wifi?.band).map((channel) => (
+                    <option key={channel} value={channel}>
+                      {channel}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </Grid>
+            <Segmented
+              label="Security mode"
+              value={form.security}
+              onValueChange={(security) => edit({ security })}
+              options={[
+                { value: 'none', label: 'Disabled' },
+                { value: 'wpa2-psk', label: 'WPA2 Personal' },
+              ]}
+              className="self-start"
+            />
+            {form.security === 'wpa2-psk' &&
+              field('passphrase', 'Passphrase', '8 to 63 characters', true)}
+          </div>
+        </Section>
+      )}
+      {router && runsIotServer(router) && <IotDevices device={router} />}
       <div className="flex items-center justify-end gap-1.5 px-3 pb-3">
         <Button size="sm" variant="ghost" onClick={reset} disabled={!draft}>
           Revert

@@ -21,7 +21,7 @@ type Server = Extract<Device, { kind: 'server' }>;
  */
 export function ServicesTab({ device }: { device: Server }) {
   const services = serverServices(device.config);
-  const { tftp, ftp, email, ntp } = services;
+  const { tftp, ftp, email, ntp, iot } = services;
   const status = useServerStatus(device.id);
   const write = (next: ServerServices) =>
     editorStore.getState().updateConfig({
@@ -124,6 +124,24 @@ export function ServicesTab({ device }: { device: Server }) {
           testId="ftp-files"
           files={ftp.files}
           onChange={(files) => write({ ...services, ftp: { ...ftp, files } })}
+        />
+      </ConfigSection>
+      <ConfigSection title="IoT" summary={onOff(iot.enabled)}>
+        <ServiceSwitch
+          label="IoT service"
+          checked={iot.enabled}
+          onChange={(enabled) => write({ ...services, iot: { ...iot, enabled } })}
+        />
+        <p className="text-2xs text-fg-3">
+          The registration server things set to Remote Server register with, under an account here.
+          Browse to this server to sign in and control them. Its page replaces the HTTP page while
+          IoT is on.
+        </p>
+        <MailUsers
+          noun="IoT"
+          users={iot.users}
+          mailboxes={null}
+          onChange={(users) => write({ ...services, iot: { ...iot, users } })}
         />
       </ConfigSection>
     </>
