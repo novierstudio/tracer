@@ -21,7 +21,7 @@ export default defineConfig([
   {
     files: ['src/engine/**', 'src/cli/**', 'src/importers/**', 'src/workers/**', 'src/model/**'],
     // The model's one React binding.
-    ignores: ['src/model/react.ts', 'src/model/react.test.ts'],
+    ignores: ['src/model/react.ts'],
     rules: {
       'no-restricted-imports': [
         'error',
@@ -44,7 +44,7 @@ export default defineConfig([
     // The simulation worker must not bundle zod: value imports from the model may only come from
     // its schema-free modules. Type imports are erased and always fine.
     files: ['src/engine/**', 'src/workers/sim.worker.ts'],
-    ignores: ['src/engine/**/*.test.ts', 'src/engine/testing.ts', 'src/engine/client.ts'],
+    ignores: ['src/engine/client.ts'],
     rules: {
       '@typescript-eslint/no-restricted-imports': [
         'error',

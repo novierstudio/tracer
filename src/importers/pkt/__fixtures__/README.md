@@ -13,13 +13,3 @@ The two `.pkt` files are used under the MIT licence of their repositories:
 > The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
 >
 > THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-
-## More real files
-
-`samples.test.ts` decrypts every `.pkt` and `.pka` in a local folder and checks that each one is well-formed Packet Tracer XML. It then imports each file and checks the topology against the `Topology` schema, printing one Markdown table row per file: name, Packet Tracer version, devices imported / skipped, links imported / dropped, and whether the schema passed. It is skipped unless `PKT_SAMPLES_DIR` is set:
-
-```sh
-PKT_SAMPLES_DIR=~/pkt-samples PKT_XML_OUT=/tmp/pkt-xml pnpm vitest run src/importers/pkt/samples.test.ts --silent=false
-```
-
-`PKT_XML_OUT` is optional and writes each decrypted XML next to its name.
