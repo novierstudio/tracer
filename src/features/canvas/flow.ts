@@ -128,6 +128,8 @@ function address(device: Device): string | undefined {
   switch (device.kind) {
     case 'router':
       return Object.values(device.config.interfaces).find((i) => i.ipv4)?.ipv4?.address;
+    case 'wirelessRouter':
+      return device.config.lan.address;
     case 'pc':
     case 'server':
       return device.config.ipv4.mode === 'static' ? device.config.ipv4.address?.address : undefined;

@@ -7,7 +7,14 @@ test('the device palette lists the catalog by category and filters it', async ({
   const palette = page.getByRole('complementary', { name: 'Device palette' });
   const groups = palette.getByRole('heading', { level: 3 });
 
-  await expect(groups).toHaveText(['Routers', 'Switches', 'End devices', 'Servers']);
+  await expect(groups).toHaveText([
+    'Routers',
+    'Switches',
+    'Hubs',
+    'Wireless devices',
+    'End devices',
+    'Servers',
+  ]);
   await expect(palette.getByRole('list', { name: 'Routers' }).getByRole('listitem')).toHaveText([
     /Branch Router\s*2× Gi, 2× Serial/,
     /Edge Router\s*4× Gi/,
@@ -32,7 +39,9 @@ test('a palette device is keyboard-focusable and drags its model id', async ({ p
   await expect(first).toHaveAttribute('draggable', 'true');
 
   const dataTransfer = await page.evaluateHandle(() => new DataTransfer());
-  await palette.getByText('Access Switch 24').dispatchEvent('dragstart', { dataTransfer });
+  await palette
+    .getByText('Access Switch 24', { exact: true })
+    .dispatchEvent('dragstart', { dataTransfer });
   const payload = await dataTransfer.evaluate((transfer) => ({
     types: [...transfer.types],
     model: transfer.getData('application/x-tracer-device'),
