@@ -13,6 +13,7 @@
     "format": "prettier --write .",
     "test:e2e": "playwright test",
     "icons": "node scripts/pwa-icons.js",
+    "icons:render": "node scripts/icons/render.js",
     "labs": "node scripts/build-labs.js"
   },
   "dependencies": {
@@ -55,6 +56,7 @@
     "eslint-plugin-react-hooks": "^7.1.1",
     "globals": "^17.14.0",
     "prettier": "^3.10.1",
+    "three": "0.180.0",
     "typescript": "~6.0.3",
     "typescript-eslint": "^8.74.0",
     "vite": "^8.3.8",
