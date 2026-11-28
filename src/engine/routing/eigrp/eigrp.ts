@@ -9,7 +9,12 @@ import type {
   RoutingTimers,
 } from '@/model';
 import { ms, type SimDuration, type SimTime } from '../../core/time';
-import { ipInterfaces, type IpInterface } from '../../l3/interfaces';
+import {
+  ipInterfaces,
+  routingDevice,
+  type IpInterface,
+  type RoutingDevice,
+} from '../../l3/interfaces';
 import {
   classfulNetwork,
   compareAddresses,
@@ -53,7 +58,7 @@ import type { EigrpPathStatus, EigrpStatus, EigrpTopologyEntry } from './status'
  * neighbour and picks the best path once they have all replied.
  */
 
-type Router = Extract<Device, { kind: 'router' }>;
+type Router = RoutingDevice;
 
 /** EIGRP on one interface. */
 type Iface = {
@@ -179,7 +184,7 @@ const timersOf = (ctx: DeviceContext) => EIGRP_TIMERS[ctx.settings.routingTimers
 const keyOf = ({ address, prefixLength }: Ipv4Cidr) => `${address}/${prefixLength}`;
 const neighborKey = (iface: InterfaceId, address: Ipv4Address) => `${iface} ${address}`;
 const eigrpConfig = (device: Device): EigrpConfig | undefined =>
-  device.kind === 'router' ? device.config.eigrp : undefined;
+  routingDevice(device)?.config.eigrp;
 const sameK = (a: EigrpKValues, b: EigrpKValues) => a.every((k, i) => k === b[i]);
 const reachable = (d: Destination) => d.origin !== undefined || d.successors.length > 0;
 
@@ -781,7 +786,7 @@ function redistributed(
   const redistribution = config.redistributeStatic;
   if (!redistribution) return found;
   const interfaces = ipInterfaces(device, ctx, undefined);
-  for (const route of device.config.staticRoutes) {
+  for (const route of device.config.staticRoutes ?? []) {
     if ((route.distance ?? ADMINISTRATIVE_DISTANCE.static) >= ADMINISTRATIVE_DISTANCE.eigrp) {
       continue;
     }
@@ -850,9 +855,9 @@ function syncOrigins(ctx: EigrpContext, process: Process, device: Router, config
  * since a link's metric may have changed.
  */
 function reconcile(ctx: EigrpContext) {
-  const { device } = ctx;
-  const config = eigrpConfig(device);
-  if (!config || device.kind !== 'router') {
+  const device = routingDevice(ctx.device);
+  const config = device?.config.eigrp;
+  if (!device || !config) {
     stop(ctx);
     return;
   }

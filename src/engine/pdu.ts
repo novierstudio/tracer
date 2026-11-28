@@ -460,14 +460,28 @@ export const MAX_AGE = 3600;
 /** The first sequence number an LSA carries, 0x80000001 as a signed 32-bit number. Higher is newer. */
 export const INITIAL_SEQUENCE = -0x7fffffff;
 
-/** The LSAs a single area needs: each router's own links, and each multi-access network's routers. */
-export type LsaType = 'router' | 'network';
+/**
+ * Router and network LSAs describe one area. Summary LSAs carry networks and AS boundary routers
+ * from one area into another, and external LSAs carry routes from outside OSPF to every area but
+ * a stub one.
+ */
+export type LsaType = 'router' | 'network' | 'summary' | 'asbr-summary' | 'external';
 
-export const LSA_TYPE = { router: 1, network: 2 } as const satisfies Record<LsaType, number>;
+export const LSA_TYPE = {
+  router: 1,
+  network: 2,
+  summary: 3,
+  'asbr-summary': 4,
+  external: 5,
+} as const satisfies Record<LsaType, number>;
+
+/** LSInfinity: a summary or external LSA at this metric is unreachable. */
+export const LS_INFINITY = 0xffffff;
 
 /**
  * Which LSA: its type, its link state ID (the router ID for a router LSA, the DR's interface
- * address for a network LSA) and the router that originated it.
+ * address for a network LSA, the network for a summary or external LSA, the boundary router's ID
+ * for an ASBR summary LSA) and the router that originated it.
  */
 export type LsaKey = {
   readonly type: LsaType;
@@ -509,6 +523,10 @@ export type RouterLink =
 /** A router's links in its area. Every router originates one. */
 export type RouterLsa = LsaHeader & {
   readonly type: 'router';
+  /** The B bit: the router is an area border router. */
+  readonly abr: boolean;
+  /** The E bit: the router is an AS boundary router, which originates external LSAs. */
+  readonly asbr: boolean;
   readonly links: readonly RouterLink[];
 };
 
@@ -520,7 +538,32 @@ export type NetworkLsa = LsaHeader & {
   readonly attached: readonly Ipv4Address[];
 };
 
-export type Lsa = RouterLsa | NetworkLsa;
+/** A network in another area, as an area border router advertises it into this one. */
+export type SummaryLsa = LsaHeader & {
+  readonly type: 'summary';
+  readonly prefixLength: PrefixLength;
+  /** The border router's cost to the network. */
+  readonly metric: number;
+};
+
+/** An AS boundary router in another area, as an area border router advertises it into this one. */
+export type AsbrSummaryLsa = LsaHeader & {
+  readonly type: 'asbr-summary';
+  /** The border router's cost to the boundary router. */
+  readonly metric: number;
+};
+
+/** A route from outside OSPF, as an AS boundary router redistributes it. */
+export type ExternalLsa = LsaHeader & {
+  readonly type: 'external';
+  readonly prefixLength: PrefixLength;
+  /** Type 1 adds the cost to the boundary router; type 2, the default, keeps the metric as is. */
+  readonly metricType: 1 | 2;
+  readonly metric: number;
+  readonly tag: number;
+};
+
+export type Lsa = RouterLsa | NetworkLsa | SummaryLsa | AsbrSummaryLsa | ExternalLsa;
 
 /** What every OSPF packet's header says: who sent it, and in which area. */
 type OspfHeader = {
@@ -538,6 +581,8 @@ export type OspfHello = OspfHeader & {
   readonly helloInterval: number;
   readonly deadInterval: number;
   readonly priority: number;
+  /** The E bit clear: the sender's area is a stub area. Neighbours must agree on it. */
+  readonly stub: boolean;
   /** The DR and BDR the sender knows of, by interface address, or 0.0.0.0 for none. */
   readonly dr: Ipv4Address;
   readonly bdr: Ipv4Address;

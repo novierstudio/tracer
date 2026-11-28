@@ -157,6 +157,7 @@ function stpContext(ctx: DeviceContext, device: Switch, state: SwitchState): Stp
     setTimer: (key, delay) => ctx.setTimer(key, delay),
     clearTimer: (key) => ctx.clearTimer(key),
     note: (text) => ctx.note(text),
+    forwardingChanged: () => ctx.forwardingChanged(),
     sendBpdu(port, vlan, bpdu) {
       const switchport = view.config.interfaces[port]?.switchport;
       const out = isPortChannel(port) ? bundled(state.channel, device, groupOf(port))[0] : port;

@@ -234,6 +234,13 @@ export function createEngine({
         relink: () => relink((link) => link.a.device === id || link.b.device === id),
         storeVlans: (database) =>
           log.append({ kind: 'vlan-database', time: now, device: id, database }),
+        forwardingChanged: () => {
+          for (const other of running.get(id) ?? []) {
+            // A module still booting reads the forwarding state when its init runs.
+            if (other === slot || other.ctx.state === undefined) continue;
+            other.module.onConfigChange?.(other.ctx);
+          }
+        },
         learnedRoutes: () =>
           (running.get(id) ?? []).flatMap((other) => other.module.routes?.(other.ctx) ?? []),
         virtualAddresses: () =>

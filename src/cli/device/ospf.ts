@@ -3,18 +3,27 @@ import {
   ipv4ToUint32,
   uint32ToIpv4,
   type Ipv4Address,
+  type OspfArea,
   type OspfConfig,
+  type PrefixLength,
   type RoutedInterface,
   type Subinterface,
 } from '../../model';
 import type { ModeOf } from '../modes';
-import { iface, ipv4, keyword, num } from '../params';
-import { defineCommand } from '../tree';
-import { INVALID_INPUT, type RouterContext } from './context';
+import { choice, iface, ipv4, keyword, mask, num, type Segment } from '../params';
+import { defineCommand, type Command } from '../tree';
+import { INVALID_INPUT, type DeviceContext } from './context';
 import { findInterface, interfaceEntries, isLayer2 } from './show';
-import { showIpOspfInterface, showIpOspfInterfaceBrief, showIpOspfNeighbor } from './showOspf';
+import {
+  showIpOspf,
+  showIpOspfBorderRouters,
+  showIpOspfDatabase,
+  showIpOspfInterface,
+  showIpOspfInterfaceBrief,
+  showIpOspfNeighbor,
+} from './showOspf';
 
-const routerCommand = defineCommand<RouterContext>();
+const routerCommand = defineCommand<DeviceContext>();
 
 const EXEC = ['user-exec', 'priv-exec'] as const;
 const GLOBAL = ['global-config'] as const;
@@ -41,7 +50,7 @@ const networkPath = [
 ] as const;
 
 /** The router's OSPF process. `router ospf` creates it, so it is there in `ospf-config` unless undone. */
-function ospfOf(ctx: RouterContext, mode: ModeOf<'ospf-config'>): Draft<OspfConfig> {
+function ospfOf(ctx: DeviceContext, mode: ModeOf<'ospf-config'>): Draft<OspfConfig> {
   return (ctx.device.config.ospf ??= {
     processId: mode.processId,
     networks: [],
@@ -56,7 +65,7 @@ function networkNumber(address: Ipv4Address, wildcard: Ipv4Address): Ipv4Address
 
 /** Applies `edit` to each routed interface or subinterface of the mode. */
 export function eachInterface(
-  ctx: RouterContext,
+  ctx: DeviceContext,
   mode: ModeOf<'interface-config' | 'subinterface-config'>,
   edit: (config: Draft<RoutedInterface> | Draft<Subinterface>) => void,
 ): readonly string[] {
@@ -69,7 +78,287 @@ export function eachInterface(
   return NOTHING;
 }
 
+const CLASSFUL_ONLY = '% Only classful networks will be redistributed';
+const BACKBONE_STUB = '% OSPF: Backbone can not be configured as stub area';
+
+const areaPath = [
+  keyword('area', 'OSPF area parameters'),
+  num('area', 0, 4294967295, 'OSPF area ID as a decimal value'),
+] as const;
+
+/** The wildcard bits of a prefix length, as `network` takes them. */
+const wildcardOf = (prefixLength: PrefixLength): Ipv4Address =>
+  uint32ToIpv4((2 ** (32 - prefixLength) - 1) >>> 0);
+
+/** The area's `area` settings, created empty when absent. */
+function areaOf(ospf: Draft<OspfConfig>, area: number): Draft<OspfArea> {
+  const areas = (ospf.areas ??= []);
+  let entry = areas.find((candidate) => candidate.area === area);
+  if (!entry) areas.push((entry = { area }));
+  return entry;
+}
+
+/** Drops areas left with no settings, and the list once it is empty. */
+function pruneAreas(ospf: Draft<OspfConfig>) {
+  const kept = ospf.areas?.filter((entry) => entry.stub !== undefined || entry.ranges?.length);
+  if (kept?.length) ospf.areas = kept;
+  else delete ospf.areas;
+}
+
+/** Every order of every subset of `items`, as IOS takes optional keywords in any order. */
+function orderings<T>(items: readonly T[]): T[][] {
+  const out: T[][] = [[]];
+  const grow = (prefix: T[], rest: readonly T[]) => {
+    rest.forEach((item, i) => {
+      const next = [...prefix, item];
+      out.push(next);
+      grow(next, [...rest.slice(0, i), ...rest.slice(i + 1)]);
+    });
+  };
+  grow([], items);
+  return out;
+}
+
+type MetricArgs = { readonly metric?: number; readonly metricType?: '1' | '2' };
+
+const metricTypeOf = (args: MetricArgs) =>
+  args.metricType === undefined ? undefined : (Number(args.metricType) as 1 | 2);
+
+const METRIC_TYPES = {
+  1: 'Set OSPF External Type 1 metrics',
+  2: 'Set OSPF External Type 2 metrics',
+} as const;
+
+/**
+ * `redistribute connected|static [metric <n>] [metric-type 1|2] [subnets]`, the options in any
+ * order. A repeat changes only the options it names. Without `subnets` IOS warns that only
+ * classful networks go out.
+ */
+function redistributeCommands(): Command<DeviceContext>[] {
+  const options = {
+    metric: [
+      keyword('metric', 'Metric for redistributed routes'),
+      num('metric', 0, 16777214, 'OSPF default metric'),
+    ],
+    'metric-type': [
+      keyword('metric-type', 'OSPF/IS-IS exterior metric type for redistributed routes'),
+      choice('metricType', METRIC_TYPES),
+    ],
+    subnets: [keyword('subnets', 'Consider subnets for redistribution into OSPF')],
+  } satisfies Record<string, readonly Segment[]>;
+  const redistribute = keyword(
+    'redistribute',
+    'Redistribute information from another routing protocol',
+  );
+  const sources = [
+    ['connected', 'Connected', 'redistributeConnected'],
+    ['static', 'Static routes', 'redistributeStatic'],
+  ] as const;
+  return sources.flatMap(([source, help, field]) =>
+    orderings(Object.keys(options) as (keyof typeof options)[]).map((order) =>
+      routerCommand({
+        modes: OSPF,
+        path: [
+          redistribute,
+          keyword(source, help),
+          ...order.flatMap((option): readonly Segment[] => options[option]),
+        ],
+        run: (args, ctx, mode) => {
+          const ospf = ospfOf(ctx, mode);
+          const { metric } = args as MetricArgs;
+          const metricType = metricTypeOf(args as MetricArgs);
+          const held = ospf[field];
+          const next = {
+            ...held,
+            ...(metric === undefined ? {} : { metric }),
+            ...(metricType === undefined ? {} : { metricType }),
+            subnets: (held?.subnets ?? false) || order.includes('subnets'),
+          };
+          ospf[field] = next;
+          return next.subnets ? NOTHING : [CLASSFUL_ONLY];
+        },
+        no: (_a, ctx, mode) => {
+          delete ospfOf(ctx, mode)[field];
+          return NOTHING;
+        },
+      }),
+    ),
+  );
+}
+
+/** `default-information originate [always] [metric <n>] [metric-type 1|2]`, in any order. */
+function defaultInformationCommands(): Command<DeviceContext>[] {
+  const options = {
+    always: [keyword('always', 'Always advertise default route')],
+    metric: [keyword('metric', 'OSPF default metric'), num('metric', 0, 16777214, 'OSPF metric')],
+    'metric-type': [
+      keyword('metric-type', 'OSPF metric type for default routes'),
+      choice('metricType', METRIC_TYPES),
+    ],
+  } satisfies Record<string, readonly Segment[]>;
+  const base = [
+    keyword('default-information', 'Control distribution of default information'),
+    keyword('originate', 'Distribute a default route'),
+  ];
+  return orderings(Object.keys(options) as (keyof typeof options)[]).map((order) =>
+    routerCommand({
+      modes: OSPF,
+      path: [...base, ...order.flatMap((option): readonly Segment[] => options[option])],
+      run: (args, ctx, mode) => {
+        const { metric } = args as MetricArgs;
+        const metricType = metricTypeOf(args as MetricArgs);
+        ospfOf(ctx, mode).defaultOriginate = {
+          always: order.includes('always'),
+          ...(metric === undefined ? {} : { metric }),
+          ...(metricType === undefined ? {} : { metricType }),
+        };
+        return NOTHING;
+      },
+      no: (_a, ctx, mode) => {
+        delete ospfOf(ctx, mode).defaultOriginate;
+        return NOTHING;
+      },
+    }),
+  );
+}
+
+type RangeArgs = {
+  readonly area: number;
+  readonly address: Ipv4Address;
+  readonly mask: PrefixLength;
+};
+
+/** `area <id> range <address> <mask> [advertise|not-advertise]` and `area <id> stub [no-summary]`. */
+function areaCommands(): Command<DeviceContext>[] {
+  const rangePath = [
+    ...areaPath,
+    keyword('range', 'Summarize routes matching address/mask (border routers only)'),
+    ipv4('address', 'IP address to match'),
+    mask('mask', 'IP mask for address'),
+  ] as const;
+  const prefixOf = ({ address, mask: prefixLength }: RangeArgs) => ({
+    address: networkNumber(address, wildcardOf(prefixLength)),
+    prefixLength,
+  });
+  const setRange = (
+    args: RangeArgs,
+    ctx: DeviceContext,
+    mode: ModeOf<'ospf-config'>,
+    advertise: boolean,
+  ) => {
+    const prefix = prefixOf(args);
+    const ranges = (areaOf(ospfOf(ctx, mode), args.area).ranges ??= []);
+    const held = ranges.find(
+      (range) =>
+        range.prefix.address === prefix.address &&
+        range.prefix.prefixLength === prefix.prefixLength,
+    );
+    if (held) held.advertise = advertise;
+    else ranges.push({ prefix, advertise });
+    return NOTHING;
+  };
+  const removeRange = (
+    args: Partial<RangeArgs>,
+    ctx: DeviceContext,
+    mode: ModeOf<'ospf-config'>,
+  ) => {
+    if (args.area === undefined || args.address === undefined || args.mask === undefined)
+      return ctx.reject(INCOMPLETE);
+    const prefix = prefixOf(args as RangeArgs);
+    const ospf = ospfOf(ctx, mode);
+    const entry = ospf.areas?.find((candidate) => candidate.area === args.area);
+    if (entry?.ranges) {
+      entry.ranges = entry.ranges.filter(
+        (range) =>
+          range.prefix.address !== prefix.address ||
+          range.prefix.prefixLength !== prefix.prefixLength,
+      );
+    }
+    pruneAreas(ospf);
+    return NOTHING;
+  };
+  const stubPath = [...areaPath, keyword('stub', 'Specify a stub area')] as const;
+  const setStub = (
+    area: number,
+    ctx: DeviceContext,
+    mode: ModeOf<'ospf-config'>,
+    stub: NonNullable<OspfArea['stub']>,
+  ) => {
+    if (area === 0) return ctx.reject(BACKBONE_STUB);
+    areaOf(ospfOf(ctx, mode), area).stub = stub;
+    return NOTHING;
+  };
+  return [
+    routerCommand({
+      modes: OSPF,
+      path: rangePath,
+      run: (args, ctx, mode) => setRange(args, ctx, mode, true),
+      no: removeRange,
+    }),
+    routerCommand({
+      modes: OSPF,
+      path: [...rangePath, keyword('advertise', 'Advertise this range (default)')],
+      run: (args, ctx, mode) => setRange(args, ctx, mode, true),
+      no: removeRange,
+    }),
+    routerCommand({
+      modes: OSPF,
+      path: [...rangePath, keyword('not-advertise', 'DoNotAdvertise this range')],
+      run: (args, ctx, mode) => setRange(args, ctx, mode, false),
+      no: removeRange,
+    }),
+    routerCommand({
+      modes: OSPF,
+      path: stubPath,
+      run: ({ area }, ctx, mode) => setStub(area, ctx, mode, 'stub'),
+      no: ({ area }, ctx, mode) => {
+        if (area === undefined) return ctx.reject(INCOMPLETE);
+        const ospf = ospfOf(ctx, mode);
+        const entry = ospf.areas?.find((candidate) => candidate.area === area);
+        if (entry) delete entry.stub;
+        pruneAreas(ospf);
+        return NOTHING;
+      },
+    }),
+    routerCommand({
+      modes: OSPF,
+      path: [...stubPath, keyword('no-summary', 'Do not send summary LSA into stub area')],
+      run: ({ area }, ctx, mode) => setStub(area, ctx, mode, 'no-summary'),
+      // `no area <id> stub no-summary` keeps the stub area and lets summaries in again.
+      no: ({ area }, ctx, mode) => {
+        if (area === undefined) return ctx.reject(INCOMPLETE);
+        const entry = ospfOf(ctx, mode).areas?.find((candidate) => candidate.area === area);
+        if (entry?.stub) entry.stub = 'stub';
+        return NOTHING;
+      },
+    }),
+  ];
+}
+
 export const ospfCommands = [
+  routerCommand({
+    modes: EXEC,
+    path: [show, showIp, showOspf],
+    run: (_a, ctx) => ctx.query('protocols', showIpOspf),
+  }),
+  routerCommand({
+    modes: EXEC,
+    path: [show, showIp, showOspf, keyword('database', 'Database summary')],
+    run: (_a, ctx) => ctx.query('protocols', showIpOspfDatabase),
+  }),
+  routerCommand({
+    modes: EXEC,
+    path: [
+      show,
+      showIp,
+      showOspf,
+      keyword('border-routers', 'Border and Boundary Router Information'),
+    ],
+    run: (_a, ctx) => ctx.query('protocols', showIpOspfBorderRouters),
+  }),
+  ...areaCommands(),
+  ...redistributeCommands(),
+  ...defaultInformationCommands(),
   routerCommand({
     modes: EXEC,
     path: [show, showIp, showOspf, keyword('neighbor', 'Neighbor list')],

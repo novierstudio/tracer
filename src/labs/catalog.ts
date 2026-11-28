@@ -95,6 +95,22 @@ export const SAMPLE_LABS: readonly SampleLab[] = [
     load: () => import('./layer3-switch.tracer.json?raw').then(text),
   },
   {
+    id: 'layer3-switch-ospf',
+    title: 'Layer 3 switch with OSPF and DHCP',
+    description:
+      'A multilayer switch lends the Sales VLAN its addresses by DHCP and runs OSPF with a router over a routed port, so the PCs reach a LAN beyond the router.',
+    difficulty: 'intermediate',
+    devices: { switch: 1, router: 1, pc: 3 },
+    tryThis: [
+      'Run `show ip ospf neighbor` on MLS1: R1 is FULL',
+      'Run `show ip route` on MLS1 and find R1’s LAN as an O route',
+      'Run `ipconfig /all` on PC1: MLS1 lent its address and gateway',
+      'Ping PC3 (192.168.20.10) from PC1’s Command Prompt',
+      'Run `show ip dhcp binding` on MLS1 to see both leases',
+    ],
+    load: () => import('./layer3-switch-ospf.tracer.json?raw').then(text),
+  },
+  {
     id: 'stp-triangle',
     title: 'Spanning tree triangle',
     description:
@@ -139,6 +155,22 @@ export const SAMPLE_LABS: readonly SampleLab[] = [
       'Shut down R2’s GigabitEthernet0/2, then run `show ip route` on R1 again: R3’s LAN is now over the serial link',
     ],
     load: () => import('./ospf-three-routers.tracer.json?raw').then(text),
+  },
+  {
+    id: 'ospf-multi-area',
+    title: 'Multi-area OSPF with an ABR and a default route',
+    description:
+      'R2 joins area 1 to the backbone and sums area 1 up into one route. R3 borders the Internet: it brings in its ISP link and a default route as external routes, so PC1 reaches 8.8.8.8 across both areas.',
+    difficulty: 'intermediate',
+    devices: { router: 4, pc: 2 },
+    tryThis: [
+      'Run `show ip route` on R1: O IA routes come from area 0, and O*E2 is the default route R3 originates',
+      'Ping 8.8.8.8 from PC1’s Command Prompt',
+      'Run `show ip route` on R3: `area 1 range` on R2 folds area 1 into one O IA route, 10.1.0.0/16',
+      'Run `show ip ospf database` on R2 to see both areas’ LSAs and the Type-5 externals',
+      'Run `show ip ospf border-routers` on R1 to find the ABR and the ASBR',
+    ],
+    load: () => import('./ospf-multi-area.tracer.json?raw').then(text),
   },
   {
     id: 'eigrp-feasible-successor',

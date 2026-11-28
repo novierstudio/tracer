@@ -31,6 +31,8 @@ export type LearnedRoute = {
   readonly rank?: number;
   /** A route another protocol brought into this one, as EIGRP's `D EX`. */
   readonly external?: true;
+  /** How OSPF learned a route from beyond its area: `O IA`, `O E1` or `O E2`. */
+  readonly ospf?: 'IA' | 'E1' | 'E2';
   /** The neighbour to forward to. */
   readonly via: Ipv4Address;
   readonly interface: InterfaceId;

@@ -6,12 +6,17 @@ import { keyword } from '../params';
 import { defineCommand, type Command, type Terminal } from '../tree';
 import { INVALID_INPUT, type DeviceContext, type SwitchContext } from './context';
 import { helperAddressCommands, routeCommands } from './commands';
+import { dhcpCommands } from './dhcp';
+import { eigrpCommands } from './eigrp';
+import { ospfCommands } from './ospf';
+import { ripCommands } from './rip';
 
 const switchCommand = defineCommand<SwitchContext>();
 
 const GLOBAL = ['global-config'] as const;
 const IF = ['interface-config'] as const;
 const NOTHING: readonly string[] = [];
+const IP_ROUTING_OFF = '% IP routing not enabled';
 const ACCESS_VLAN_1 = { mode: 'access', vlan: VlanId.parse(1) } as const;
 
 const globalIp = keyword('ip', 'Global IP configuration subcommands');
@@ -34,6 +39,27 @@ function multilayerOnly<Ctx extends DeviceContext>(command: Command<Ctx>): Comma
 }
 
 /**
+ * A multilayer switch opens a routing process (`router ospf`, `router rip`, `router eigrp`) only
+ * once `ip routing` is on, as IOS on a 3560 does.
+ */
+function ipRoutingFirst<Ctx extends DeviceContext>(command: Command<Ctx>): Command<Ctx> {
+  const { terminal } = command;
+  if (!command.modes.includes('global-config') || !terminal.command.startsWith('router ')) {
+    return command;
+  }
+  return {
+    ...command,
+    terminal: {
+      ...terminal,
+      run: (args, ctx, mode) =>
+        ctx.device.kind === 'switch' && !ctx.device.config.ipRouting
+          ? ctx.reject(IP_ROUTING_OFF)
+          : (terminal.run?.(args, ctx, mode) ?? NOTHING),
+    },
+  };
+}
+
+/**
  * Applies `edit` to each physical port of the mode. A VLAN interface or loopback in it refuses
  * the whole command.
  */
@@ -52,7 +78,8 @@ function eachPort(
 
 /**
  * What a multilayer switch adds to a switch's commands: `ip routing`, routed ports with
- * `no switchport`, static routes and DHCP relay. The route and helper commands are the router's.
+ * `no switchport`, static routes, DHCP relay and server, and RIP, OSPF and EIGRP. Those are the
+ * router's commands.
  */
 export const multilayerCommands = [
   // `switchport` brings a routed port back to switching as a VLAN 1 access port. On a layer 2
@@ -91,5 +118,11 @@ export const multilayerCommands = [
     }),
     ...routeCommands(),
     ...helperAddressCommands(),
-  ].map(multilayerOnly),
+    ...dhcpCommands,
+    ...ripCommands,
+    ...ospfCommands,
+    ...eigrpCommands,
+  ]
+    .map(ipRoutingFirst)
+    .map(multilayerOnly),
 ];

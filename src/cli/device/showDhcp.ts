@@ -75,7 +75,7 @@ export function showIpDhcpPool(
   device: IosDevice,
   only?: string,
 ): string[] | undefined {
-  const pools = device.kind === 'router' ? (device.config.dhcp?.pools ?? {}) : {};
+  const pools = device.config.dhcp?.pools ?? {};
   if (only !== undefined && !(only in pools)) return undefined;
   const blocks = Object.entries(pools)
     .filter(([name]) => only === undefined || name === only)

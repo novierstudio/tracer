@@ -9,13 +9,13 @@ import {
 import type { ModeOf } from '../modes';
 import { iface, ipv4, keyword, num } from '../params';
 import { defineCommand } from '../tree';
-import { INVALID_INPUT, type RouterContext } from './context';
+import { INVALID_INPUT, type DeviceContext } from './context';
 import { eachInterface } from './ospf';
 import { classfulNetwork } from './rip';
 import { findInterface, interfaceEntries } from './show';
 import { showIpEigrpInterfaces, showIpEigrpNeighbors, showIpEigrpTopology } from './showEigrp';
 
-const routerCommand = defineCommand<RouterContext>();
+const routerCommand = defineCommand<DeviceContext>();
 
 const EXEC = ['user-exec', 'priv-exec'] as const;
 const GLOBAL = ['global-config'] as const;
@@ -57,7 +57,7 @@ const sameNetwork = (a: EigrpNetwork, b: EigrpNetwork) =>
   a.address === b.address && a.wildcard === b.wildcard;
 
 /** The router's EIGRP process. `router eigrp` creates it, so it is there in `eigrp-config` unless undone. */
-function eigrpOf(ctx: RouterContext, mode: ModeOf<'eigrp-config'>): Draft<EigrpConfig> {
+function eigrpOf(ctx: DeviceContext, mode: ModeOf<'eigrp-config'>): Draft<EigrpConfig> {
   return (ctx.device.config.eigrp ??= {
     asn: mode.asn,
     networks: [],
@@ -67,7 +67,7 @@ function eigrpOf(ctx: RouterContext, mode: ModeOf<'eigrp-config'>): Draft<EigrpC
 }
 
 function addNetwork(
-  ctx: RouterContext,
+  ctx: DeviceContext,
   mode: ModeOf<'eigrp-config'>,
   address: Ipv4Address,
   wildcard?: Ipv4Address,
@@ -80,7 +80,7 @@ function addNetwork(
 }
 
 function removeNetwork(
-  ctx: RouterContext,
+  ctx: DeviceContext,
   mode: ModeOf<'eigrp-config'>,
   address: Ipv4Address | undefined,
   wildcard?: Ipv4Address,

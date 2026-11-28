@@ -47,7 +47,8 @@ import { hsrpModule, hsrpStatus } from './l3/hsrp';
 import { ipv6Module, ipv6Status, startPing6, startTrace6, stopProbe6 } from './l3v6/ipv6';
 import type { ModuleContext, SimModule } from './module';
 import { eigrpModule, eigrpStatus } from './routing/eigrp/eigrp';
-import { ospfModule, ospfStatus } from './routing/ospf/ospf';
+import { ospfModule } from './routing/ospf/ospf';
+import { ospfStatus } from './routing/ospf/query';
 import { ripModule, ripStatus } from './routing/rip';
 
 /** The module a ping or traceroute runs in, IPv4's or IPv6's, and how it starts and stops there. */
@@ -463,7 +464,9 @@ export function createSimService({
     dhcpBindings: (device) =>
       flatten(
         engine.withModule(device, ipModule, (ctx) =>
-          ctx.device.kind === 'router' ? dhcpBindings(ctx) : undefined,
+          ctx.device.kind === 'router' || ctx.device.kind === 'switch'
+            ? dhcpBindings(ctx)
+            : undefined,
         ),
       ),
     dhcpRenew: (device, listener) =>

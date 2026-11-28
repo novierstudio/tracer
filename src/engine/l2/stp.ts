@@ -94,7 +94,7 @@ export type StpState = Map<VlanId, Instance>;
 /** What spanning tree needs from the switch it runs on. */
 export interface StpContext extends Pick<
   DeviceContext,
-  'now' | 'settings' | 'portUp' | 'setTimer' | 'clearTimer' | 'note'
+  'now' | 'settings' | 'portUp' | 'setTimer' | 'clearTimer' | 'note' | 'forwardingChanged'
 > {
   readonly device: Switch;
   /** Sends a BPDU out of a port as a frame of `vlan`, tagged as the port needs. */
@@ -205,8 +205,10 @@ const compareCandidates = (a: Candidate, b: Candidate) =>
   comparePorts(a.own, b.own);
 
 function setState(ctx: StpContext, instance: Instance, id: PortId, port: Port, state: PortState) {
+  const wasForwarding = port.state === 'forwarding';
   port.state = state;
   ctx.note(`${id} in VLAN ${instance.vlan} is ${state}`);
+  if (wasForwarding !== (state === 'forwarding')) ctx.forwardingChanged();
 }
 
 /** Every VLAN that exists on the switch and an up port carries, with those ports in hardware order. */

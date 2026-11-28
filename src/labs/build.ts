@@ -385,6 +385,70 @@ function layer3Switch() {
   return lab.topology;
 }
 
+// The PCs sit low on the left, clear of the Try this card in the canvas's top-left corner.
+function layer3SwitchOspf() {
+  const lab = labBuilder('layer3-switch-ospf');
+  lab.ios('MLS1', 'switch-l3-24', 424, 568, [
+    'ip routing',
+    'vlan 10',
+    ' name Sales',
+    'interface range FastEthernet0/1 - 2',
+    ' switchport mode access',
+    ' switchport access vlan 10',
+    'interface Vlan10',
+    ' description Sales',
+    ' ip address 192.168.10.1 255.255.255.0',
+    'interface GigabitEthernet0/1',
+    ' description To R1',
+    ' no switchport',
+    ' ip address 10.0.0.1 255.255.255.252',
+    'exit',
+    'ip dhcp excluded-address 192.168.10.1 192.168.10.10',
+    'ip dhcp pool SALES',
+    ' network 192.168.10.0 255.255.255.0',
+    ' default-router 192.168.10.1',
+    'router ospf 1',
+    ' router-id 1.1.1.1',
+    ' passive-interface Vlan10',
+    ' network 10.0.0.0 0.0.0.3 area 0',
+    ' network 192.168.10.0 0.0.0.255 area 0',
+  ]);
+  lab.ios(
+    'R1',
+    'router-2g2s',
+    712,
+    568,
+    ospfRouter(
+      2,
+      [
+        ['GigabitEthernet0/0', '192.168.20.1 255.255.255.0'],
+        ['GigabitEthernet0/1', '10.0.0.2 255.255.255.252'],
+      ],
+      ['192.168.20.0 0.0.0.255', '10.0.0.0 0.0.0.3'],
+    ),
+  );
+  lab.dhcpPc('PC1', 136, 472);
+  lab.dhcpPc('PC2', 136, 664);
+  lab.pc('PC3', 712, 760, '192.168.20.10/24', '192.168.20.1');
+  lab.cable(['PC1', 'FastEthernet0'], ['MLS1', 'FastEthernet0/1']);
+  lab.cable(['PC2', 'FastEthernet0'], ['MLS1', 'FastEthernet0/2']);
+  lab.cable(['MLS1', 'GigabitEthernet0/1'], ['R1', 'GigabitEthernet0/1']);
+  lab.cable(['PC3', 'FastEthernet0'], ['R1', 'GigabitEthernet0/0']);
+  lab.note(
+    'dhcp',
+    336,
+    688,
+    'VLAN 10, Sales: both PCs are set to DHCP. MLS1’s pool SALES lends 192.168.10.0/24 with Vlan10 as the gateway, and never .1 to .10.',
+  );
+  lab.note(
+    'ospf',
+    528,
+    48,
+    'GigabitEthernet0/1 is a routed port: no switchport. MLS1 and R1 run OSPF area 0 across it, router IDs 1.1.1.1 and 2.2.2.2.',
+  );
+  return lab.topology;
+}
+
 function stpTriangle() {
   const lab = labBuilder('stp-triangle');
   lab.ios('SW1', 'switch-24', 424, 40, ['spanning-tree vlan 1 priority 4096']);
@@ -535,6 +599,76 @@ function ospfThreeRouters() {
     328,
     528,
     'Each Gigabit link costs 1 and the serial link 64, so R1 reaches R3’s LAN through R2 at cost 3 rather than straight across at 65.',
+  );
+  return lab.topology;
+}
+
+// Left to right: area 1, the ABR, area 0, and the ISP beyond the AS boundary router.
+function ospfMultiArea() {
+  const lab = labBuilder('ospf-multi-area');
+  const port = (name: string, address: string, extra: readonly string[] = []) => [
+    `interface ${name}`,
+    ` ip address ${address}`,
+    ...extra,
+    ' no shutdown',
+  ];
+  lab.ios('R1', 'router-2g2s', 232, 424, [
+    ...port('GigabitEthernet0/0', '10.1.1.1 255.255.255.0'),
+    ...port('GigabitEthernet0/1', '10.1.12.1 255.255.255.252'),
+    'interface Loopback0',
+    ' ip address 10.1.2.1 255.255.255.0',
+    'router ospf 1',
+    ' router-id 1.1.1.1',
+    ' passive-interface GigabitEthernet0/0',
+    ' network 10.1.0.0 0.0.255.255 area 1',
+  ]);
+  lab.ios('R2', 'router-2g2s', 424, 424, [
+    ...port('GigabitEthernet0/0', '10.0.23.1 255.255.255.252'),
+    ...port('GigabitEthernet0/1', '10.1.12.2 255.255.255.252'),
+    'router ospf 1',
+    ' router-id 2.2.2.2',
+    ' area 1 range 10.1.0.0 255.255.0.0',
+    ' network 10.0.23.0 0.0.0.3 area 0',
+    ' network 10.1.12.0 0.0.0.3 area 1',
+  ]);
+  lab.ios('R3', 'router-2g2s', 616, 424, [
+    ...port('GigabitEthernet0/0', '192.168.3.1 255.255.255.0'),
+    ...port('GigabitEthernet0/1', '10.0.23.2 255.255.255.252'),
+    ...port('Serial0/0/0', '203.0.113.1 255.255.255.252', [' clock rate 64000']),
+    'ip route 0.0.0.0 0.0.0.0 203.0.113.2',
+    'router ospf 1',
+    ' router-id 3.3.3.3',
+    ' redistribute connected subnets',
+    ' passive-interface GigabitEthernet0/0',
+    ' network 10.0.23.0 0.0.0.3 area 0',
+    ' network 192.168.3.0 0.0.0.255 area 0',
+    ' default-information originate',
+  ]);
+  lab.ios('ISP', 'router-2g2s', 808, 424, [
+    ...port('Serial0/0/0', '203.0.113.2 255.255.255.252'),
+    'interface Loopback0',
+    ' ip address 8.8.8.8 255.255.255.255',
+    'ip route 10.0.0.0 255.0.0.0 203.0.113.1',
+    'ip route 192.168.3.0 255.255.255.0 203.0.113.1',
+  ]);
+  lab.pc('PC1', 40, 424, '10.1.1.10/24', '10.1.1.1');
+  lab.pc('PC3', 616, 616, '192.168.3.10/24', '192.168.3.1');
+  lab.cable(['R1', 'GigabitEthernet0/1'], ['R2', 'GigabitEthernet0/1']);
+  lab.cable(['R2', 'GigabitEthernet0/0'], ['R3', 'GigabitEthernet0/1']);
+  lab.cable(['R3', 'Serial0/0/0'], ['ISP', 'Serial0/0/0'], { cable: 'serial', dce: 'a' });
+  lab.cable(['PC1', 'FastEthernet0'], ['R1', 'GigabitEthernet0/0']);
+  lab.cable(['PC3', 'FastEthernet0'], ['R3', 'GigabitEthernet0/0']);
+  lab.note(
+    'areas',
+    136,
+    232,
+    'Area 1: R1, its LAN, its loopback and the link to R2. Area 0, the backbone: R2 to R3, and R3’s LAN. R2 sits in both, so it is the area border router.',
+  );
+  lab.note(
+    'asbr',
+    712,
+    232,
+    'R3 is the AS boundary router: redistribute connected brings in the ISP link, and default-information originate advertises its static default route.',
   );
   return lab.topology;
 }
@@ -1198,9 +1332,11 @@ export const BUILDERS: Record<string, () => Topology> = {
   'static-routes-serial': staticRoutesSerial,
   'router-on-a-stick': routerOnAStick,
   'layer3-switch': layer3Switch,
+  'layer3-switch-ospf': layer3SwitchOspf,
   'stp-triangle': stpTriangle,
   'dhcp-router': dhcpRouter,
   'ospf-three-routers': ospfThreeRouters,
+  'ospf-multi-area': ospfMultiArea,
   'eigrp-feasible-successor': eigrpFeasibleSuccessor,
   'dns-web-server': dnsWebServer,
   'pat-acl': patAcl,

@@ -14,7 +14,6 @@ import {
   type InterfaceId,
   type InterfaceType,
   type LineConfig,
-  type OspfConfig,
   type Port,
   type PortChannelId,
   type PortChannelInterface,
@@ -37,6 +36,7 @@ import type { PortStates } from './query';
 import { ipv6InterfaceLines, ipv6RouteLine } from './ipv6Config';
 import { sshLines, usernameLines } from './remote';
 import { eigrpLines } from './eigrpConfig';
+import { ospfLines } from './ospfConfig';
 import { accessListLines, natLines } from './showAclNat';
 import { standbyLines } from './hsrpConfig';
 import { transparentVlanLines, vtpConfigLines } from './vtpConfig';
@@ -309,18 +309,6 @@ function discoveryGlobalLines(config: IosDevice['config']): string[] {
   ];
 }
 
-/** `router ospf` and its settings, in IOS's order. */
-function ospfBlock(ospf: OspfConfig): string[] {
-  return [
-    `router ospf ${ospf.processId}`,
-    ...(ospf.routerId === undefined ? [] : [` router-id ${ospf.routerId}`]),
-    ...ospf.passiveInterfaces.map((id) => ` passive-interface ${id}`),
-    ...ospf.networks.map(
-      ({ address, wildcard, area }) => ` network ${address} ${wildcard} area ${area}`,
-    ),
-  ];
-}
-
 /** `router rip` and the settings that differ from its defaults, in IOS's order. */
 function ripBlock(rip: RipConfig): string[] {
   return [
@@ -439,7 +427,7 @@ export function runningConfig(device: IosDevice): string[] {
     out.push(`enable password ${passwordText(device, config.enablePassword)}`);
   const users = usernameLines(config);
   if (users.length > 0) out.push('!', ...users, '!');
-  if (device.kind === 'router' && device.config.dhcp) out.push(...dhcpLines(device.config.dhcp));
+  if (config.dhcp) out.push(...dhcpLines(config.dhcp));
   if (device.kind === 'switch' && device.config.ipRouting) out.push('ip routing');
   if (device.kind === 'router' && device.config.ipv6UnicastRouting) {
     out.push('ipv6 unicast-routing');
@@ -458,13 +446,9 @@ export function runningConfig(device: IosDevice): string[] {
     out.push(...transparentVlanLines(device.config));
   }
   for (const entry of interfaceEntries(device)) out.push(...interfaceBlock(entry), '!');
-  if (device.kind === 'router' && device.config.eigrp) {
-    out.push(...eigrpLines(device.config.eigrp), '!');
-  }
-  if (device.kind === 'router' && device.config.ospf) {
-    out.push(...ospfBlock(device.config.ospf), '!');
-  }
-  if (device.kind === 'router' && device.config.rip) out.push(...ripBlock(device.config.rip), '!');
+  if (config.eigrp) out.push(...eigrpLines(config.eigrp), '!');
+  if (config.ospf) out.push(...ospfLines(config.ospf), '!');
+  if (config.rip) out.push(...ripBlock(config.rip), '!');
   if (device.kind === 'router' && device.config.nat) out.push(...natLines(device.config.nat), '!');
   const staticRoutes = config.staticRoutes ?? [];
   if (staticRoutes.length > 0) out.push(...staticRoutes.map(routeLine), '!');
@@ -616,7 +600,7 @@ const HARDWARE: Record<InterfaceType, Hardware> = {
     encapsulation: 'ARPA',
   },
   Serial: { name: 'HD64570', bandwidth: 1544, delay: 20000, encapsulation: 'HDLC' },
-  Vlan: { name: 'CPU Interface', bandwidth: 100000, delay: 10, encapsulation: 'ARPA' },
+  Vlan: { name: 'CPU Interface', bandwidth: 1000000, delay: 10, encapsulation: 'ARPA' },
 };
 
 /** `aa:bb:cc:dd:ee:ff` as IOS writes it, `aabb.ccdd.eeff`. */

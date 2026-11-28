@@ -352,6 +352,9 @@ export const SwitchInterface = z.object({
   ipv4: Ipv4Cidr.optional(),
   /** A routed port's `ip helper-address` lines. */
   helperAddresses,
+  /** A routed port's OSPF settings and routing metrics. */
+  ...ospfInterfaceFields,
+  ...metricInterfaceFields,
   /** A routed port's access lists. */
   ...accessGroupFields,
   /**
@@ -564,6 +567,9 @@ export const RipConfig = z.object({
 });
 export type RipConfig = z.infer<typeof RipConfig>;
 
+/** An OSPF area ID, as a decimal number. */
+const OspfAreaId = z.int().min(0).max(4294967295);
+
 /**
  * `network <address> <wildcard> area <id>`: an interface whose address matches, bit for bit where
  * the wildcard has a 0, runs OSPF in that area.
@@ -571,11 +577,54 @@ export type RipConfig = z.infer<typeof RipConfig>;
 export const OspfNetwork = z.object({
   address: Ipv4Address,
   wildcard: Ipv4Address,
-  area: z.int().min(0).max(4294967295),
+  area: OspfAreaId,
 });
 export type OspfNetwork = z.infer<typeof OspfNetwork>;
 
-/** `router ospf <process-id>`. Tracer runs one process per router, in a single area. */
+/**
+ * `area <id> range <address> <mask> [not-advertise]`: an area border router advertises the
+ * area's networks inside the range into other areas as one summary, or with `not-advertise`
+ * hides them.
+ */
+export const OspfAreaRange = z.object({
+  prefix: Ipv4Cidr,
+  advertise: z.boolean(),
+});
+export type OspfAreaRange = z.infer<typeof OspfAreaRange>;
+
+/** What `area <id>` commands set for one area. */
+export const OspfArea = z.object({
+  area: OspfAreaId,
+  /** `area <id> stub`: no external LSAs; `no-summary` also keeps out other areas' networks. */
+  stub: z.enum(['stub', 'no-summary']).optional(),
+  /** In the order entered. */
+  ranges: z.array(OspfAreaRange).optional(),
+});
+export type OspfArea = z.infer<typeof OspfArea>;
+
+/** `redistribute static|connected [metric <n>] [metric-type 1|2] [subnets]`. */
+export const OspfRedistribution = z.object({
+  /** Absent means 20. */
+  metric: z.int().min(0).max(16777214).optional(),
+  /** Absent means type 2. */
+  metricType: z.union([z.literal(1), z.literal(2)]).optional(),
+  /** Without it, IOS redistributes classful networks only. */
+  subnets: z.boolean(),
+});
+export type OspfRedistribution = z.infer<typeof OspfRedistribution>;
+
+/** `default-information originate [always] [metric <n>] [metric-type 1|2]`. */
+export const OspfDefaultOriginate = z.object({
+  /** Advertise the default route even when the routing table has none. */
+  always: z.boolean(),
+  /** Absent means 1. */
+  metric: z.int().min(0).max(16777214).optional(),
+  /** Absent means type 2. */
+  metricType: z.union([z.literal(1), z.literal(2)]).optional(),
+});
+export type OspfDefaultOriginate = z.infer<typeof OspfDefaultOriginate>;
+
+/** `router ospf <process-id>`. Tracer runs one process per router. */
 export const OspfConfig = z.object({
   /** Local to the router, 1 to 65535. Neighbours need not agree on it. */
   processId: z.int().min(1).max(65535),
@@ -585,6 +634,11 @@ export const OspfConfig = z.object({
   networks: z.array(OspfNetwork).default(() => []),
   /** `passive-interface`: no hellos, so no neighbours, but its network is still advertised. */
   passiveInterfaces: z.array(InterfaceId).default(() => []),
+  /** Areas with a `stub` or `range` setting, by area ID. Absent means none. */
+  areas: z.array(OspfArea).optional(),
+  redistributeStatic: OspfRedistribution.optional(),
+  redistributeConnected: OspfRedistribution.optional(),
+  defaultOriginate: OspfDefaultOriginate.optional(),
 });
 export type OspfConfig = z.infer<typeof OspfConfig>;
 
@@ -887,6 +941,11 @@ export const SwitchConfig = z.object({
       interval: z.int().min(30).max(86400).optional(),
     })
     .optional(),
+  /** A multilayer switch's DHCP server and routing protocols, as a router's. They run with `ip routing`. */
+  dhcp: DhcpServerConfig.optional(),
+  rip: RipConfig.optional(),
+  ospf: OspfConfig.optional(),
+  eigrp: EigrpConfig.optional(),
 });
 export type SwitchConfig = z.infer<typeof SwitchConfig>;
 

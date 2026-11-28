@@ -55,11 +55,14 @@ import type {
 import type { HsrpGroupStatus, HsrpPeerStatus, HsrpTrackStatus } from './l3/hsrp';
 import type { DeviceUnavailable } from './module';
 import type {
+  OspfAreaStatus,
+  OspfBorderRouterStatus,
   OspfDesignated,
   OspfInterfaceState,
   OspfInterfaceStatus,
   OspfNeighborState,
   OspfNeighborStatus,
+  OspfLsaStatus,
   OspfNetworkType,
   OspfStatus,
 } from './routing/ospf/status';
@@ -141,11 +144,14 @@ export type {
   NatEndpoint,
   NatTranslationEntry,
   NeighborState,
+  OspfAreaStatus,
+  OspfBorderRouterStatus,
   OspfDesignated,
   OspfInterfaceState,
   OspfInterfaceStatus,
   OspfNeighborState,
   OspfNeighborStatus,
+  OspfLsaStatus,
   OspfNetworkType,
   OspfStatus,
   OspfTimers,
