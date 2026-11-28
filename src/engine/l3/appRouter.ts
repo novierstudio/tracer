@@ -29,6 +29,8 @@ import {
   onSmtpCommand,
   stopMail,
 } from './mail';
+import { onCapwapMessage } from './capwap';
+import { onIotMessage } from './iot';
 import { onNtpMessage } from './ntp';
 import { onSyslogMessage } from './syslog';
 import type { TcpAbort } from './tcpStack';
@@ -159,6 +161,12 @@ export function deliverAppUdp(ctx: IpContext, packet: Ipv4Packet, datagram: UdpD
       return true;
     case 'syslog':
       if (datagram.dstPort === APP_PORT.syslog) onSyslogMessage(ctx, packet, datagram);
+      return true;
+    case 'capwap':
+      onCapwapMessage(ctx, packet, datagram);
+      return true;
+    case 'iot':
+      onIotMessage(ctx, packet, datagram);
       return true;
     default:
       return false;

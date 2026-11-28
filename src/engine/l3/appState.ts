@@ -2,7 +2,9 @@ import type { Ipv4Address, StoredFile } from '@/model';
 import { serverServices } from '@/model/defaults';
 import type { FileService } from '../module';
 import type { IpContext } from './context';
+import { CAPWAP_IDLE, emptyController, type CapwapAp, type CapwapController } from './capwap';
 import type { FtpClient, FtpServerSession } from './ftp';
+import { emptyIotServer, idleThing, type IotServerState, type IotThing } from './iot';
 import type { MailJob, Pop3Session, SmtpSession } from './mail';
 import type { NtpClient } from './ntp';
 import type { TftpTransfer } from './tftp';
@@ -55,6 +57,14 @@ export type AppState = {
   readonly syslogQueue: string[];
   /** A syslog server's log, oldest first. */
   readonly syslog: SyslogEntry[];
+  /** A lightweight AP's CAPWAP session. */
+  capwap: CapwapAp;
+  /** A wireless LAN controller's APs. */
+  readonly wlc: CapwapController;
+  /** An IoT thing's registration. */
+  readonly iot: IotThing;
+  /** An IoT server's registered things: a Home Gateway's, or a server's with IoT on. */
+  readonly iotServer: IotServerState;
 };
 
 export const emptyApps = (): AppState => ({
@@ -70,6 +80,10 @@ export const emptyApps = (): AppState => ({
   ntp: undefined,
   syslogQueue: [],
   syslog: [],
+  capwap: CAPWAP_IDLE,
+  wlc: emptyController(),
+  iot: idleThing(),
+  iotServer: emptyIotServer(),
 });
 
 /** The config's file list for a service, or none on a device that is not a server. */

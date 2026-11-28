@@ -1,7 +1,16 @@
 import { DEFAULT_LAB_SETTINGS, labSettings } from '@/model/defaults';
-import type { Device, DeviceId, Endpoint, LabSettings, Link, LinkId, Topology } from '@/model';
+import type {
+  Device,
+  DeviceId,
+  Endpoint,
+  LabSettings,
+  Link,
+  LinkId,
+  Topology,
+  WirelessProfile,
+} from '@/model';
 import { err, ok, type Result } from '@/model/result';
-import { associations, type Association } from '@/model/wireless';
+import { associations, type ApBroadcasts, type Association } from '@/model/wireless';
 import { cloneState } from './core/clone';
 import { createEventLog, type EventLog } from './core/log';
 import { createEventQueue, type QueueEntry, type SavedEntry } from './core/queue';
@@ -231,7 +240,10 @@ export function createEngine({
           log.append({ kind: 'sticky-mac', time: now, device: id, port, mac }),
         learnFiles: (service, files) =>
           log.append({ kind: 'server-files', time: now, device: id, service, files: [...files] }),
+        learnThingState: (state) =>
+          log.append({ kind: 'thing-state', time: now, device: id, state: { ...state } }),
         relink: () => relink((link) => link.a.device === id || link.b.device === id),
+        reassociate: () => applyPatch({ devices: {}, links: {} }),
         storeVlans: (database) =>
           log.append({ kind: 'vlan-database', time: now, device: id, database }),
         forwardingChanged: () => {
@@ -326,9 +338,22 @@ export function createEngine({
     }
   }
 
+  /** What each running lightweight AP broadcasts now, as its modules say. */
+  function apBroadcasts(): ApBroadcasts {
+    const found: Partial<Record<DeviceId, readonly WirelessProfile[]>> = {};
+    for (const [id, slots] of running) {
+      for (const slot of slots) {
+        const networks =
+          slot.ctx.state === undefined ? undefined : slot.module.broadcasts?.(slot.ctx);
+        if (networks) found[id] = networks;
+      }
+    }
+    return found;
+  }
+
   /** The associations the devices make now, and those that ended, as a patch to the links. */
   function wirelessPatch(): Record<LinkId, Association | null> {
-    const wanted = associations(devices.values());
+    const wanted = associations(devices.values(), apBroadcasts());
     const patch: Record<LinkId, Association | null> = {};
     for (const [id, state] of links) if (state.link.cable === 'wireless') patch[id] = null;
     for (const association of wanted) patch[association.id] = association;

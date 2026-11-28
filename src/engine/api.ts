@@ -31,6 +31,8 @@ import type { Mail, SyslogEntry } from './l3/appState';
 import type { FtpEvent, FtpListener, FtpListing, FtpReply, FtpRequest, FtpResult } from './l3/ftp';
 import type { MailFailure, MailListener, MailOutcome, MailRequest, OutgoingMail } from './l3/mail';
 import type { NtpAssociation, NtpStatus } from './l3/ntp';
+import type { LapStatus, WlcStatus } from './l3/capwap';
+import type { IotServerStatus, ThingStatus } from './l3/iot';
 import type { TftpEvent, TftpFailure, TftpListener, TftpRequest } from './l3/tftp';
 import type { ArpTableEntry } from './l3/arp';
 import type { DhcpListener, DhcpOutcome, Lease } from './l3/dhcpClient';
@@ -90,6 +92,10 @@ export type {
   MailOutcome,
   MailRequest,
   NtpAssociation,
+  LapStatus,
+  WlcStatus,
+  IotServerStatus,
+  ThingStatus,
   NtpStatus,
   OutgoingMail,
   SyslogEntry,
@@ -412,6 +418,14 @@ export interface SimAPI {
   ntpStatus(device: DeviceId): Result<NtpStatus, DeviceUnavailable>;
   /** A server's syslog, mailboxes and clock now. `unsupported` for any other device. */
   serverStatus(device: DeviceId): Result<ServerStatus, DeviceUnavailable>;
+  /** A lightweight AP's address, controller and WLANs now. `unsupported` for any other device. */
+  lapStatus(device: DeviceId): Result<LapStatus, DeviceUnavailable>;
+  /** The APs a wireless LAN controller has joined. `unsupported` for any other device. */
+  wlcStatus(device: DeviceId): Result<WlcStatus, DeviceUnavailable>;
+  /** The things an IoT server has registered: a Home Gateway's, or a server's with IoT on. */
+  iotServerStatus(device: DeviceId): Result<IotServerStatus, DeviceUnavailable>;
+  /** Whether an IoT thing has registered, and where. `unsupported` for any other device. */
+  thingStatus(device: DeviceId): Result<ThingStatus, DeviceUnavailable>;
   /**
    * The device logs a console message of its own, as IOS logs `%SYS-5-CONFIG_I` when config mode
    * ends. It shows on the console, and goes to the device's logging hosts.
