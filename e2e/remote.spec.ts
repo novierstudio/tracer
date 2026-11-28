@@ -56,8 +56,8 @@ test('console-cables a PC to a fresh router and configures it from the Terminal 
     (window as unknown as DevWindow).__TRACER_DEV__ = true;
   });
   await gotoCanvas(page);
-  await dropDevice(page, 'Branch Router', 520, 200);
-  await dropDevice(page, 'Desktop PC', 220, 420);
+  await dropDevice(page, '1941', 520, 200);
+  await dropDevice(page, 'PC-PT', 220, 420);
 
   await page.keyboard.press('c');
   await page
@@ -96,7 +96,7 @@ test('says so when the PC has no console cable', async ({ page }) => {
     (window as unknown as DevWindow).__TRACER_DEV__ = true;
   });
   await gotoCanvas(page);
-  await dropDevice(page, 'Desktop PC', 220, 420);
+  await dropDevice(page, 'PC-PT', 220, 420);
   await openApp(page, await idOf(page, 'PC0'), /^Terminal/);
   await inspector(page).getByRole('button', { name: 'OK' }).click();
   await expect(inspector(page).getByText('No console cable')).toBeVisible();

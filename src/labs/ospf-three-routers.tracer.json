@@ -34,6 +34,9 @@
           "id": "Serial0/0/1"
         }
       ],
+      "modules": {
+        "0/0": "HWIC-2T"
+      },
       "kind": "router",
       "config": {
         "hostname": "R1",
@@ -249,13 +252,9 @@
           "kind": "gigabitEthernet",
           "id": "GigabitEthernet0/2",
           "mac": "06:ab:aa:04:d3:05"
-        },
-        {
-          "kind": "gigabitEthernet",
-          "id": "GigabitEthernet0/3",
-          "mac": "1e:82:32:bf:fd:52"
         }
       ],
+      "modules": {},
       "kind": "router",
       "config": {
         "hostname": "R2",
@@ -284,9 +283,6 @@
               "address": "10.0.23.1",
               "prefixLength": 30
             }
-          },
-          "GigabitEthernet0/3": {
-            "shutdown": true
           }
         },
         "subinterfaces": {},
@@ -475,6 +471,9 @@
           "id": "Serial0/0/1"
         }
       ],
+      "modules": {
+        "0/0": "HWIC-2T"
+      },
       "kind": "router",
       "config": {
         "hostname": "R3",

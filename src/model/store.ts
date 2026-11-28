@@ -47,6 +47,12 @@ export type EditorState = {
   removeLinks(ids: readonly LinkId[]): void;
   setLinkCable(change: CableChange): Result<void, TopologyError>;
   swapNic(change: { device: DeviceId; port: commands.PortSpec }): Result<void, TopologyError>;
+  /** The device must be off. `ports` is its whole port list with the modules fitted. */
+  setModules(change: {
+    device: DeviceId;
+    modules: Record<string, string>;
+    ports: readonly commands.PortSpec[];
+  }): Result<void, TopologyError>;
   renameLab(name: string): void;
   updateLabSettings(update: Partial<LabSettings>): void;
   /** Ids, MACs and names must already be fresh: the batch goes in as given, or not at all. */
@@ -146,6 +152,7 @@ export function createEditorStore({
           removeLinks: (linkIds) => commit(commands.removeLinks(get().topology, linkIds)),
           setLinkCable: (change) => apply(commands.setLinkCable(get().topology, change)),
           swapNic: (change) => apply(commands.swapNic(get().topology, change)),
+          setModules: (change) => apply(commands.setModules(get().topology, change, ids)),
           renameLab: (name) => commit(commands.renameLab(get().topology, { name, now: now() })),
           updateLabSettings: (update) => commit(commands.updateLabSettings(get().topology, update)),
           addElements: (elements) => apply(commands.addElements(get().topology, elements)),

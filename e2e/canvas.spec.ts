@@ -31,8 +31,8 @@ async function cable(page: Page, from: string, fromPort: string, to: string, toP
 
 async function routerAndSwitch(page: Page) {
   await gotoCanvas(page);
-  await dropDevice(page, 'Branch Router', 220, 180);
-  await dropDevice(page, 'Access Switch 24', 520, 420);
+  await dropDevice(page, '1941', 220, 180);
+  await dropDevice(page, '2960-24TT', 520, 420);
 }
 
 test('devices dragged from the palette land where they are dropped, with unique names', async ({
@@ -50,7 +50,7 @@ test('devices dragged from the palette land where they are dropped, with unique 
 
   await page
     .getByRole('complementary', { name: 'Device palette' })
-    .getByText('Branch Router')
+    .getByText('1941', { exact: true })
     .click();
   await expect(device(page, 'Router1')).toBeVisible();
   await expect(page.getByText('Your lab is empty')).toBeHidden();

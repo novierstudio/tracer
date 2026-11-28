@@ -9,6 +9,7 @@ import {
   type Point,
 } from '@/model';
 import { deviceModel, type DeviceModelId } from './catalog';
+import { modelPorts, storedModules } from './modules';
 
 /** Packet Tracer style: the lowest free `Router0`, `Router1`, … Names compare case-insensitively. */
 export function nextHostname(prefix: string, existingNames: Iterable<string>): Hostname {
@@ -29,7 +30,8 @@ export function deviceSpec(
     model: model.id,
     hostname: nextHostname(model.hostnamePrefix, existingNames),
     position,
-    ports: model.ports,
+    ports: modelPorts(model),
+    ...(model.slots && { modules: storedModules(model.modules ?? {}) }),
   };
 }
 

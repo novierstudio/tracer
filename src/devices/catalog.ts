@@ -1,29 +1,51 @@
-import { PortId, type DeviceKind, type PortKind } from '@/model';
-import type { PortSpec } from '@/model';
+import { PortId, type DeviceKind, type PortKind, type PortSpec } from '@/model';
+import { HUB_MODELS, ROUTER_MODELS, SWITCH_MODELS } from './models/routers-switches';
+import { modelPorts, subslots, type ModuleMap, type Slot } from './modules';
+import { fiber, numbered, ports, radio, single } from './ports';
 
-export const DEVICE_CATEGORIES = [
-  'routers',
-  'switches',
-  'hubs',
-  'wireless',
-  'end-devices',
-  'servers',
+export { WIRELESS_NIC } from './ports';
+
+/** Packet Tracer's palette groups, each with its categories in palette order. */
+export const DEVICE_GROUPS = [
+  {
+    label: 'Network Devices',
+    categories: ['routers', 'switches', 'hubs', 'wireless', 'security', 'wan-emulation'],
+  },
+  {
+    label: 'End Devices',
+    categories: ['end-devices', 'home', 'smart-city', 'industrial', 'power-grid'],
+  },
+  { label: 'Components', categories: ['components'] },
 ] as const;
-export type DeviceCategory = (typeof DEVICE_CATEGORIES)[number];
+export type DeviceGroup = (typeof DEVICE_GROUPS)[number];
+
+export const DEVICE_CATEGORIES = DEVICE_GROUPS.flatMap((group) => group.categories);
+export type DeviceCategory = DeviceGroup['categories'][number];
 
 export const CATEGORY_LABELS: Record<DeviceCategory, string> = {
   routers: 'Routers',
   switches: 'Switches',
   hubs: 'Hubs',
-  wireless: 'Wireless devices',
-  'end-devices': 'End devices',
-  servers: 'Servers',
+  wireless: 'Wireless Devices',
+  security: 'Security',
+  'wan-emulation': 'WAN Emulation',
+  'end-devices': 'End Devices',
+  home: 'Home',
+  'smart-city': 'Smart City',
+  industrial: 'Industrial',
+  'power-grid': 'Power Grid',
+  components: 'Components',
 };
 
 export type DeviceIconName =
   | 'router'
+  | 'router-isr'
+  | 'router-pt'
   | 'switch'
   | 'multilayer-switch'
+  | 'industrial-switch'
+  | 'bridge'
+  | 'repeater'
   | 'pc'
   | 'laptop'
   | 'server'
@@ -49,67 +71,43 @@ export type DeviceModel = {
   readonly kind: DeviceKind;
   readonly hostnamePrefix: string;
   readonly icon: DeviceIconName;
-  /** Interfaces in module/slot order, as `show ip interface brief` lists them. */
+  /** Onboard interfaces, as `show ip interface brief` lists them. Its modules' ports follow. */
   readonly ports: readonly PortSpec[];
+  /** Module bays, in the order their ports list. */
+  readonly slots?: readonly Slot[];
+  /** The modules it ships with. */
+  readonly modules?: ModuleMap;
   /** A multilayer switch: it takes `ip routing`, routed ports and static routes. */
   readonly multilayer?: true;
 };
 
-const PORT_PREFIX: Record<PortKind, string> = {
-  fastEthernet: 'FastEthernet',
-  gigabitEthernet: 'GigabitEthernet',
-  serial: 'Serial',
-  wireless: 'Wireless',
-};
-
-/** `ports('gigabitEthernet', '0/', 0, 2)` is GigabitEthernet0/0 and GigabitEthernet0/1. */
-function ports(kind: PortKind, slot: string, first: number, count: number): PortSpec[] {
-  return Array.from({ length: count }, (_, i) => ({
-    kind,
-    id: PortId.parse(`${PORT_PREFIX[kind]}${slot}${first + i}`),
-  }));
-}
-
-const fiber = (specs: PortSpec[]): PortSpec[] => specs.map((spec) => ({ ...spec, fiber: true }));
-
-/** Packet Tracer's `Port 0`, `Port 1`, …: how a hub names its ports. */
-const numbered = (count: number): PortSpec[] =>
-  Array.from({ length: count }, (_, i) => ({
-    kind: 'fastEthernet',
-    id: PortId.parse(`Port${i}`),
-  }));
-
-const radio = (name: string): PortSpec => ({ kind: 'wireless', id: PortId.parse(name) });
-
-/** The radio a PC or laptop takes in place of its Ethernet card, as Packet Tracer's WMP300N. */
-export const WIRELESS_NIC: PortSpec = radio('Wireless0');
-
-const single = (kind: PortKind): PortSpec[] => [
-  { kind, id: PortId.parse(`${PORT_PREFIX[kind]}0`) },
-];
-
 export const DEVICE_MODELS = [
   {
+    // A 1941 with an HWIC-2T, for serial links out of the box.
     id: 'router-2g2s',
-    name: 'Branch Router',
+    name: '1941',
     category: 'routers',
     kind: 'router',
     hostnamePrefix: 'Router',
     icon: 'router',
-    ports: [...ports('gigabitEthernet', '0/', 0, 2), ...ports('serial', '0/0/', 0, 2)],
+    ports: ports('gigabitEthernet', '0/', 0, 2),
+    slots: subslots('hwic', 0, 1),
+    modules: { '0/0': 'HWIC-2T' },
   },
   {
     id: 'router-4g',
-    name: 'Edge Router',
+    name: '2911',
     category: 'routers',
     kind: 'router',
     hostnamePrefix: 'Router',
     icon: 'router',
-    ports: ports('gigabitEthernet', '0/', 0, 4),
+    ports: ports('gigabitEthernet', '0/', 0, 3),
+    slots: subslots('hwic', 0, 3),
   },
+  ...ROUTER_MODELS,
   {
     id: 'switch-24',
-    name: 'Access Switch 24',
+    name: '2960-24TT',
     category: 'switches',
     kind: 'switch',
     hostnamePrefix: 'Switch',
@@ -118,7 +116,8 @@ export const DEVICE_MODELS = [
   },
   {
     id: 'switch-48',
-    name: 'Access Switch 48',
+    // Packet Tracer has no 48-port 2960; this one stays for labs that use it.
+    name: '2960-48TT',
     category: 'switches',
     kind: 'switch',
     hostnamePrefix: 'Switch',
@@ -127,7 +126,7 @@ export const DEVICE_MODELS = [
   },
   {
     id: 'switch-24-fiber',
-    name: 'Access Switch 24 Fiber',
+    name: '2960-24TT Fiber',
     category: 'switches',
     kind: 'switch',
     hostnamePrefix: 'Switch',
@@ -137,7 +136,7 @@ export const DEVICE_MODELS = [
   },
   {
     id: 'switch-l3-24',
-    name: 'Multilayer Switch 24',
+    name: '3560-24PS',
     category: 'switches',
     kind: 'switch',
     hostnamePrefix: 'Switch',
@@ -145,18 +144,20 @@ export const DEVICE_MODELS = [
     ports: [...ports('fastEthernet', '0/', 1, 24), ...ports('gigabitEthernet', '0/', 1, 2)],
     multilayer: true,
   },
+  ...SWITCH_MODELS,
   {
     id: 'hub',
-    name: 'Hub',
+    name: 'Hub-PT',
     category: 'hubs',
     kind: 'hub',
     hostnamePrefix: 'Hub',
     icon: 'hub',
     ports: numbered(6),
   },
+  ...HUB_MODELS,
   {
     id: 'access-point',
-    name: 'Access Point',
+    name: 'AccessPoint-PT',
     category: 'wireless',
     kind: 'accessPoint',
     hostnamePrefix: 'AccessPoint',
@@ -166,7 +167,7 @@ export const DEVICE_MODELS = [
   },
   {
     id: 'wireless-router',
-    name: 'Wireless Router',
+    name: 'WRT300N',
     category: 'wireless',
     kind: 'wirelessRouter',
     hostnamePrefix: 'WirelessRouter',
@@ -183,7 +184,7 @@ export const DEVICE_MODELS = [
   },
   {
     id: 'pc',
-    name: 'Desktop PC',
+    name: 'PC-PT',
     category: 'end-devices',
     kind: 'pc',
     hostnamePrefix: 'PC',
@@ -192,7 +193,7 @@ export const DEVICE_MODELS = [
   },
   {
     id: 'laptop',
-    name: 'Laptop',
+    name: 'Laptop-PT',
     category: 'end-devices',
     kind: 'pc',
     hostnamePrefix: 'Laptop',
@@ -201,8 +202,8 @@ export const DEVICE_MODELS = [
   },
   {
     id: 'server',
-    name: 'Server',
-    category: 'servers',
+    name: 'Server-PT',
+    category: 'end-devices',
     kind: 'server',
     hostnamePrefix: 'Server',
     icon: 'server',
@@ -223,6 +224,13 @@ export function findDeviceModel(id: string): DeviceModel | undefined {
   return BY_ID.get(id);
 }
 
+const BY_NAME = new Map<string, DeviceModel>(DEVICE_MODELS.map((model) => [model.name, model]));
+
+/** The model Packet Tracer calls `name`, such as 2911 or Switch-PT. */
+export function findDeviceModelByName(name: string): DeviceModel | undefined {
+  return BY_NAME.get(name);
+}
+
 /** Whether a device of model `id` can route, as only multilayer switches and routers can. */
 export const isMultilayerSwitch = (id: string): boolean => findDeviceModel(id)?.multilayer === true;
 
@@ -236,9 +244,10 @@ const PORT_ABBREVIATION: Record<PortKind, string> = {
 /** "2× Gi, 2× Serial", in the order the kinds first appear. Fiber ports say so. */
 export function portSummary(model: DeviceModel): string {
   const counts = new Map<string, number>();
-  for (const port of model.ports) {
+  for (const port of modelPorts(model)) {
     const name = `${PORT_ABBREVIATION[port.kind]}${port.fiber ? ' fiber' : ''}`;
     counts.set(name, (counts.get(name) ?? 0) + 1);
   }
+  if (counts.size === 0) return 'No ports';
   return [...counts].map(([name, count]) => `${count}× ${name}`).join(', ');
 }
