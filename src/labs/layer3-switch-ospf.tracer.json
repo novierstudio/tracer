@@ -484,6 +484,9 @@
           ]
         },
         "ipRouting": true,
+        "vtp": {
+          "revision": 2
+        },
         "dhcp": {
           "pools": {
             "SALES": {
