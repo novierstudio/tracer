@@ -21,6 +21,7 @@ pnpm typecheck
 pnpm lint
 pnpm format
 pnpm test:e2e     # browser tests (Playwright)
+pnpm labs         # rewrite the sample labs from src/labs/build.ts
 ```
 
 Before the first `pnpm test:e2e`, install the browser with `pnpm exec playwright install chromium`. Set `E2E_PORT` to run it on a port other than 4173.
