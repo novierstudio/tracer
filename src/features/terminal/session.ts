@@ -54,6 +54,7 @@ export type SimQueries = {
       | 'clearNatTranslations'
       | 'ipv6Status'
       | 'layer2Status'
+      | 'standbyStatus'
   ]: Remote<SimAPI[K]>;
 };
 
@@ -99,6 +100,7 @@ export function engineSource(sim: SimLink, device: DeviceId, remote?: RemoteHook
     ipv6: () => sim.ipv6Status(device).then(valueOf),
     sessions: async () => remote?.sessions(device),
     layer2: () => sim.layer2Status(device).then(valueOf),
+    standby: () => sim.standbyStatus(device).then(valueOf),
   };
 }
 

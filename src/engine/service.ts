@@ -35,6 +35,7 @@ import { clearNat, natTranslations } from './l3/nat';
 import { pingSummary, startPing } from './l3/ping';
 import { closeTerminal, closeVty, sendTerminal, startTerminal, terminalEnds } from './l3/terminal';
 import { startTrace } from './l3/traceroute';
+import { hsrpModule, hsrpStatus } from './l3/hsrp';
 import { ipv6Module, ipv6Status, startPing6, startTrace6, stopProbe6 } from './l3v6/ipv6';
 import type { ModuleContext, SimModule } from './module';
 import { eigrpModule, eigrpStatus } from './routing/eigrp/eigrp';
@@ -470,6 +471,7 @@ export function createSimService({
         (ctx, once) => startFetch(ctx, target, once),
       ),
     ipv6Status: (device) => engine.withModule(device, ipv6Module, ipv6Status),
+    standbyStatus: (device) => engine.withModule(device, hsrpModule, hsrpStatus),
     openTerminal(device, target, protocol, listener) {
       const handle = nextHandle++ as TerminalHandle;
       let id = 0;

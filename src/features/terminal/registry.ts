@@ -75,6 +75,7 @@ function linkTo({ sim, onBatch, ping, traceroute, openTerminal }: SimClient): Si
     clearNatTranslations: (device) => sim.clearNatTranslations(device),
     ipv6Status: (device) => sim.ipv6Status(device),
     layer2Status: (device) => sim.layer2Status(device),
+    standbyStatus: (device) => sim.standbyStatus(device),
     now: () => now,
     ping,
     traceroute,

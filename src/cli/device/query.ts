@@ -3,6 +3,7 @@ import type {
   ArpTableEntry,
   DeviceUnavailable,
   DhcpBindingEntry,
+  HsrpGroupStatus,
   Ipv6Status,
   Layer2Status,
   MacTableEntry,
@@ -56,6 +57,8 @@ export interface EngineAnswers {
   readonly sessions: readonly VtySession[];
   /** CDP, LLDP, EtherChannel and port security as they run now. */
   readonly layer2: Layer2Status;
+  /** HSRP groups as they run now, for `show standby`. */
+  readonly standby: readonly HsrpGroupStatus[];
 }
 
 export type EngineQueryKind = keyof EngineAnswers;
