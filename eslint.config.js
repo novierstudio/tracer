@@ -6,7 +6,7 @@ import globals from 'globals';
 import tseslint from 'typescript-eslint';
 
 export default defineConfig([
-  globalIgnores(['dist', 'dist-e2e-*', 'playwright-report', 'test-results']),
+  globalIgnores(['.claude', 'dist', 'dist-e2e-*', 'playwright-report', 'test-results']),
   js.configs.recommended,
   tseslint.configs.recommended,
   {
