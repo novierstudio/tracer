@@ -603,6 +603,76 @@ function ospfThreeRouters() {
   return lab.topology;
 }
 
+// Left to right: area 1, the ABR, area 0, and the ISP beyond the AS boundary router.
+function ospfMultiArea() {
+  const lab = labBuilder('ospf-multi-area');
+  const port = (name: string, address: string, extra: readonly string[] = []) => [
+    `interface ${name}`,
+    ` ip address ${address}`,
+    ...extra,
+    ' no shutdown',
+  ];
+  lab.ios('R1', 'router-2g2s', 232, 424, [
+    ...port('GigabitEthernet0/0', '10.1.1.1 255.255.255.0'),
+    ...port('GigabitEthernet0/1', '10.1.12.1 255.255.255.252'),
+    'interface Loopback0',
+    ' ip address 10.1.2.1 255.255.255.0',
+    'router ospf 1',
+    ' router-id 1.1.1.1',
+    ' passive-interface GigabitEthernet0/0',
+    ' network 10.1.0.0 0.0.255.255 area 1',
+  ]);
+  lab.ios('R2', 'router-2g2s', 424, 424, [
+    ...port('GigabitEthernet0/0', '10.0.23.1 255.255.255.252'),
+    ...port('GigabitEthernet0/1', '10.1.12.2 255.255.255.252'),
+    'router ospf 1',
+    ' router-id 2.2.2.2',
+    ' area 1 range 10.1.0.0 255.255.0.0',
+    ' network 10.0.23.0 0.0.0.3 area 0',
+    ' network 10.1.12.0 0.0.0.3 area 1',
+  ]);
+  lab.ios('R3', 'router-2g2s', 616, 424, [
+    ...port('GigabitEthernet0/0', '192.168.3.1 255.255.255.0'),
+    ...port('GigabitEthernet0/1', '10.0.23.2 255.255.255.252'),
+    ...port('Serial0/0/0', '203.0.113.1 255.255.255.252', [' clock rate 64000']),
+    'ip route 0.0.0.0 0.0.0.0 203.0.113.2',
+    'router ospf 1',
+    ' router-id 3.3.3.3',
+    ' redistribute connected subnets',
+    ' passive-interface GigabitEthernet0/0',
+    ' network 10.0.23.0 0.0.0.3 area 0',
+    ' network 192.168.3.0 0.0.0.255 area 0',
+    ' default-information originate',
+  ]);
+  lab.ios('ISP', 'router-2g2s', 808, 424, [
+    ...port('Serial0/0/0', '203.0.113.2 255.255.255.252'),
+    'interface Loopback0',
+    ' ip address 8.8.8.8 255.255.255.255',
+    'ip route 10.0.0.0 255.0.0.0 203.0.113.1',
+    'ip route 192.168.3.0 255.255.255.0 203.0.113.1',
+  ]);
+  lab.pc('PC1', 40, 424, '10.1.1.10/24', '10.1.1.1');
+  lab.pc('PC3', 616, 616, '192.168.3.10/24', '192.168.3.1');
+  lab.cable(['R1', 'GigabitEthernet0/1'], ['R2', 'GigabitEthernet0/1']);
+  lab.cable(['R2', 'GigabitEthernet0/0'], ['R3', 'GigabitEthernet0/1']);
+  lab.cable(['R3', 'Serial0/0/0'], ['ISP', 'Serial0/0/0'], { cable: 'serial', dce: 'a' });
+  lab.cable(['PC1', 'FastEthernet0'], ['R1', 'GigabitEthernet0/0']);
+  lab.cable(['PC3', 'FastEthernet0'], ['R3', 'GigabitEthernet0/0']);
+  lab.note(
+    'areas',
+    136,
+    232,
+    'Area 1: R1, its LAN, its loopback and the link to R2. Area 0, the backbone: R2 to R3, and R3’s LAN. R2 sits in both, so it is the area border router.',
+  );
+  lab.note(
+    'asbr',
+    712,
+    232,
+    'R3 is the AS boundary router: redistribute connected brings in the ISP link, and default-information originate advertises its static default route.',
+  );
+  return lab.topology;
+}
+
 /**
  * An EIGRP router's lines: each interface with its address and an optional clock rate, then AS
  * 10 with a router ID, the LAN port passive, and a classful `network` line per network.
@@ -1266,6 +1336,7 @@ export const BUILDERS: Record<string, () => Topology> = {
   'stp-triangle': stpTriangle,
   'dhcp-router': dhcpRouter,
   'ospf-three-routers': ospfThreeRouters,
+  'ospf-multi-area': ospfMultiArea,
   'eigrp-feasible-successor': eigrpFeasibleSuccessor,
   'dns-web-server': dnsWebServer,
   'pat-acl': patAcl,
