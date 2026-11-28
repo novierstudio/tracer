@@ -95,6 +95,22 @@ export const SAMPLE_LABS: readonly SampleLab[] = [
     load: () => import('./layer3-switch.tracer.json?raw').then(text),
   },
   {
+    id: 'layer3-switch-ospf',
+    title: 'Layer 3 switch with OSPF and DHCP',
+    description:
+      'A multilayer switch lends the Sales VLAN its addresses by DHCP and runs OSPF with a router over a routed port, so the PCs reach a LAN beyond the router.',
+    difficulty: 'intermediate',
+    devices: { switch: 1, router: 1, pc: 3 },
+    tryThis: [
+      'Run `show ip ospf neighbor` on MLS1: R1 is FULL',
+      'Run `show ip route` on MLS1 and find R1’s LAN as an O route',
+      'Run `ipconfig /all` on PC1: MLS1 lent its address and gateway',
+      'Ping PC3 (192.168.20.10) from PC1’s Command Prompt',
+      'Run `show ip dhcp binding` on MLS1 to see both leases',
+    ],
+    load: () => import('./layer3-switch-ospf.tracer.json?raw').then(text),
+  },
+  {
     id: 'stp-triangle',
     title: 'Spanning tree triangle',
     description:
