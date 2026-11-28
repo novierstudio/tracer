@@ -31,6 +31,7 @@ import {
 import { applyModifier, pipeComplete, pipeHelp, readPipe } from './pipe';
 import { bindQuery, mapQuery, type EngineQuery, type EngineStream } from './query';
 import { continueKeys, rsaPrompt, verifyUser } from './remote';
+import { configuredMessage } from './servicesConfig';
 import { blankLine } from './show';
 
 const ROUTER_TREE = buildTree<RouterContext>(routerCommands);
@@ -417,6 +418,12 @@ export interface SessionResult {
   readonly connect?: RemoteRequest;
   /** The session has ended. The terminal closes it and returns to where it came from. */
   readonly disconnect?: true;
+  /**
+   * A message the device logs, such as `%SYS-5-CONFIG_I` when config mode ends. A terminal that
+   * can reach the simulation logs it there, which prints it on the console and sends it to the
+   * logging hosts.
+   */
+  readonly log?: string;
 }
 
 /**
@@ -484,6 +491,7 @@ export function createDeviceSession(
         : readPipe(text, state.mode, treeOf(device), width);
       if (piped.kind === 'error') return { output: piped.output, update: undefined };
       const command = piped.kind === 'piped' ? piped.command : text;
+      const before = state.mode;
       const result = step(device, state, command, history, line);
       state = result.state;
       const update = result.device === device ? undefined : toConfigUpdate(result.device);
@@ -491,6 +499,7 @@ export function createDeviceSession(
         case 'done': {
           if (piped.kind === 'none') {
             const { output, query, stream, connect, disconnect } = result;
+            const configured = isConfigMode(before) && !isConfigMode(state.mode);
             return {
               output,
               update,
@@ -498,6 +507,7 @@ export function createDeviceSession(
               ...(stream && { stream }),
               ...(connect && { connect }),
               ...(disconnect && { disconnect }),
+              ...(configured && { log: configuredMessage(line) }),
             };
           }
           const filter = (lines: readonly string[]) => applyModifier(piped.modifier, lines);

@@ -78,6 +78,7 @@ function linkTo({ sim, ping, traceroute, openTerminal }: SimClient): SimLink {
     ping,
     traceroute,
     cancel: (handle) => sim.cancel(handle),
+    logMessage: (device, text) => sim.logMessage(device, text),
     openTerminal,
     terminalSend: (handle, text) => sim.terminalSend(handle, text),
     terminalClose: (handle, server) => sim.terminalClose(handle, server),

@@ -66,6 +66,7 @@ export type SimLink = SimQueries & {
     ...args: Parameters<SimAPI['traceroute']>
   ) => Promise<ReturnType<SimAPI['traceroute']>>;
   readonly cancel: Remote<SimAPI['cancel']>;
+  readonly logMessage: Remote<SimAPI['logMessage']>;
   readonly openTerminal: (
     ...args: Parameters<SimAPI['openTerminal']>
   ) => Promise<ReturnType<SimAPI['openTerminal']>>;
@@ -127,6 +128,15 @@ async function answerLive(
   }
 }
 
+/** Logs a message the device sends, such as `%SYS-5-CONFIG_I`. Without a simulation it is lost. */
+async function logOn(engine: EngineLink, device: DeviceId, text: string): Promise<void> {
+  try {
+    await (await engine()).logMessage(device, text);
+  } catch {
+    // No simulation: nothing prints it, as nothing would hear it.
+  }
+}
+
 const NO_COMPLETION: CompleteResult = { line: undefined, candidates: [] };
 
 /**
@@ -151,8 +161,9 @@ export function deviceTerminal(
   const run = (line: string): Reply => {
     const current = device();
     if (!current) return [];
-    const { output, update, query, stream, connect, disconnect } = session.run(current, line);
+    const { output, update, query, stream, connect, disconnect, log } = session.run(current, line);
     const committed = update && store.getState().updateConfig(update);
+    if (log && engine) void logOn(engine, id, log);
     const printed =
       committed && !committed.ok
         ? [...output, `% ${describeTopologyError(committed.error)}`]

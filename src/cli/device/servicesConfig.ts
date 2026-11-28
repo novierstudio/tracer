@@ -1,4 +1,5 @@
 import type { RouterConfig, SwitchConfig } from '../../model';
+import type { SessionLine } from './context';
 
 /** `logging trap` levels by severity, 0 to 7, with the help IOS gives each. */
 export const TRAP_LEVELS = [
@@ -34,3 +35,7 @@ export function loggingLines(config: IosConfig): string[] {
 /** `ntp server` lines, in the order entered. IOS writes them after the `line` blocks. */
 export const ntpLines = (config: IosConfig): string[] =>
   (config.ntpServers ?? []).map((server) => `ntp server ${server}`);
+
+/** What IOS logs when a session leaves config mode, naming the line it ran on. */
+export const configuredMessage = (line: SessionLine): string =>
+  `%SYS-5-CONFIG_I: Configured from console by ${line.kind === 'console' ? 'console' : `vty${line.index} (${line.peer})`}`;
