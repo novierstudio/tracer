@@ -32,7 +32,8 @@ export function deviceSpec(
     position,
     ports: modelPorts(model),
     ...(model.slots && { modules: storedModules(model.modules ?? {}) }),
-  };
+    ...(model.config && { config: model.config }),
+  } as DeviceSpec;
 }
 
 /** A complete device outside the store, for importers and tests. Same seed, same MACs. */

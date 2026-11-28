@@ -21,9 +21,13 @@ export const ARP_TIMEOUT: Record<DeviceKind, SimDuration> = {
   pc: ms(2 * 60_000),
   server: ms(2 * 60_000),
   wirelessRouter: ms(4 * 60 * 60_000),
-  // A hub and an access point run no IP.
+  centralOffice: ms(4 * 60 * 60_000),
+  lightweightAp: ms(4 * 60 * 60_000),
+  wlc: ms(4 * 60 * 60_000),
+  // A hub, an access point and a cell tower run no IP.
   hub: ms(0),
   accessPoint: ms(0),
+  cellTower: ms(0),
 };
 
 /** A request unanswered for this long is sent again, up to ARP_TRIES requests in all. */

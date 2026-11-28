@@ -157,6 +157,8 @@ export type DhcpGrant = {
   readonly subnetMask: PrefixLength;
   readonly routers: readonly Ipv4Address[];
   readonly dnsServers: readonly Ipv4Address[];
+  /** Option 43, Cisco's sub-option 241: the wireless LAN controllers a lightweight AP joins. */
+  readonly controllers?: readonly Ipv4Address[];
 };
 
 /**

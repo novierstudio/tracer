@@ -8,9 +8,13 @@ type LayoutEngine = (graph: ElkNode) => Promise<ElkNode>;
 const TIER: Record<DeviceKind, number> = {
   router: 0,
   wirelessRouter: 0,
+  centralOffice: 0,
+  wlc: 1,
   switch: 1,
   hub: 1,
   accessPoint: 1,
+  lightweightAp: 1,
+  cellTower: 1,
   pc: 2,
   server: 2,
 };

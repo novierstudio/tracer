@@ -92,24 +92,22 @@ function excludedCommands() {
 }
 
 /**
- * `default-router` or `dns-server` with one to eight addresses, as IOS takes them. Each length is
- * its own command, so `?` offers the next address after every one.
+ * `default-router`, `dns-server` or `option 43 ip` with one to eight addresses, as IOS takes them.
+ * Each length is its own command, so `?` offers the next address after every one.
  */
 function addressListCommands(
-  word: string,
-  help: string,
+  path: readonly ReturnType<typeof keyword>[],
   addressHelp: string,
-  field: 'defaultRouters' | 'dnsServers',
+  field: 'defaultRouters' | 'dnsServers' | 'option43',
 ) {
   const params: Param<string, Ipv4Address>[] = Array.from(
     { length: MAX_DHCP_OPTION_ADDRESSES },
     (_, n) => ipv4(`address${n + 1}`, addressHelp),
   );
-  const listKw = keyword(word, help);
   return params.map((_, n) =>
     routerCommand({
       modes: DHCP,
-      path: [listKw, ...params.slice(0, n + 1)],
+      path: [...path, ...params.slice(0, n + 1)],
       run: (args, ctx, mode) => {
         const named = args as Readonly<Record<string, Ipv4Address>>;
         const addresses = params.slice(0, n + 1).map((param) => named[param.name]!);
@@ -239,11 +237,23 @@ export const dhcpCommands = [
     no: (_a, ctx, mode) => editPool(ctx, mode, (pool) => void delete pool.network),
   }),
   ...addressListCommands(
-    'default-router',
-    'Default routers',
+    [keyword('default-router', 'Default routers')],
     "Router's IP address",
     'defaultRouters',
   ),
-  ...addressListCommands('dns-server', 'DNS servers', "Server's IP address", 'dnsServers'),
+  ...addressListCommands(
+    [keyword('dns-server', 'DNS servers')],
+    "Server's IP address",
+    'dnsServers',
+  ),
+  ...addressListCommands(
+    [
+      keyword('option', 'Raw DHCP options'),
+      keyword('43', 'Vendor specific information'),
+      keyword('ip', 'Data is one or more IP addresses'),
+    ],
+    "Controller's IP address",
+    'option43',
+  ),
   ...leaseCommands(),
 ];

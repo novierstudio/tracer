@@ -58,6 +58,7 @@ const CABLE_CHOICES: Record<Cable, string> = {
   straight: 'Straight-through',
   crossover: 'Crossover',
   fiber: 'Fiber',
+  coaxial: 'Coaxial',
   serial: 'Serial',
   console: 'Console',
 };

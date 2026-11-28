@@ -8,13 +8,16 @@ test('the device palette lists the catalog by category and filters it', async ({
   const groups = palette.getByRole('heading', { level: 3 });
   const categories = palette.getByRole('heading', { level: 4 });
 
-  await expect(groups).toHaveText(['Network Devices', 'End Devices']);
+  await expect(groups).toHaveText(['Network Devices', 'End Devices', 'Components']);
   await expect(categories).toHaveText([
     'Routers',
     'Switches',
     'Hubs',
     'Wireless Devices',
+    'WAN Emulation',
     'End Devices',
+    'Home',
+    'Components',
   ]);
   await expect(palette.getByRole('list', { name: 'Routers' }).getByRole('listitem')).toHaveText([
     /^1941\s*2× Gi, 2× Serial$/,

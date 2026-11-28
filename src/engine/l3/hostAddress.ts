@@ -1,5 +1,5 @@
 import type { Device, HostIpv4, Ipv4Address, Ipv4Cidr, Port } from '@/model';
-import { WAN_PORT } from '@/model/cabling';
+import { isGateway, uplinkPort } from '@/model/wireless';
 import type { DhcpClient, Lease } from './dhcpClient';
 
 type Host = Extract<Device, { kind: 'pc' | 'server' }>;
@@ -13,17 +13,27 @@ type EthernetPort = Exclude<Port, { kind: 'serial' }>;
 export const hostPort = (device: Host): EthernetPort | undefined =>
   device.ports.find((port): port is EthernetPort => port.kind !== 'serial');
 
+const firstPort = (device: Device): EthernetPort | undefined =>
+  device.ports.find((port): port is EthernetPort => port.kind !== 'serial');
+
 /**
  * The port a device addresses as a host does, statically or by DHCP, with the settings for it:
- * a host's NIC, or a home router's Internet port, which takes its address from the ISP.
+ * a host's NIC, a wireless LAN controller's management port, a lightweight AP's Ethernet port,
+ * which always asks DHCP, or a gateway's uplink, which takes its address from the ISP.
  */
 export function addressedPort(device: Device): { port: EthernetPort; ipv4: HostIpv4 } | undefined {
   if (isHost(device)) {
     const port = hostPort(device);
     return port && { port, ipv4: device.config.ipv4 };
   }
-  if (device.kind !== 'wirelessRouter') return undefined;
-  const port = device.ports.find((candidate) => candidate.id === WAN_PORT);
+  if (device.kind === 'wlc' || device.kind === 'lightweightAp') {
+    const port = firstPort(device);
+    const ipv4: HostIpv4 = device.kind === 'wlc' ? device.config.management : { mode: 'dhcp' };
+    return port && { port, ipv4 };
+  }
+  if (!isGateway(device)) return undefined;
+  const uplink = uplinkPort(device);
+  const port = device.ports.find((candidate) => candidate.id === uplink);
   return port && port.kind !== 'serial' ? { port, ipv4: device.config.wan } : undefined;
 }
 

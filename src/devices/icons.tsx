@@ -112,6 +112,120 @@ const GLYPHS: Record<DeviceIconName, ReactNode> = {
       <path d="M15 31.5h2M20 31.5h2M25 31.5h2" />
     </>
   ),
+  // An access point with a link up to its controller.
+  'lightweight-ap': (
+    <>
+      <rect x="12" y="29" width="24" height="9" rx="4.5" />
+      <path d="M18.5 22.5a8 8 0 0 1 11 0" stroke={ACCENT} />
+      <path d="M24 29V10m-4 4 4-4 4 4" />
+    </>
+  ),
+  // A rack unit that runs the APs.
+  wlc: (
+    <>
+      <rect x="8" y="18" width="32" height="12" rx="3" />
+      <path d="M13 24h6" />
+      <path d="M26 24a3 3 0 0 1 6 0M23.5 21a7 7 0 0 1 11 0" stroke={ACCENT} />
+    </>
+  ),
+  'home-gateway': (
+    <>
+      <path d="M10 24 24 12l14 12v13H10z" />
+      <path d="M19.5 28a6 6 0 0 1 9 0M22.5 31.5a2 2 0 0 1 3 0" stroke={ACCENT} />
+    </>
+  ),
+  'cell-tower': (
+    <>
+      <path d="M24 16 17 38m7-22 7 22m-12.5-7h11" />
+      <circle cx="24" cy="14" r="2" fill={ACCENT} stroke="none" />
+      <path d="M17 9a10 10 0 0 0 0 10M31 9a10 10 0 0 1 0 10" stroke={ACCENT} />
+    </>
+  ),
+  'central-office': (
+    <>
+      <rect x="12" y="9" width="24" height="30" rx="2" />
+      <path d="M17 15h14M17 21h14M17 27h14" />
+      <circle cx="24" cy="33.5" r="1.5" fill={ACCENT} stroke="none" />
+    </>
+  ),
+  'iot-lamp': (
+    <>
+      <path d="M17 22h14l-3-10h-8z" />
+      <path d="M24 22v13m-5 2h10" />
+      <path d="M20 26.5h8" stroke={ACCENT} />
+    </>
+  ),
+  'iot-fan': (
+    <>
+      <circle cx="24" cy="24" r="3" fill={ACCENT} stroke="none" />
+      <path d="M24 21c-1-5 1-9 4-9s2 6-4 9zM27 25.5c5-.5 9 1.5 9 4.5s-6 2-9-4.5zM21 25.5c-3 4-7 6-9 4s3-5.5 9-4z" />
+    </>
+  ),
+  'iot-door': (
+    <>
+      <rect x="15" y="9" width="18" height="30" rx="1.5" />
+      <circle cx="28.5" cy="25" r="1.5" fill={ACCENT} stroke="none" />
+    </>
+  ),
+  'iot-window': (
+    <>
+      <rect x="11" y="11" width="26" height="26" rx="1.5" />
+      <path d="M24 11v26M11 24h26" />
+      <path d="M15 15l5 5" stroke={ACCENT} />
+    </>
+  ),
+  'iot-motion': (
+    <>
+      <circle cx="24" cy="30" r="5" />
+      <path d="M17 21a10 10 0 0 1 14 0M13 16.5a16 16 0 0 1 22 0" stroke={ACCENT} />
+    </>
+  ),
+  'iot-smoke': (
+    <>
+      <circle cx="24" cy="24" r="12" />
+      <circle cx="24" cy="24" r="4" fill={ACCENT} fillOpacity="0.4" />
+    </>
+  ),
+  'iot-siren': (
+    <>
+      <path d="M16 34v-9a8 8 0 0 1 16 0v9z" />
+      <path d="M12 37h24" />
+      <path d="M24 9v4M13 14l2.5 2.5M35 14l-2.5 2.5" stroke={ACCENT} />
+    </>
+  ),
+  'iot-thermostat': (
+    <>
+      <circle cx="24" cy="24" r="13" />
+      <path d="M24 17v7l4 3" stroke={ACCENT} />
+    </>
+  ),
+  'iot-webcam': (
+    <>
+      <circle cx="24" cy="20" r="9" />
+      <circle cx="24" cy="20" r="3" fill={ACCENT} stroke="none" />
+      <path d="M18 35h12M24 29v6" />
+    </>
+  ),
+  'iot-mcu': (
+    <>
+      <rect x="12" y="12" width="24" height="24" rx="2" />
+      <rect x="19" y="19" width="10" height="10" rx="1" fill={ACCENT} fillOpacity="0.3" />
+      <path d="M17 8v4M24 8v4M31 8v4M17 36v4M24 36v4M31 36v4" />
+    </>
+  ),
+  'iot-sbc': (
+    <>
+      <rect x="8" y="13" width="32" height="22" rx="2" />
+      <rect x="13" y="18" width="9" height="9" rx="1" fill={ACCENT} fillOpacity="0.3" />
+      <path d="M27 19h8M27 24h8M27 29h4" />
+    </>
+  ),
+  'iot-thing': (
+    <>
+      <rect x="13" y="13" width="22" height="22" rx="5" />
+      <path d="M20 22a6 6 0 0 1 8 0M22.5 25.5a2 2 0 0 1 3 0" stroke={ACCENT} />
+    </>
+  ),
 };
 
 type DeviceIconProps = Omit<SVGProps<SVGSVGElement>, 'name'> & { name: DeviceIconName };

@@ -652,6 +652,17 @@ function dhcpOptions(message: DhcpMessage): Part[] {
           bytes: option(6, addressList(message.dnsServers)),
         });
       }
+      if (message.controllers?.length) {
+        const addresses = addressList(message.controllers);
+        parts.push({
+          id: 'dhcp.option.43',
+          label: 'Vendor specific',
+          value: `WLC ${message.controllers.join(', ')}`,
+          explain:
+            'Option 43. Cisco’s sub-option 241 lists the wireless LAN controllers a lightweight AP joins over CAPWAP.',
+          bytes: option(43, [0xf1, addresses.length, ...addresses]),
+        });
+      }
       break;
     }
   }

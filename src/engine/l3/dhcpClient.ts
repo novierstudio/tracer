@@ -19,6 +19,8 @@ export type Lease = {
   readonly address: Ipv4Cidr;
   readonly gateway?: Ipv4Address;
   readonly dns: readonly Ipv4Address[];
+  /** The wireless LAN controllers option 43 named, which a lightweight AP joins. */
+  readonly controllers?: readonly Ipv4Address[];
   /** The server that granted it, which renewals and the release go to. */
   readonly server: Ipv4Address;
   /**
@@ -227,11 +229,12 @@ function request(ctx: IpContext, offer: Offer, tries: number, fallback: Ipv4Cidr
 }
 
 function bind(ctx: IpContext, ack: Ack, via: MacAddress) {
-  const { yiaddr, subnetMask, routers, dnsServers, serverId, leaseTime } = ack;
+  const { yiaddr, subnetMask, routers, dnsServers, serverId, leaseTime, controllers } = ack;
   const lease: Lease = {
     address: { address: yiaddr, prefixLength: subnetMask },
     ...(routers[0] && { gateway: routers[0] }),
     dns: dnsServers,
+    ...(controllers && { controllers }),
     server: serverId,
     via,
     obtainedAt: ctx.now,
