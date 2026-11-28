@@ -16,7 +16,7 @@ import {
   type DeviceModel,
   type DeviceModelId,
 } from '@/devices/catalog';
-import { DeviceIcon } from '@/devices/icons';
+import { DeviceSprite } from '@/devices/icons';
 import { formatShortcut } from '@/app/shell/shortcuts';
 import { ANNOTATION_TOOLS, type AnnotationTool } from '@/features/canvas/annotations';
 import { addAnnotationAt, placeDevice, viewCentre } from '@/features/canvas/controller';
@@ -148,7 +148,7 @@ function DeviceItem({ entry: { model, summary } }: { entry: Entry }) {
     <PaletteItem
       name={model.name}
       summary={summary}
-      icon={<DeviceIcon name={model.icon} className="size-6 shrink-0 text-fg-1" />}
+      icon={<DeviceSprite name={model.icon} loading="lazy" className="size-9 shrink-0" />}
       drag={{ type: DEVICE_DRAG_TYPE, payload: model.id }}
       onAdd={() => placeDevice(model.id as DeviceModelId)}
     />

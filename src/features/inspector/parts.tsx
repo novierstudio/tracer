@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { DeviceIcon } from '@/devices/icons';
+import { DeviceIcon, DeviceSprite } from '@/devices/icons';
 import type { Device, PortId } from '@/model';
 import { cn } from '@/ui/cn';
 import { selectDevice } from './actions';
@@ -65,9 +65,19 @@ export function StateDot({ state, className }: { state: PortState; className?: s
   );
 }
 
-export function DeviceTile({ device, className }: { device: Device; className?: string }) {
+/** A device's picture: its sprite where there is room for one, else its glyph. */
+export function DeviceTile({
+  device,
+  sprite,
+  className,
+}: {
+  device: Device;
+  sprite?: boolean;
+  className?: string;
+}) {
+  const Picture = sprite ? DeviceSprite : DeviceIcon;
   return (
-    <DeviceIcon
+    <Picture
       name={describeModel(device).icon}
       className={cn('shrink-0 text-fg-1', !device.powered && 'opacity-50', className)}
     />

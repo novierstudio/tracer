@@ -55,6 +55,18 @@ export function HelpDialogs({ open, onOpenChange }: HelpDialogsProps) {
               View the source on GitHub
             </a>
           </p>
+          <p className="text-sm text-fg-2">
+            Device icons use the stroked-toon look from{' '}
+            <a
+              href="https://github.com/sloemo01/isom3trics"
+              target="_blank"
+              rel="noreferrer"
+              className="text-accent-text underline-offset-2 hover:underline"
+            >
+              isom3trics
+            </a>{' '}
+            by sloemo01, under the MIT licence.
+          </p>
         </DialogContent>
       </Dialog>
     </>

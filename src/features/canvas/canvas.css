@@ -57,8 +57,12 @@
   outline-offset: 4px;
 }
 
+/* The tile takes the pane's colour, React Flow's over the canvas's, so cables stop at its edge
+   instead of running under the art. */
 .device-tile {
   border-radius: 12px;
+  background: linear-gradient(var(--xy-background-color, var(--xy-background-color-default)) 0 0)
+    var(--surface-0);
   transition:
     box-shadow 150ms ease-out,
     outline-color 150ms ease-out;

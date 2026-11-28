@@ -1,6 +1,6 @@
 import { Handle, Position, useStore, type NodeProps } from '@xyflow/react';
 import { memo, useState, type KeyboardEvent } from 'react';
-import { DeviceIcon } from '@/devices/icons';
+import { DeviceSprite } from '@/devices/icons';
 import { addressOf } from '@/engine/l3/hostAddress';
 import { useHostAddressing } from '@/features/simulation/hostAddresses';
 import type { DeviceId } from '@/model';
@@ -88,8 +88,12 @@ export const DeviceNode = memo(function DeviceNode({
         device={id as DeviceId}
         disabled={dragging || connecting || cabling || renaming}
       >
-        <div className="device-tile size-12" data-cable-role={role}>
-          <DeviceIcon name={data.icon} className="size-12 text-fg-1" />
+        <div className="device-tile relative size-12" data-cable-role={role}>
+          {/* A little larger than the tile: a sprite's art never reaches its corners. */}
+          <DeviceSprite
+            name={data.icon}
+            className="pointer-events-none absolute -top-1 -left-1 size-14 max-w-none"
+          />
         </div>
       </DeviceHoverCard>
       <Handle
